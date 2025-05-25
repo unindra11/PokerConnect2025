@@ -3,7 +3,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { UserCog, ShieldCheck, BarChart3, Edit3 } from "lucide-react";
+import { UserCog, ShieldCheck, BarChart3, Edit3, UserPlus } from "lucide-react"; // Added UserPlus
 import Image from "next/image";
 import Link from "next/link";
 
@@ -72,6 +72,11 @@ export default function UserProfilePage({ params }: { params: { username: string
                {isCurrentUserProfile && (
                 <Button variant="outline" size="sm" className="mt-4 sm:mt-0 sm:ml-auto bg-white/20 hover:bg-white/30 text-white border-white/50">
                   <Edit3 className="mr-2 h-4 w-4" /> Edit Profile
+                </Button>
+              )}
+              {!isCurrentUserProfile && (
+                <Button variant="default" size="sm" className="mt-4 sm:mt-0 sm:ml-auto">
+                  <UserPlus className="mr-2 h-4 w-4" /> Add Friend
                 </Button>
               )}
             </div>
