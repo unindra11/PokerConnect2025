@@ -10,6 +10,8 @@ import { Input } from "@/components/ui/input"; // Import Input
 import { Textarea } from "@/components/ui/textarea"; // Import Textarea
 import { UserCircle, BellDot, Palette, ShieldAlert, Image as ImageIcon, Save } from "lucide-react"; // Added ImageIcon, Save
 import { useToast } from "@/hooks/use-toast";
+import { useRouter } from "next/navigation"; // Import useRouter
+import Link from "next/link"; // Import Link
 import {
   AlertDialog,
   AlertDialogAction,
@@ -26,12 +28,13 @@ interface LoggedInUserDetails {
   fullName: string;
   username: string;
   email: string;
-  bio?: string; // Added bio
-  // avatar and coverImage are handled by their respective uploaders
+  bio?: string;
+  avatar?: string; // Keep avatar to avoid breaking the object structure
 }
 
 export default function SettingsPage() {
   const { toast } = useToast();
+  const router = useRouter(); // Initialize useRouter
   const [currentUser, setCurrentUser] = useState<LoggedInUserDetails | null>(null);
   const [editableFullName, setEditableFullName] = useState("");
   const [editableBio, setEditableBio] = useState("");
@@ -39,7 +42,7 @@ export default function SettingsPage() {
   const [notificationsLikes, setNotificationsLikes] = useState(true);
   const [notificationsComments, setNotificationsComments] = useState(true);
   const [notificationsFriendRequests, setNotificationsFriendRequests] = useState(true);
-  const [isDarkMode, setIsDarkMode] = useState(true); 
+  const [isDarkMode, setIsDarkMode] = useState(true);
 
   useEffect(() => {
     try {
@@ -49,6 +52,11 @@ export default function SettingsPage() {
         setCurrentUser(userDetails);
         setEditableFullName(userDetails.fullName || "");
         setEditableBio(userDetails.bio || "");
+      } else {
+        // Fallback or redirect if no user is logged in
+        setCurrentUser({ fullName: "Player One", username: "playerone", email: "player@example.com", bio: "" });
+        setEditableFullName("Player One");
+        setEditableBio("");
       }
     } catch (error) {
       console.error("Error loading user from localStorage for settings:", error);
@@ -70,11 +78,12 @@ export default function SettingsPage() {
         bio: editableBio,
       };
       localStorage.setItem("loggedInUser", JSON.stringify(updatedUser));
-      setCurrentUser(updatedUser); // Update local state if needed elsewhere on this page
+      setCurrentUser(updatedUser); 
       toast({
         title: "Settings Saved!",
-        description: "Your profile information has been updated in local storage.",
+        description: "Your profile information has been updated.",
       });
+      router.push(`/profile/${currentUser.username}`); // Redirect to profile page
     } catch (error) {
       console.error("Error saving user to localStorage:", error);
       toast({ title: "Error", description: "Could not save settings.", variant: "destructive"});
@@ -107,7 +116,7 @@ export default function SettingsPage() {
             <UserCircle className="h-6 w-6 text-primary" />
             <CardTitle className="text-xl">Profile Information</CardTitle>
           </div>
-          <CardDescription>Update your public profile details.</CardDescription>
+          <CardDescription>Update your public profile details. Username and email cannot be changed here.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div>
@@ -128,7 +137,6 @@ export default function SettingsPage() {
               disabled
               className="mt-1 bg-muted/50"
             />
-             <p className="text-xs text-muted-foreground mt-1">Username cannot be changed here.</p>
           </div>
           <div>
             <Label htmlFor="email">Email</Label>
@@ -149,10 +157,17 @@ export default function SettingsPage() {
               placeholder="Tell us a bit about yourself..."
             />
           </div>
+           {currentUser && (
+            <Link href={`/profile/${currentUser.username}`} passHref>
+              <Button variant="outline" className="w-full">
+                View/Edit Full Profile Page
+              </Button>
+            </Link>
+          )}
           <div>
             <Label>Cover Image</Label>
-             <Button 
-                variant="outline" 
+             <Button
+                variant="outline"
                 className="w-full mt-1"
                 onClick={() => toast({ title: "Coming Soon!", description: "Cover image change functionality will be available soon."})}
             >
@@ -215,13 +230,13 @@ export default function SettingsPage() {
               id="dark-mode"
               checked={isDarkMode}
               onCheckedChange={setIsDarkMode}
-              disabled 
+              disabled
             />
           </div>
           <p className="text-xs text-muted-foreground mt-2 text-center">App is currently in Dark Mode by default.</p>
         </CardContent>
       </Card>
-      
+
       {/* Account Settings */}
       <Card className="shadow-lg rounded-xl border-destructive">
         <CardHeader>
