@@ -1,40 +1,57 @@
+
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { BellRing, CircleUserRound, MessageSquareText, ThumbsUp } from "lucide-react";
+import { BellRing, CircleUserRound, MessageSquareText, ThumbsUp, Share2, UserCheck } from "lucide-react"; // Added Share2, UserCheck
 
 const notifications = [
-  { 
-    id: "1", 
+  {
+    id: "1",
     type: "friend_request",
-    user: { name: "RoyalFlushRoy", avatar: "https://placehold.co/100x100.png?n=1" }, 
-    message: "sent you a friend request.", 
+    user: { name: "RoyalFlushRoy", avatar: "https://placehold.co/100x100.png?n=1", handle: "@royflush" },
+    message: "sent you a friend request.",
     timestamp: "15m ago",
     icon: <CircleUserRound className="h-5 w-5 text-primary" />,
   },
-  { 
-    id: "2", 
+  {
+    id: "2",
     type: "comment",
-    user: { name: "StraightSue", avatar: "https://placehold.co/100x100.png?n=2" }, 
-    message: "commented on your post: \"Great analysis!\"", 
+    user: { name: "StraightSue", avatar: "https://placehold.co/100x100.png?n=2", handle: "@sue_straight" },
+    message: "commented on your post: \"Great analysis on that river bet!\"",
     timestamp: "1h ago",
     icon: <MessageSquareText className="h-5 w-5 text-accent" />,
   },
-  { 
-    id: "3", 
+  {
+    id: "3",
     type: "like",
-    user: { name: "FullHouseFred", avatar: "https://placehold.co/100x100.png?n=3" }, 
-    message: "liked your photo.", 
+    user: { name: "FullHouseFred", avatar: "https://placehold.co/100x100.png?n=3", handle: "@fred_full" },
+    message: "liked your post about your tournament win.",
     timestamp: "3h ago",
     icon: <ThumbsUp className="h-5 w-5 text-red-500" />, // Example specific color
   },
-  { 
-    id: "4", 
+  {
+    id: "4",
     type: "system",
-    user: null, 
-    message: "Welcome to PokerConnect! Complete your profile for better suggestions.", 
+    user: null,
+    message: "Welcome to PokerConnect! Complete your profile for better suggestions.",
     timestamp: "1d ago",
-    icon: <BellRing className="h-5 w-5 text-yellow-500" />, // Example specific color
+    icon: <BellRing className="h-5 w-5 text-yellow-500" />,
+  },
+  {
+    id: "5",
+    type: "share",
+    user: { name: "BluffingBetty", avatar: "https://placehold.co/100x100.png?n=4", handle: "@bettybluffs" },
+    message: "shared your post on bankroll management.",
+    timestamp: "2d ago",
+    icon: <Share2 className="h-5 w-5 text-green-500" />,
+  },
+  {
+    id: "6",
+    type: "friend_accept",
+    user: { name: "AceHighAlex", avatar: "https://placehold.co/100x100.png?n=5", handle: "@alex_ace" },
+    message: "accepted your friend request.",
+    timestamp: "3d ago",
+    icon: <UserCheck className="h-5 w-5 text-blue-500" />,
   },
 ];
 
@@ -48,7 +65,9 @@ export default function NotificationsPage() {
 
       {notifications.length === 0 && (
         <Card className="text-center p-8 shadow-lg rounded-xl">
-          <CardTitle className="text-xl mb-2">No New Notifications</CardTitle>
+          <CardHeader>
+             <CardTitle className="text-xl mb-2">No New Notifications</CardTitle>
+          </CardHeader>
           <CardContent>
             <p className="text-muted-foreground">You're all caught up!</p>
           </CardContent>
