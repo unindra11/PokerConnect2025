@@ -1,12 +1,16 @@
 
+"use client"; // Make this a client component
+
+import { useState } from "react"; // Import useState
 import { Button } from "@/components/ui/button";
-import { Card, CardDescription, CardTitle } from "@/components/ui/card"; // CardDescription used for empty state
+import { Card, CardDescription, CardTitle } from "@/components/ui/card";
 import Link from "next/link";
 import { PlusCircle } from "lucide-react";
-import { PostCard } from "@/components/post-card"; // New import
-import type { Post } from "@/types/post"; // New import
+import { PostCard } from "@/components/post-card";
+import type { Post } from "@/types/post";
 
-const userPostsData: Post[] = [
+// Initial data - will be moved to state
+const initialUserPostsData: Post[] = [
   {
     id: "mypost1",
     user: { name: "Player One", avatar: "https://placehold.co/100x100.png", handle: "@playerone" },
@@ -30,6 +34,14 @@ const userPostsData: Post[] = [
 ];
 
 export default function MyPostsPage() {
+  const [userPosts, setUserPosts] = useState<Post[]>(initialUserPostsData); // Manage posts in state
+
+  // Function to handle deleting a post
+  const handleDeletePost = (postId: string) => {
+    setUserPosts(prevPosts => prevPosts.filter(post => post.id !== postId));
+    // The toast notification will still be handled by PostCard
+  };
+
   return (
     <div className="container mx-auto max-w-2xl">
       <div className="flex justify-between items-center mb-6">
@@ -42,7 +54,7 @@ export default function MyPostsPage() {
       </div>
 
       <div className="space-y-6">
-        {userPostsData.length === 0 && (
+        {userPosts.length === 0 && (
           <Card className="text-center p-8 shadow-lg rounded-xl">
             <CardTitle className="text-xl mb-2">No Posts Yet!</CardTitle>
             <CardDescription className="mb-4">Start sharing your poker journey with the community.</CardDescription>
@@ -51,8 +63,13 @@ export default function MyPostsPage() {
             </Link>
           </Card>
         )}
-        {userPostsData.map((post) => (
-          <PostCard key={post.id} post={post} showManagementControls={true} />
+        {userPosts.map((post) => (
+          <PostCard 
+            key={post.id} 
+            post={post} 
+            showManagementControls={true} 
+            onDeletePost={handleDeletePost} // Pass the delete handler
+          />
         ))}
       </div>
     </div>

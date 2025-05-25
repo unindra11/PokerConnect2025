@@ -16,23 +16,23 @@ import { Button } from "@/components/ui/button";
 import { MessageCircle, Heart, Repeat, Edit3, Trash2 } from "lucide-react";
 import type { Post } from "@/types/post";
 import { useToast } from "@/hooks/use-toast";
-import { useRouter } from "next/navigation"; // New import
+import { useRouter } from "next/navigation";
 
 interface PostCardProps {
   post: Post;
   showManagementControls?: boolean;
+  onDeletePost?: (postId: string) => void; // New prop for delete callback
 }
 
-export function PostCard({ post, showManagementControls = false }: PostCardProps) {
+export function PostCard({ post, showManagementControls = false, onDeletePost }: PostCardProps) {
   const { toast } = useToast();
-  const router = useRouter(); // New hook
+  const router = useRouter();
 
   const handleShare = () => {
     toast({
       title: "Post Shared!",
       description: "This post has been shared to your feed (simulated).",
     });
-    // In a real app, you'd update the shares count and user's feed.
   };
 
   const handleLike = () => {
@@ -40,7 +40,6 @@ export function PostCard({ post, showManagementControls = false }: PostCardProps
       title: "Post Liked!",
       description: "You liked this post (simulated).",
     });
-    // In a real app, you'd update the likes count.
   };
 
   const handleComment = () => {
@@ -48,18 +47,19 @@ export function PostCard({ post, showManagementControls = false }: PostCardProps
       title: "Comment Added",
       description: "Your comment would be processed here (simulated).",
     });
-    // In a real app, you'd open a comment modal or navigate to a comment section.
   };
 
   const handleEdit = () => {
-    // Navigate to create-post page with post data as query params
     router.push(`/create-post?editPostId=${post.id}&editContent=${encodeURIComponent(post.content)}${post.image ? `&editImage=${encodeURIComponent(post.image)}` : ''}`);
   };
 
   const handleDelete = () => {
+    if (onDeletePost) {
+      onDeletePost(post.id); // Call the passed-in handler
+    }
     toast({
       title: "Post Deleted",
-      description: "This post would be deleted (simulated).",
+      description: `Post "${post.content.substring(0,20)}..." has been removed.`, // Updated toast
       variant: "destructive",
     });
   };
