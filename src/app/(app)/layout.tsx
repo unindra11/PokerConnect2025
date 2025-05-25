@@ -52,7 +52,7 @@ export default function AppLayout({
                 </Link>
              </SidebarMenuButton>
              <SidebarMenuButton asChild tooltip="Logout" size="sm" className="text-destructive hover:bg-destructive/10 hover:text-destructive data-[active=true]:text-destructive data-[active=true]:bg-destructive/10">
-                <Link href="/login"> {/* Updated logout to go to login page */}
+                <Link href="/login"> {/* Ensures logout navigates to login page */}
                     <LogOut size={18} />
                     <span className="group-data-[collapsible=icon]:hidden delay-300">Logout</span>
                 </Link>
