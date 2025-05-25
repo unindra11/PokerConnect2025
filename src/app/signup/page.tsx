@@ -52,6 +52,10 @@ export default function SignupPage() {
               <Label htmlFor="confirmPassword">Confirm Password</Label>
               <Input id="confirmPassword" type="password" placeholder="••••••••" className="mt-1" />
             </div>
+            <div>
+              <Label htmlFor="location">Location</Label>
+              <Input id="location" placeholder="e.g., City, Country" className="mt-1" />
+            </div>
           </CardContent>
           <CardFooter className="flex flex-col gap-4">
             <Button type="submit" className="w-full text-lg py-3">
