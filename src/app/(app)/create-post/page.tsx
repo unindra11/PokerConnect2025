@@ -10,7 +10,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
-import { ImagePlus, Send, Edit, Loader2, X } from "lucide-react"; // Added X
+import { ImagePlus, Send, Edit, Loader2, X, ArrowLeft } from "lucide-react"; // Added ArrowLeft
 import { useToast } from "@/hooks/use-toast";
 import { useRouter, useSearchParams } from "next/navigation";
 
@@ -71,6 +71,7 @@ export default function CreatePostPage() {
     console.log("Selected file:", selectedFile);
     console.log("Post ID (if editing):", editPostId);
 
+    // Simulate API call
     await new Promise(resolve => setTimeout(resolve, 1500));
 
     toast({
@@ -83,6 +84,7 @@ export default function CreatePostPage() {
     setPreviewUrl(null);
     setIsLoading(false);
     
+    // Navigate back to My Posts if editing, or Home if creating a new post
     router.push(isEditMode ? "/my-posts" : "/home"); 
   };
 
@@ -90,10 +92,19 @@ export default function CreatePostPage() {
     <div className="container mx-auto max-w-xl">
       <Card className="shadow-xl rounded-xl">
         <CardHeader>
-          <CardTitle className="text-2xl">{isEditMode ? "Edit Your Post" : "Share Your Poker Story"}</CardTitle>
-          <CardDescription>
-            {isEditMode ? "Make changes to your post below." : "Post updates, ask questions, or share your experiences with the PokerConnect community."}
-          </CardDescription>
+          <div className="flex justify-between items-center">
+            <div>
+              <CardTitle className="text-2xl">{isEditMode ? "Edit Your Post" : "Share Your Poker Story"}</CardTitle>
+              <CardDescription>
+                {isEditMode ? "Make changes to your post below." : "Post updates, ask questions, or share your experiences with the PokerConnect community."}
+              </CardDescription>
+            </div>
+            {isEditMode && (
+              <Button variant="outline" size="sm" onClick={() => router.push('/my-posts')}>
+                <ArrowLeft className="mr-2 h-4 w-4" /> Cancel Edit
+              </Button>
+            )}
+          </div>
         </CardHeader>
         <form onSubmit={form.handleSubmit(onSubmit)}>
           <CardContent className="space-y-6">
@@ -163,8 +174,11 @@ export default function CreatePostPage() {
                           onClick={() => {
                               setSelectedFile(null);
                               setPreviewUrl(null);
+                              // Reset the file input value so the same file can be selected again if needed
                               (document.getElementById('mediaFile-upload') as HTMLInputElement).value = '';
+                              // If in edit mode and an existing image was being shown, remove it from the URL params
                               if (isEditMode && editImage) {
+                                  // This will reload the page with the image query param removed
                                   router.replace(`/create-post?editPostId=${editPostId}&editContent=${encodeURIComponent(form.getValues("postContent"))}`);
                               }
                           }}
