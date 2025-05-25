@@ -1,3 +1,4 @@
+
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -61,8 +62,10 @@ export default function HomePage() {
               </Avatar>
               <div className="flex-1">
                 <div className="flex items-center gap-2">
-                    <CardTitle className="text-lg">{post.user.name}</CardTitle>
-                    <span className="text-sm text-muted-foreground">{post.user.handle}</span>
+                  <Link href={`/profile/${post.user.handle.replace('@', '')}`}>
+                    <CardTitle className="text-lg hover:underline">{post.user.name}</CardTitle>
+                  </Link>
+                  <span className="text-sm text-muted-foreground">{post.user.handle}</span>
                 </div>
                 <CardDescription className="text-xs text-muted-foreground">{post.timestamp}</CardDescription>
               </div>
