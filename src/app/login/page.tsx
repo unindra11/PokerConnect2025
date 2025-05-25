@@ -1,3 +1,4 @@
+
 // src/app/login/page.tsx
 "use client";
 
@@ -22,12 +23,11 @@ export default function LoginPage() {
     e.preventDefault();
     console.log("Login attempt submitted.");
     console.log("Entered Email/Username:", emailOrUsername);
-    console.log("Entered Password:", password);
+    // console.log("Entered Password:", password); // Avoid logging password in real scenarios
 
     let loginSuccess = false;
-    let loggedInUser = null;
+    let loggedInUserObject = null;
 
-    // Try to get user from localStorage
     try {
       const storedUserString = localStorage.getItem("pokerConnectUser");
       if (storedUserString) {
@@ -37,7 +37,7 @@ export default function LoginPage() {
           storedUser.password === password
         ) {
           loginSuccess = true;
-          loggedInUser = storedUser;
+          loggedInUserObject = storedUser;
           console.log("Login successful with localStorage user:", storedUser.username);
         }
       }
@@ -45,29 +45,31 @@ export default function LoginPage() {
       console.error("Error reading from localStorage:", error);
     }
 
-    // Fallback to hardcoded admin user if localStorage login failed
     if (!loginSuccess) {
+      // Fallback to hardcoded admin user if localStorage login failed
       if (emailOrUsername === "unindra111@gmail.com" && password === "qwerty") {
         loginSuccess = true;
-        loggedInUser = { 
-          fullName: "Player One", 
+        loggedInUserObject = { 
+          fullName: "Player One Admin", 
           email: "unindra111@gmail.com", 
-          username: "playerone_admin" // or some admin username
-        }; // Mock admin user object
+          username: "playerone_admin",
+          bio: "Admin user bio.",
+          avatar: "",
+          coverImage: "",
+        }; 
         console.log("Login successful with hardcoded admin user.");
       }
     }
 
-    if (loginSuccess && loggedInUser) {
+    if (loginSuccess && loggedInUserObject) {
       try {
-        localStorage.setItem("loggedInUser", JSON.stringify(loggedInUser));
+        localStorage.setItem("loggedInUser", JSON.stringify(loggedInUserObject));
       } catch (error) {
         console.error("Error saving loggedInUser to localStorage:", error);
-        // Non-critical error, proceed with login
       }
       toast({
         title: "Login Successful!",
-        description: `Welcome back, ${loggedInUser.fullName || loggedInUser.username}!`,
+        description: `Welcome back, ${loggedInUserObject.fullName || loggedInUserObject.username}!`,
       });
       router.push("/home");
     } else {
@@ -133,15 +135,20 @@ export default function LoginPage() {
             <Button type="submit" className="w-full text-lg py-3">
               <LogInIcon className="mr-2 h-5 w-5" /> Log In
             </Button>
-            <p className="text-sm text-muted-foreground">
+            <div className="flex justify-between w-full text-sm">
+              <Link href="/forgot-username" className="text-muted-foreground hover:text-primary hover:underline">
+                Forgot Username?
+              </Link>
+              <Link href="/forgot-password" className="text-muted-foreground hover:text-primary hover:underline">
+                Forgot Password?
+              </Link>
+            </div>
+            <p className="text-sm text-muted-foreground mt-2">
               Don't have an account?{" "}
               <Link href="/signup" className="text-primary hover:underline">
                 Sign Up
               </Link>
             </p>
-             <Link href="#" className="text-sm text-muted-foreground hover:text-primary hover:underline">
-                Forgot Password?
-            </Link>
           </CardFooter>
         </form>
       </Card>
