@@ -12,10 +12,10 @@ const containerStyle = {
   height: "600px", // Adjust as needed
 };
 
-// Example center, replace with a more suitable default or dynamic calculation
+// Centered on New Delhi, India
 const center = {
-  lat: 34.0522,
-  lng: -118.2437, // Los Angeles
+  lat: 28.6139,
+  lng: 77.2090,
 };
 
 interface MockUserPin {
@@ -30,27 +30,27 @@ interface MockUserPin {
 const mockUsersOnMap: MockUserPin[] = [
   {
     id: "mapuser1",
-    username: "globalgamer",
-    name: "Global Gamer",
-    avatar: "https://placehold.co/40x40.png?m=1",
-    position: { lat: 34.0522, lng: -118.2437 }, // LA
-    aiHint: "gamer avatar",
+    username: "delhipokerstar",
+    name: "Delhi Poker Star",
+    avatar: "https://placehold.co/40x40.png?m=1&text=DP",
+    position: { lat: 28.6139, lng: 77.2090 }, // Delhi
+    aiHint: "poker player avatar",
   },
   {
     id: "mapuser2",
-    username: "casinoking",
-    name: "Casino King",
-    avatar: "https://placehold.co/40x40.png?m=2",
-    position: { lat: 40.7128, lng: -74.0060 }, // New York
-    aiHint: "king avatar",
+    username: "mumbaigambler",
+    name: "Mumbai Gambler",
+    avatar: "https://placehold.co/40x40.png?m=2&text=MG",
+    position: { lat: 19.0760, lng: 72.8777 }, // Mumbai
+    aiHint: "card player avatar",
   },
   {
     id: "mapuser3",
-    username: "pokerninja",
-    name: "Poker Ninja",
-    avatar: "https://placehold.co/40x40.png?m=3",
-    position: { lat: 51.5074, lng: -0.1278 }, // London
-    aiHint: "ninja avatar",
+    username: "bangalorebluffer",
+    name: "Bangalore Bluffer",
+    avatar: "https://placehold.co/40x40.png?m=3&text=BB",
+    position: { lat: 12.9716, lng: 77.5946 }, // Bangalore
+    aiHint: "strategy gamer avatar",
   },
 ];
 
@@ -98,22 +98,25 @@ export default function MapPage() {
       <h1 className="text-3xl font-bold mb-6">Player Map</h1>
       <Card className="shadow-lg rounded-xl overflow-hidden">
         <CardHeader>
-          <CardTitle>Interactive Player Map</CardTitle>
+          <CardTitle>Interactive Player Map - India</CardTitle>
         </CardHeader>
         <CardContent>
           <LoadScript googleMapsApiKey={googleMapsApiKey}>
             <GoogleMap
               mapContainerStyle={containerStyle}
               center={center}
-              zoom={2} // Adjust zoom level as needed
+              zoom={5} // Adjusted zoom level for India
             >
               {mockUsersOnMap.map((user) => (
                 <Marker
                   key={user.id}
                   position={user.position}
                   onClick={() => setSelectedUser(user)}
-                  // You can customize the marker icon here using the 'icon' prop
-                  // Example: icon={{ url: user.avatar, scaledSize: typeof window !== 'undefined' ? new window.google.maps.Size(30, 30) : undefined }}
+                  icon={{
+                    url: user.avatar,
+                    scaledSize: typeof window !== 'undefined' && window.google?.maps?.Size ? new window.google.maps.Size(35, 35) : undefined,
+                    anchor: typeof window !== 'undefined' && window.google?.maps?.Point ? new window.google.maps.Point(17.5, 17.5) : undefined,
+                  }}
                 />
               ))}
 
@@ -139,7 +142,7 @@ export default function MapPage() {
             </GoogleMap>
           </LoadScript>
           <p className="text-sm text-muted-foreground mt-4">
-            This map shows approximate locations of PokerConnect users. Click on a marker to see more details.
+            This map shows approximate locations of PokerConnect users in India. Click on an avatar to see more details.
           </p>
         </CardContent>
       </Card>
