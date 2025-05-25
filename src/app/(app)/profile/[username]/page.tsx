@@ -10,23 +10,23 @@ import { UserCog, ShieldCheck, Edit3, UserPlus, Loader2, Users, Camera, UserChec
 import Image from "next/image";
 import Link from "next/link";
 import { PostCard } from "@/components/post-card";
-import type { Post, User as PostUser } from "@/types/post"; // Assuming User is also in post.ts or similar
+import type { Post, User as PostUser } from "@/types/post"; 
 import { useToast } from "@/hooks/use-toast";
-import { useRouter } from "next/navigation";
+import { useRouter, useParams } from "next/navigation"; // useParams is fine for client components
 import type { MockUserPin } from "@/app/(app)/map/page";
 
 
-interface LoggedInUser { // This represents the structure in localStorage for "loggedInUser" and "pokerConnectUser"
+interface LoggedInUser { 
   username: string;
   fullName?: string;
   email?: string;
   avatar?: string; 
   bio?: string;
   coverImage?: string; 
-  friendsCount?: number; // Added for consistency, though might be mocked
+  friendsCount?: number; 
 }
 
-interface StoredNotification { // For friend request status checking
+interface StoredNotification { 
   id: string;
   type: string; 
   user: { name: string; avatar: string; handle: string; username?: string; }; 
@@ -56,8 +56,8 @@ const mockProfileConnections: Connection[] = [
 ];
 
 
-export default function UserProfilePage({ params }: { params: { username: string } }) {
-  const resolvedParams = use(params); 
+export default function UserProfilePage({ params: routeParams }: { params: { username: string } }) {
+  const resolvedParams = use(routeParams); 
   const router = useRouter();
 
   const [isCurrentUserProfile, setIsCurrentUserProfile] = useState(false);
@@ -95,20 +95,20 @@ export default function UserProfilePage({ params }: { params: { username: string
              const allUsers: MockUserPin[] = JSON.parse(allUsersString);
              const otherUser = allUsers.find(u => u.username === resolvedParams.username);
              if (otherUser) {
-                 userForProfile = { // Construct a LoggedInUser compatible object
+                 userForProfile = { 
                      username: otherUser.username,
                      fullName: otherUser.name,
                      bio: otherUser.bio || "A passionate poker player enjoying the game.",
                      avatar: otherUser.avatar,
                      coverImage: otherUser.coverImage || `https://placehold.co/1200x300.png?u=${otherUser.username}&cover=map`,
-                     email: "", // Not typically stored in mapUsers for privacy
-                     friendsCount: Math.floor(Math.random() * 200) // MockUserPin doesn't store this
+                     email: "", 
+                     friendsCount: Math.floor(Math.random() * 200) 
                  };
                  foundOtherUser = true;
              }
           }
 
-          if (!foundOtherUser) { // If not in mapUsers, try the main "pokerConnectUser" storage (could be unindra111)
+          if (!foundOtherUser) { 
             const pokerConnectUserString = localStorage.getItem("pokerConnectUser");
             if (pokerConnectUserString) {
                 const mainStoredUser: LoggedInUser = JSON.parse(pokerConnectUserString);
@@ -119,7 +119,7 @@ export default function UserProfilePage({ params }: { params: { username: string
             }
           }
           
-          if (!foundOtherUser) { // Fallback if not loggedInUser, not in mapUsers, not the mainPokerConnectUser
+          if (!foundOtherUser) { 
              userForProfile = {
                 username: resolvedParams.username,
                 fullName: resolvedParams.username.charAt(0).toUpperCase() + resolvedParams.username.slice(1),
@@ -131,7 +131,7 @@ export default function UserProfilePage({ params }: { params: { username: string
             };
           }
         }
-      } else { // No loggedInUser session active (public view)
+      } else { 
         setIsCurrentUserProfile(false);
         const allUsersString = localStorage.getItem("pokerConnectMapUsers");
         let foundPublicUser = false;
@@ -161,7 +161,7 @@ export default function UserProfilePage({ params }: { params: { username: string
               }
           }
         }
-        if (!foundPublicUser) { // Absolute fallback
+        if (!foundPublicUser) { 
            userForProfile = {
               username: resolvedParams.username,
               fullName: resolvedParams.username.charAt(0).toUpperCase() + resolvedParams.username.slice(1),
@@ -174,7 +174,6 @@ export default function UserProfilePage({ params }: { params: { username: string
         }
       }
 
-      // Set avatar and cover based on the determined userForProfile
       if (userForProfile) {
           console.log(`[Profile Page for ${resolvedParams.username}] Determined userForProfile:`, userForProfile);
           avatarForProfile = userForProfile.avatar || `https://placehold.co/150x150.png?u=${userForProfile.username}&ava=1`;
@@ -183,7 +182,6 @@ export default function UserProfilePage({ params }: { params: { username: string
           console.log(`[Profile Page for ${resolvedParams.username}] Using cover: ${coverForProfile}`);
       }
 
-      // Check friend request status
       if (loggedInUserForState && userForProfile && loggedInUserForState.username !== userForProfile.username) {
         const notificationsKey = `pokerConnectNotifications_${loggedInUserForState.username}`;
         const storedNotificationsString = localStorage.getItem(notificationsKey);
@@ -213,7 +211,7 @@ export default function UserProfilePage({ params }: { params: { username: string
     setProfileUser(userForProfile);
     setProfileAvatarUrl(avatarForProfile);
     setProfileCoverImageUrl(coverForProfile);
-  }, [resolvedParams.username]); // Re-run if username in URL changes
+  }, [resolvedParams.username]); 
 
 
   useEffect(() => {
@@ -285,6 +283,44 @@ export default function UserProfilePage({ params }: { params: { username: string
       }
     } catch (error) {
       console.error("Error updating likes in localStorage:", error);
+       toast({
+        title: "Error Liking Post",
+        description: "Could not save your like.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleCommentOnPost = (postId: string, commentText: string) => {
+    setProfilePosts(prevPosts =>
+      prevPosts.map(p =>
+        p.id === postId ? { 
+          ...p, 
+          comments: (p.comments || 0) + 1,
+          commentTexts: [...(p.commentTexts || []), commentText] 
+        } : p
+      )
+    );
+    try {
+      const allStoredPostsString = localStorage.getItem(USER_POSTS_STORAGE_KEY);
+      if (allStoredPostsString) {
+        let allStoredPosts: Post[] = JSON.parse(allStoredPostsString);
+        allStoredPosts = allStoredPosts.map(p =>
+          p.id === postId ? { 
+            ...p, 
+            comments: (p.comments || 0) + 1,
+            commentTexts: [...(p.commentTexts || []), commentText] 
+          } : p
+        );
+        localStorage.setItem(USER_POSTS_STORAGE_KEY, JSON.stringify(allStoredPosts));
+      }
+    } catch (error) {
+      console.error("Error saving comment to localStorage:", error);
+      toast({
+        title: "Error Commenting",
+        description: "Could not save your comment.",
+        variant: "destructive",
+      });
     }
   };
 
@@ -323,7 +359,6 @@ export default function UserProfilePage({ params }: { params: { username: string
             loggedInUser.avatar = newAvatarDataUrl;
             localStorage.setItem("loggedInUser", JSON.stringify(loggedInUser));
             
-            // Also update the general pokerConnectUser if it's the same user
             const pokerConnectUserString = localStorage.getItem("pokerConnectUser");
             if (pokerConnectUserString) {
                 let pokerConnectUser: LoggedInUser = JSON.parse(pokerConnectUserString);
@@ -332,7 +367,6 @@ export default function UserProfilePage({ params }: { params: { username: string
                     localStorage.setItem("pokerConnectUser", JSON.stringify(pokerConnectUser));
                 }
             }
-            // Also update in pokerConnectMapUsers if the user exists there
             const mapUsersString = localStorage.getItem("pokerConnectMapUsers");
             if (mapUsersString) {
               let mapUsers: MockUserPin[] = JSON.parse(mapUsersString);
@@ -410,19 +444,19 @@ export default function UserProfilePage({ params }: { params: { username: string
   };
 
 
-  const mockUser = { // This is for display purposes, data comes from profileUser state
+  const mockUser = { 
     name: profileUser?.fullName || resolvedParams.username.charAt(0).toUpperCase() + resolvedParams.username.slice(1), 
     username: resolvedParams.username,
     avatar: profileAvatarUrl || `https://placehold.co/150x150.png?u=${resolvedParams.username}`,
     bio: profileUser?.bio || "Passionate poker player, always learning and looking for the next big win. Specializing in Texas Hold'em tournaments.",
-    joinedDate: "Joined January 2023", // This can be made dynamic if signup date is stored
+    joinedDate: "Joined January 2023", 
     friendsCount: profileUser?.friendsCount || 0, 
     totalPosts: profilePosts.length, 
     coverImage: profileCoverImageUrl || "https://placehold.co/1200x300.png?cover=1",
     coverImageAiHint: "poker table background",
   };
 
-  if (!profileUser) { // Initial loading state before useEffect finishes
+  if (!profileUser) { 
     return (
         <div className="container mx-auto max-w-4xl text-center py-10">
             <Loader2 className="h-12 w-12 animate-spin text-primary mx-auto" />
@@ -441,8 +475,8 @@ export default function UserProfilePage({ params }: { params: { username: string
             fill
             style={{objectFit: "cover"}}
             data-ai-hint={mockUser.coverImageAiHint}
-            priority // Good for LCP elements
-            key={mockUser.coverImage} // Re-render if source changes
+            priority 
+            key={mockUser.coverImage} 
           />
           <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/70 to-transparent">
             <div className="flex flex-col sm:flex-row items-center sm:items-end space-x-0 sm:space-x-4">
@@ -550,6 +584,7 @@ export default function UserProfilePage({ params }: { params: { username: string
                   showManagementControls={isCurrentUserProfile}
                   onDeletePost={isCurrentUserProfile ? handleDeletePost : undefined}
                   onLikePost={handleLikePost}
+                  onCommentPost={handleCommentOnPost}
                 />
               ))}
             </TabsContent>

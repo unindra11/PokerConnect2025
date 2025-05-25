@@ -79,7 +79,7 @@ export default function CreatePostPage() {
         if (initialEditImage) setPreviewUrl(decodeURIComponent(initialEditImage));
       }
     }
-  }, [isEditMode, editPostId, initialEditContent, initialEditImage, form]);
+  }, [isEditMode, editPostId, initialEditContent, initialEditImage, form, toast]);
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -151,7 +151,7 @@ export default function CreatePostPage() {
             const parsedUser = JSON.parse(loggedInUserString);
             loggedInUser = {
                 name: parsedUser.fullName || parsedUser.username || "Anonymous",
-                avatar: `https://placehold.co/100x100.png?text=${(parsedUser.fullName || parsedUser.username || "A").substring(0,1)}`,
+                avatar: parsedUser.avatar || `https://placehold.co/100x100.png?text=${(parsedUser.fullName || parsedUser.username || "A").substring(0,1)}`,
                 handle: `@${parsedUser.username || 'anonymous'}`
             };
         } else {
@@ -190,6 +190,7 @@ export default function CreatePostPage() {
           imageAiHint: selectedFile ? "user uploaded image" : undefined,
           likes: 0,
           comments: 0,
+          commentTexts: [],
           shares: 0,
           timestamp: new Date().toLocaleString(),
         };

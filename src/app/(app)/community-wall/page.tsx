@@ -43,25 +43,60 @@ export default function CommunityWallPage() {
   const handleLikePost = (postId: string) => {
     setCommunityPosts(prevPosts =>
       prevPosts.map(p =>
-        p.id === postId ? { ...p, likes: p.likes + 1 } : p
+        p.id === postId ? { ...p, likes: p.likes + (p.likedByCurrentUser ? -1 : 1), likedByCurrentUser: !p.likedByCurrentUser } : p
       )
     );
-
     try {
       const allStoredPostsString = localStorage.getItem(USER_POSTS_STORAGE_KEY);
       if (allStoredPostsString) {
         let allStoredPosts: Post[] = JSON.parse(allStoredPostsString);
         allStoredPosts = allStoredPosts.map(p =>
-          p.id === postId ? { ...p, likes: p.likes + 1 } : p
+          p.id === postId ? { ...p, likes: p.likes + (p.likedByCurrentUser ? -1 : 1), likedByCurrentUser: !p.likedByCurrentUser } : p
         );
         localStorage.setItem(USER_POSTS_STORAGE_KEY, JSON.stringify(allStoredPosts));
       }
     } catch (error) {
       console.error("Error updating likes in localStorage:", error);
-      // Optionally revert state update or show error toast
+      toast({
+        title: "Error Liking Post",
+        description: "Could not save your like.",
+        variant: "destructive",
+      });
     }
   };
 
+  const handleCommentOnPost = (postId: string, commentText: string) => {
+    setCommunityPosts(prevPosts =>
+      prevPosts.map(p =>
+        p.id === postId ? { 
+          ...p, 
+          comments: (p.comments || 0) + 1,
+          commentTexts: [...(p.commentTexts || []), commentText] 
+        } : p
+      )
+    );
+    try {
+      const allStoredPostsString = localStorage.getItem(USER_POSTS_STORAGE_KEY);
+      if (allStoredPostsString) {
+        let allStoredPosts: Post[] = JSON.parse(allStoredPostsString);
+        allStoredPosts = allStoredPosts.map(p =>
+          p.id === postId ? { 
+            ...p, 
+            comments: (p.comments || 0) + 1,
+            commentTexts: [...(p.commentTexts || []), commentText] 
+          } : p
+        );
+        localStorage.setItem(USER_POSTS_STORAGE_KEY, JSON.stringify(allStoredPosts));
+      }
+    } catch (error) {
+      console.error("Error saving comment to localStorage:", error);
+      toast({
+        title: "Error Commenting",
+        description: "Could not save your comment.",
+        variant: "destructive",
+      });
+    }
+  };
 
   if (isLoading) {
     return (
@@ -104,7 +139,12 @@ export default function CommunityWallPage() {
           </Card>
         )}
         {communityPosts.map((post) => (
-          <PostCard key={post.id} post={post} onLikePost={handleLikePost} />
+          <PostCard 
+            key={post.id} 
+            post={post} 
+            onLikePost={handleLikePost}
+            onCommentPost={handleCommentOnPost}
+          />
         ))}
       </div>
     </div>

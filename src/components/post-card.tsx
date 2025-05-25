@@ -22,10 +22,17 @@ interface PostCardProps {
   post: Post;
   showManagementControls?: boolean;
   onDeletePost?: (postId: string) => void;
-  onLikePost?: (postId: string) => void; // New prop for liking
+  onLikePost?: (postId: string) => void;
+  onCommentPost?: (postId: string, commentText: string) => void;
 }
 
-export function PostCard({ post, showManagementControls = false, onDeletePost, onLikePost }: PostCardProps) {
+export function PostCard({ 
+  post, 
+  showManagementControls = false, 
+  onDeletePost, 
+  onLikePost,
+  onCommentPost
+}: PostCardProps) {
   const { toast } = useToast();
   const router = useRouter();
 
@@ -40,17 +47,33 @@ export function PostCard({ post, showManagementControls = false, onDeletePost, o
     if (onLikePost) {
       onLikePost(post.id);
     }
-    toast({
-      title: "Post Liked!",
-      description: `You liked "${post.content.substring(0,20)}...".`,
-    });
+    // Toast for liking can be handled by parent or here.
+    // For consistency, let's assume parent handles primary feedback if onLikePost exists.
+    if (!onLikePost) {
+      toast({
+        title: "Post Liked!",
+        description: `You liked "${post.content.substring(0,20)}...".`,
+      });
+    }
   };
 
   const handleComment = () => {
-    toast({
-      title: "Comment Added",
-      description: "Your comment would be processed here (simulated).",
-    });
+    const commentText = window.prompt("Enter your comment:");
+    if (commentText && commentText.trim() !== "") {
+      if (onCommentPost) {
+        onCommentPost(post.id, commentText);
+      }
+      toast({
+        title: "Comment Added",
+        description: "Your comment has been added (simulated).",
+      });
+    } else if (commentText !== null) { // User didn't cancel but entered empty string
+      toast({
+        title: "Empty Comment",
+        description: "Comment cannot be empty.",
+        variant: "destructive"
+      });
+    }
   };
 
   const handleEdit = () => {
@@ -61,9 +84,6 @@ export function PostCard({ post, showManagementControls = false, onDeletePost, o
     if (onDeletePost) {
       onDeletePost(post.id); 
     }
-    // Toast is handled by parent in MyPostsPage for deletion,
-    // but can be kept here as a fallback or for other contexts if needed.
-    // For consistency, let's assume parent handles deletion toast if onDeletePost is present.
     if (!onDeletePost) {
       toast({
         title: "Post Deleted",
