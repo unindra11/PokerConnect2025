@@ -15,7 +15,7 @@ import { LoadScript, Autocomplete } from "@react-google-maps/api";
 import type { MockUserPin } from "@/app/(app)/map/page";
 import { auth, firestore } from "@/lib/firebase";
 import { createUserWithEmailAndPassword } from "firebase/auth";
-import { doc, setDoc, Timestamp } from "firebase/firestore"; // Ensure Timestamp is imported
+import { doc, setDoc, serverTimestamp } from "firebase/firestore"; // Import serverTimestamp
 
 const googleMapsApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
 const libraries: ("places")[] = ['places'];
@@ -57,9 +57,8 @@ export default function SignupPage() {
           console.warn("SignupPage: Autocomplete place selected, but no geometry/location data found.");
         }
       } else if (locationInputRef.current) {
-        // User typed manually without selecting a suggestion
         setLocation(locationInputRef.current.value);
-        setSelectedLocationCoords(null); // Clear coords if not from autocomplete
+        setSelectedLocationCoords(null);
         console.log("SignupPage: Location input changed manually:", locationInputRef.current.value);
       }
     }
@@ -101,25 +100,24 @@ export default function SignupPage() {
       const userProfile = {
         uid: user.uid,
         fullName: fullName,
-        email: user.email, // Use email from auth response
+        email: user.email,
         username: username,
         location: location || "",
-        locationCoords: selectedLocationCoords, // Can be null
+        locationCoords: selectedLocationCoords,
         bio: "",
-        avatar: "", // Will be Firebase Storage URL later
-        coverImage: "", // Will be Firebase Storage URL later
-        createdAt: Timestamp.now(), // Correct way to set Firestore Timestamp
+        avatar: "",
+        coverImage: "",
+        createdAt: serverTimestamp(), // Use serverTimestamp
       };
 
-      console.log("SignupPage: Preparing to write to Firestore. UserProfile object:", JSON.stringify(userProfile, null, 2));
+      console.log("SignupPage: Preparing to write to Firestore. UserProfile object:", userProfile );
       
       try {
         await setDoc(doc(firestore, "users", user.uid), userProfile);
         console.log("SignupPage: User profile successfully written to Firestore for UID:", user.uid);
       } catch (firestoreError: any) {
         console.error("SignupPage: Firestore setDoc error:", firestoreError.message, firestoreError.code, firestoreError.stack);
-        // Log the full error object for more details
-        console.error("Full Firestore error object:", firestoreError);
+        console.error("Full Firestore error object for setDoc:", firestoreError);
         toast({
           title: "Profile Save Error",
           description: `Could not save profile to database: ${firestoreError.message}. Auth succeeded, but profile save failed. Please check Firestore rules and setup.`,
@@ -133,10 +131,10 @@ export default function SignupPage() {
       if (selectedLocationCoords) {
         const initials = fullName.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase() || username.substring(0,1).toUpperCase() || 'P';
         const mapUser: MockUserPin = {
-          id: user.uid, // Use user.uid from Auth for consistency
+          id: user.uid, 
           username: username,
           name: fullName,
-          avatar: `https://placehold.co/40x40.png?text=${initials}&c=${Math.random().toString(36).substring(7)}`, // Placeholder avatar
+          avatar: `https://placehold.co/40x40.png?text=${initials}&c=${Math.random().toString(36).substring(7)}`, 
           position: selectedLocationCoords,
           bio: userProfile.bio,
           coverImage: userProfile.coverImage,
@@ -148,8 +146,6 @@ export default function SignupPage() {
           try { mapUsers = JSON.parse(existingMapUsersString); if (!Array.isArray(mapUsers)) mapUsers = []; }
           catch (parseError) { console.error("SignupPage: Error parsing pokerConnectMapUsers from localStorage:", parseError); mapUsers = []; }
         }
-        // Remove existing entry for this user if any (e.g., if they re-signup with same details but diff ID)
-        // Though with unique email constraint, this user ID should be unique
         mapUsers = mapUsers.filter(u => u.id !== mapUser.id); 
         mapUsers.push(mapUser);
         localStorage.setItem("pokerConnectMapUsers", JSON.stringify(mapUsers));
@@ -276,7 +272,7 @@ export default function SignupPage() {
                   <Autocomplete
                     onLoad={onLoad}
                     onPlaceChanged={onPlaceChanged}
-                    restrictions={{ country: "in" }} // Restrict to India
+                    restrictions={{ country: "in" }} 
                     fields={["formatted_address", "geometry.location", "name"]}
                   >
                     <Input
@@ -287,7 +283,6 @@ export default function SignupPage() {
                       value={location}
                       onChange={(e) => {
                         setLocation(e.target.value);
-                        // If user types manually after selecting, clear coords
                         if (autocompleteRef.current && autocompleteRef.current.getPlace()?.formatted_address !== e.target.value) {
                             setSelectedLocationCoords(null);
                         }
