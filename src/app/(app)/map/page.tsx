@@ -13,8 +13,8 @@ const containerStyle = {
 };
 
 const initialCenter = {
-  lat: 28.6139, // New Delhi
-  lng: 77.2090,
+  lat: 22.9734, // Centered more broadly on India
+  lng: 78.6569,
 };
 
 interface MockUserPin {
@@ -26,32 +26,59 @@ interface MockUserPin {
   aiHint?: string;
 }
 
-const mockUsersData: MockUserPin[] = [
-  {
-    id: "mapuser1",
-    username: "delhipokerstar",
-    name: "Delhi Poker Star",
-    avatar: "https://placehold.co/40x40.png?m=1&text=DP",
-    position: { lat: 28.6139, lng: 77.2090 }, // Delhi
-    aiHint: "poker player avatar",
-  },
-  {
-    id: "mapuser2",
-    username: "mumbaigambler",
-    name: "Mumbai Gambler",
-    avatar: "https://placehold.co/40x40.png?m=2&text=MG",
-    position: { lat: 19.0760, lng: 72.8777 }, // Mumbai
-    aiHint: "card player avatar",
-  },
-  {
-    id: "mapuser3",
-    username: "bangalorebluffer",
-    name: "Bangalore Bluffer",
-    avatar: "https://placehold.co/40x40.png?m=3&text=BB",
-    position: { lat: 12.9716, lng: 77.5946 }, // Bangalore
-    aiHint: "strategy gamer avatar",
-  },
+const indianCities = [
+  { name: "Delhi", lat: 28.6139, lng: 77.2090 },
+  { name: "Mumbai", lat: 19.0760, lng: 72.8777 },
+  { name: "Bangalore", lat: 12.9716, lng: 77.5946 },
+  { name: "Kolkata", lat: 22.5726, lng: 88.3639 },
+  { name: "Chennai", lat: 13.0827, lng: 80.2707 },
+  { name: "Hyderabad", lat: 17.3850, lng: 78.4867 },
+  { name: "Pune", lat: 18.5204, lng: 73.8567 },
+  { name: "Ahmedabad", lat: 23.0225, lng: 72.5714 },
+  { name: "Jaipur", lat: 26.9124, lng: 75.7873 },
+  { name: "Lucknow", lat: 26.8467, lng: 80.9462 },
+  { name: "Chandigarh", lat: 30.7333, lng: 76.7794 },
+  { name: "Bhopal", lat: 23.2599, lng: 77.4126 },
+  { name: "Kochi", lat: 9.9312, lng: 76.2673 },
+  { name: "Guwahati", lat: 26.1445, lng: 91.7362 },
+  { name: "Bhubaneswar", lat: 20.2961, lng: 85.8245 },
+  { name: "Patna", lat: 25.5941, lng: 85.1376 },
+  { name: "Indore", lat: 22.7196, lng: 75.8577 },
+  { name: "Nagpur", lat: 21.1458, lng: 79.0882 },
+  { name: "Srinagar", lat: 34.0837, lng: 74.7973 },
+  { name: "Visakhapatnam", lat: 17.6868, lng: 83.2185 }
 ];
+
+const firstNames = ["Aarav", "Vivaan", "Aditya", "Vihaan", "Arjun", "Sai", "Reyansh", "Krishna", "Ishaan", "Ananya", "Diya", "Saanvi", "Aanya", "Myra", "Aarohi", "Pari", "Khushi", "Riya"];
+const lastNames = ["Sharma", "Verma", "Gupta", "Singh", "Kumar", "Patel", "Reddy", "Shah", "Das", "Jain", "Mehta", "Rao", "Iyer", "Menon", "Nair"];
+
+
+const mockUsersData: MockUserPin[] = [];
+let userCounter = 1;
+for (let i = 0; i < 100; i++) {
+  const city = indianCities[i % indianCities.length];
+  const randomOffsetLat = (Math.random() - 0.5) * 0.1; // Small offset for variety
+  const randomOffsetLng = (Math.random() - 0.5) * 0.1;
+  
+  const firstName = firstNames[Math.floor(Math.random() * firstNames.length)];
+  const lastName = lastNames[Math.floor(Math.random() * lastNames.length)];
+  const name = `${firstName} ${lastName}`;
+  const username = `${firstName.toLowerCase()}${city.name.substring(0,3).toLowerCase()}${userCounter}`;
+
+  mockUsersData.push({
+    id: `mapuser${userCounter}`,
+    username: username,
+    name: name,
+    avatar: `https://placehold.co/40x40.png?text=${firstName.substring(0,1)}${lastName.substring(0,1)}&c=${i}`,
+    position: { 
+      lat: city.lat + randomOffsetLat, 
+      lng: city.lng + randomOffsetLng 
+    },
+    aiHint: "profile picture",
+  });
+  userCounter++;
+}
+
 
 const googleMapsApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
 
@@ -68,10 +95,13 @@ export default function MapPage() {
   const [selectedUser, setSelectedUser] = useState<MockUserPin | null>(null);
   const [mapReady, setMapReady] = useState(false);
 
-  console.log(
-    `%cMapPage render: mapReady=${mapReady}, selectedUser=${selectedUser?.id || 'null'}`,
-    'color: blue; font-weight: bold;'
-  );
+  // Enhanced console logging
+  useEffect(() => {
+    console.log(
+      `%cMapPage Mount/Update: mapReady=${mapReady}, selectedUser=${selectedUser?.id || 'null'}`,
+      'color: blue; font-weight: bold;'
+    );
+  }, [mapReady, selectedUser]);
 
 
   if (!googleMapsApiKey) {
@@ -123,21 +153,22 @@ export default function MapPage() {
               <GoogleMap
                 mapContainerStyle={containerStyle}
                 center={initialCenter}
-                zoom={5}
+                zoom={5} // Adjusted zoom level for a broader view of India
                 onLoad={() => console.log("%cGoogleMap: component mounted (onLoad event).", 'color: purple;')}
                 onUnmount={() => console.log("%cGoogleMap: component unmounted (onUnmount event).", 'color: red;')}
+                options={{ zoomControl: true }} // Explicitly enable zoom controls
               >
                 {mockUsersData.map((user) => {
-                  console.log(`%cGoogleMap Child Loop: Rendering default marker for ${user.id}.`, 'color: teal');
+                  // console.log(`%cGoogleMap Child Loop: Rendering default marker for ${user.id}.`, 'color: teal');
                   return (
                     <Marker
                       key={user.id}
                       position={user.position}
                       onClick={() => {
-                        console.log(`%cMarker Click: User ${user.id} clicked. Setting selectedUser.`, 'color: brown');
+                        // console.log(`%cMarker Click: User ${user.id} clicked. Setting selectedUser.`, 'color: brown');
                         setSelectedUser(user);
                       }}
-                      // No custom icon prop, so Google Maps uses its default red pin
+                      // Using default Google Maps red pin marker for simplicity and reliability
                     />
                   );
                 })}
@@ -146,7 +177,7 @@ export default function MapPage() {
                   <InfoWindow
                     position={selectedUser.position}
                     onCloseClick={() => {
-                      console.log('%cInfoWindow: Close button clicked. Setting selectedUser to null.', 'color: brown');
+                      // console.log('%cInfoWindow: Close button clicked. Setting selectedUser to null.', 'color: brown');
                       setSelectedUser(null);
                     }}
                   >
@@ -168,10 +199,11 @@ export default function MapPage() {
             )}
           </LoadScript>
           <p className="text-sm text-muted-foreground mt-4">
-            This map shows approximate locations of PokerConnect users in India. Click on a marker to see more details.
+            This map shows approximate locations of 100 PokerConnect users across India. Click on a marker to see more details.
           </p>
         </CardContent>
       </Card>
     </div>
   );
 }
+
