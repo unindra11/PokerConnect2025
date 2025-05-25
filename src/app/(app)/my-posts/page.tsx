@@ -1,11 +1,12 @@
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import Link from "next/link";
-import { MessageCircle, Heart, Repeat, PlusCircle, Edit3, Trash2 } from "lucide-react";
-import Image from "next/image";
 
-const userPosts = [
+import { Button } from "@/components/ui/button";
+import { Card, CardDescription, CardTitle } from "@/components/ui/card"; // CardDescription used for empty state
+import Link from "next/link";
+import { PlusCircle } from "lucide-react";
+import { PostCard } from "@/components/post-card"; // New import
+import type { Post } from "@/types/post"; // New import
+
+const userPostsData: Post[] = [
   {
     id: "mypost1",
     user: { name: "Player One", avatar: "https://placehold.co/100x100.png", handle: "@playerone" },
@@ -41,7 +42,7 @@ export default function MyPostsPage() {
       </div>
 
       <div className="space-y-6">
-        {userPosts.length === 0 && (
+        {userPostsData.length === 0 && (
           <Card className="text-center p-8 shadow-lg rounded-xl">
             <CardTitle className="text-xl mb-2">No Posts Yet!</CardTitle>
             <CardDescription className="mb-4">Start sharing your poker journey with the community.</CardDescription>
@@ -50,53 +51,8 @@ export default function MyPostsPage() {
             </Link>
           </Card>
         )}
-        {userPosts.map((post) => (
-          <Card key={post.id} className="overflow-hidden shadow-lg rounded-xl">
-            <CardHeader className="flex flex-row items-start space-x-4 p-4">
-              <Avatar>
-                <AvatarImage src={post.user.avatar} alt={post.user.name} data-ai-hint="profile picture" />
-                <AvatarFallback>{post.user.name.substring(0, 1)}</AvatarFallback>
-              </Avatar>
-              <div className="flex-1">
-                <CardTitle className="text-lg">{post.user.name}</CardTitle>
-                <CardDescription className="text-xs text-muted-foreground">{post.timestamp}</CardDescription>
-              </div>
-              <div className="flex gap-2">
-                <Button variant="ghost" size="icon" className="h-8 w-8">
-                  <Edit3 className="h-4 w-4" />
-                </Button>
-                <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10">
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent className="px-4 pb-2">
-              <p className="text-foreground mb-3">{post.content}</p>
-              {post.image && (
-                 <div className="rounded-lg overflow-hidden border">
-                  <Image
-                    src={post.image}
-                    alt="Post image"
-                    width={600}
-                    height={400}
-                    className="w-full h-auto object-cover"
-                    data-ai-hint={post.imageAiHint}
-                  />
-                </div>
-              )}
-            </CardContent>
-            <CardFooter className="flex justify-around p-2 border-t">
-              <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-primary">
-                <MessageCircle className="mr-1 h-4 w-4" /> {post.comments}
-              </Button>
-              <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-primary">
-                <Heart className="mr-1 h-4 w-4" /> {post.likes}
-              </Button>
-              <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-primary">
-                <Repeat className="mr-1 h-4 w-4" /> {post.shares}
-              </Button>
-            </CardFooter>
-          </Card>
+        {userPostsData.map((post) => (
+          <PostCard key={post.id} post={post} showManagementControls={true} />
         ))}
       </div>
     </div>
