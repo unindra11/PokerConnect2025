@@ -1,25 +1,26 @@
 
 "use client"; 
 
-import { useState, useEffect, use, useRef } from "react"; // Added useRef
+import { useState, useEffect, use, useRef } from "react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { UserCog, ShieldCheck, Edit3, UserPlus, Loader2, Users, Camera } from "lucide-react"; // Added Camera
+import { UserCog, ShieldCheck, Edit3, UserPlus, Loader2, Users, Camera } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { PostCard } from "@/components/post-card";
 import type { Post, User as PostUser } from "@/types/post";
 import { useToast } from "@/hooks/use-toast";
-import { useRouter } from "next/navigation"; // Import useRouter
+import { useRouter } from "next/navigation";
 
 interface LoggedInUser {
   username: string;
   fullName?: string;
   email?: string;
   avatar?: string; 
-  bio?: string; // Added bio
+  bio?: string;
+  coverImage?: string; // Added coverImage
 }
 
 const USER_POSTS_STORAGE_KEY = "pokerConnectUserPosts";
@@ -45,19 +46,21 @@ const mockProfileConnections: Connection[] = [
 
 export default function UserProfilePage({ params }: { params: { username: string } }) {
   const resolvedParams = use(params); 
-  const router = useRouter(); // Initialize useRouter
+  const router = useRouter();
 
   const [isCurrentUserProfile, setIsCurrentUserProfile] = useState(false);
   const [profilePosts, setProfilePosts] = useState<Post[]>([]);
   const [isLoadingPosts, setIsLoadingPosts] = useState(true);
   const [profileUser, setProfileUser] = useState<LoggedInUser | null>(null);
   const [profileAvatarUrl, setProfileAvatarUrl] = useState<string | undefined>(undefined);
+  const [profileCoverImageUrl, setProfileCoverImageUrl] = useState<string | undefined>("https://placehold.co/1200x300.png?cover=1"); // Default placeholder
   const { toast } = useToast();
   const profileAvatarInputRef = useRef<HTMLInputElement>(null);
   
   useEffect(() => {
     let userForProfile: LoggedInUser | null = null;
     let avatarForProfile: string | undefined = `https://placehold.co/150x150.png?u=${resolvedParams.username}`; 
+    let coverForProfile: string | undefined = "https://placehold.co/1200x300.png?cover=1";
 
     try {
       const loggedInUserString = localStorage.getItem("loggedInUser");
@@ -69,12 +72,18 @@ export default function UserProfilePage({ params }: { params: { username: string
           if (loggedInUser.avatar) {
             avatarForProfile = loggedInUser.avatar;
           }
+          if (loggedInUser.coverImage) {
+            coverForProfile = loggedInUser.coverImage;
+          }
         } else {
           setIsCurrentUserProfile(false);
+          // For other users, we don't load their specific data from local storage (yet)
+          // So, we create a generic profile.
+          // In a real app, this would fetch data from a backend.
           userForProfile = { 
             username: resolvedParams.username, 
             fullName: resolvedParams.username.charAt(0).toUpperCase() + resolvedParams.username.slice(1),
-            bio: "A passionate poker player enjoying the game." // Default bio for other users
+            bio: "A passionate poker player enjoying the game."
           };
         }
       } else {
@@ -82,7 +91,7 @@ export default function UserProfilePage({ params }: { params: { username: string
         userForProfile = { 
           username: resolvedParams.username,
           fullName: resolvedParams.username.charAt(0).toUpperCase() + resolvedParams.username.slice(1),
-          bio: "A passionate poker player enjoying the game." // Default bio for non-logged-in scenarios
+          bio: "A passionate poker player enjoying the game."
         };
       }
     } catch (error) {
@@ -96,6 +105,7 @@ export default function UserProfilePage({ params }: { params: { username: string
     }
     setProfileUser(userForProfile);
     setProfileAvatarUrl(avatarForProfile);
+    setProfileCoverImageUrl(coverForProfile);
   }, [resolvedParams.username]);
 
 
@@ -139,7 +149,6 @@ export default function UserProfilePage({ params }: { params: { username: string
       toast({
         title: "Post Deleted",
         description: "The post has been removed from local storage.",
-        variant: "destructive"
       });
     } catch (error) {
       console.error("Error deleting post from localStorage:", error);
@@ -207,10 +216,10 @@ export default function UserProfilePage({ params }: { params: { username: string
     username: resolvedParams.username,
     avatar: profileAvatarUrl || `https://placehold.co/150x150.png?u=${resolvedParams.username}`,
     bio: profileUser?.bio || "Passionate poker player, always learning and looking for the next big win. Specializing in Texas Hold'em tournaments.",
-    joinedDate: "Joined January 2023",
+    joinedDate: "Joined January 2023", // This could also be dynamic if stored
     friendsCount: 78, 
     totalPosts: profilePosts.length, 
-    coverImage: "https://placehold.co/1200x300.png?cover=1",
+    coverImage: profileCoverImageUrl || "https://placehold.co/1200x300.png?cover=1",
     coverImageAiHint: "poker table background",
   };
 
@@ -225,6 +234,7 @@ export default function UserProfilePage({ params }: { params: { username: string
             style={{objectFit: "cover"}}
             data-ai-hint={mockUser.coverImageAiHint}
             priority
+            key={mockUser.coverImage} // Add key to force re-render if src changes
           />
           <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/70 to-transparent">
             <div className="flex flex-col sm:flex-row items-center sm:items-end space-x-0 sm:space-x-4">
@@ -233,7 +243,7 @@ export default function UserProfilePage({ params }: { params: { username: string
                 <label htmlFor={isCurrentUserProfile ? "profile-avatar-upload" : undefined} 
                        className={isCurrentUserProfile ? "cursor-pointer" : ""}>
                   <Avatar className="h-24 w-24 sm:h-32 sm:w-32 border-4 border-background -mb-12 sm:-mb-0 relative z-10">
-                    <AvatarImage src={mockUser.avatar} alt={mockUser.name} data-ai-hint="profile picture" />
+                    <AvatarImage src={mockUser.avatar} alt={mockUser.name} data-ai-hint="profile picture" key={mockUser.avatar} />
                     <AvatarFallback>{mockUser.name.substring(0, 2).toUpperCase() || 'P'}</AvatarFallback>
                   </Avatar>
                   {isCurrentUserProfile && (
@@ -263,7 +273,7 @@ export default function UserProfilePage({ params }: { params: { username: string
                   variant="outline" 
                   size="sm" 
                   className="mt-4 sm:mt-0 sm:ml-auto bg-white/20 hover:bg-white/30 text-white border-white/50"
-                  onClick={() => router.push('/settings')} // Navigate to settings
+                  onClick={() => router.push('/settings')}
                 >
                   <Edit3 className="mr-2 h-4 w-4" /> Edit Profile
                 </Button>
@@ -365,4 +375,3 @@ export default function UserProfilePage({ params }: { params: { username: string
     </div>
   );
 }
-

@@ -12,7 +12,7 @@ import { UserPlus } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/hooks/use-toast";
 import { LoadScript, Autocomplete } from "@react-google-maps/api";
-import type { MockUserPin } from "@/app/(app)/map/page"; // Import the type
+import type { MockUserPin } from "@/app/(app)/map/page";
 
 const googleMapsApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
 const libraries: ("places")[] = ['places'];
@@ -88,8 +88,9 @@ export default function SignupPage() {
       username,
       password, 
       location,
-      bio: "", // Initialize bio
-      // avatar will be set by default or uploaded later
+      bio: "", 
+      avatar: "", // Will be default or uploaded later
+      coverImage: "", // Initialize coverImage
     };
 
     try {

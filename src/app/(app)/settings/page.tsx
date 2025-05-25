@@ -1,17 +1,17 @@
 
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { Input } from "@/components/ui/input"; // Import Input
-import { Textarea } from "@/components/ui/textarea"; // Import Textarea
-import { UserCircle, BellDot, Palette, ShieldAlert, Image as ImageIcon, Save } from "lucide-react"; // Added ImageIcon, Save
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { UserCircle, BellDot, Palette, ShieldAlert, Image as ImageIcon, Save, Upload } from "lucide-react"; // Added Upload
 import { useToast } from "@/hooks/use-toast";
-import { useRouter } from "next/navigation"; // Import useRouter
-import Link from "next/link"; // Import Link
+import { useRouter } from "next/navigation";
+import Link from "next/link";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -29,12 +29,16 @@ interface LoggedInUserDetails {
   username: string;
   email: string;
   bio?: string;
-  avatar?: string; // Keep avatar to avoid breaking the object structure
+  avatar?: string;
+  coverImage?: string; // Added coverImage
 }
+
+const MAX_COVER_IMAGE_SIZE_MB = 5;
+const MAX_COVER_IMAGE_SIZE_BYTES = MAX_COVER_IMAGE_SIZE_MB * 1024 * 1024;
 
 export default function SettingsPage() {
   const { toast } = useToast();
-  const router = useRouter(); // Initialize useRouter
+  const router = useRouter();
   const [currentUser, setCurrentUser] = useState<LoggedInUserDetails | null>(null);
   const [editableFullName, setEditableFullName] = useState("");
   const [editableBio, setEditableBio] = useState("");
@@ -44,6 +48,8 @@ export default function SettingsPage() {
   const [notificationsFriendRequests, setNotificationsFriendRequests] = useState(true);
   const [isDarkMode, setIsDarkMode] = useState(true);
 
+  const coverImageInputRef = useRef<HTMLInputElement>(null);
+
   useEffect(() => {
     try {
       const loggedInUserString = localStorage.getItem("loggedInUser");
@@ -52,8 +58,8 @@ export default function SettingsPage() {
         setCurrentUser(userDetails);
         setEditableFullName(userDetails.fullName || "");
         setEditableBio(userDetails.bio || "");
+        // coverImage is handled directly via its upload function
       } else {
-        // Fallback or redirect if no user is logged in
         setCurrentUser({ fullName: "Player One", username: "playerone", email: "player@example.com", bio: "" });
         setEditableFullName("Player One");
         setEditableBio("");
@@ -76,18 +82,69 @@ export default function SettingsPage() {
         ...currentUser,
         fullName: editableFullName,
         bio: editableBio,
+        // coverImage is saved separately
       };
       localStorage.setItem("loggedInUser", JSON.stringify(updatedUser));
-      setCurrentUser(updatedUser); 
+      setCurrentUser(updatedUser);
       toast({
         title: "Settings Saved!",
         description: "Your profile information has been updated.",
       });
-      router.push(`/profile/${currentUser.username}`); // Redirect to profile page
+      router.push(`/profile/${currentUser.username}`);
     } catch (error) {
       console.error("Error saving user to localStorage:", error);
       toast({ title: "Error", description: "Could not save settings.", variant: "destructive"});
     }
+  };
+
+  const handleCoverImageChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      if (file.size > MAX_COVER_IMAGE_SIZE_BYTES) {
+        toast({
+          title: "File Too Large",
+          description: `Please select an image smaller than ${MAX_COVER_IMAGE_SIZE_MB}MB for the cover image.`,
+          variant: "destructive",
+        });
+        if (coverImageInputRef.current) coverImageInputRef.current.value = "";
+        return;
+      }
+      if (!file.type.startsWith("image/")) {
+        toast({
+          title: "Unsupported File Type",
+          description: "Please select an image file (e.g., PNG, JPG, GIF).",
+          variant: "destructive",
+        });
+        if (coverImageInputRef.current) coverImageInputRef.current.value = "";
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const newCoverImageDataUrl = reader.result as string;
+        try {
+          const loggedInUserString = localStorage.getItem("loggedInUser");
+          if (loggedInUserString && currentUser) {
+            const loggedInUser: LoggedInUserDetails = JSON.parse(loggedInUserString);
+            const updatedUser = { ...loggedInUser, coverImage: newCoverImageDataUrl };
+            localStorage.setItem("loggedInUser", JSON.stringify(updatedUser));
+            setCurrentUser(updatedUser); // Update local state to reflect change if needed elsewhere on this page
+            toast({
+              title: "Cover Image Updated!",
+              description: "Your new cover image has been saved. It will be visible on your profile.",
+            });
+          }
+        } catch (error) {
+          console.error("Error saving cover image to localStorage:", error);
+          toast({ title: "Storage Error", description: "Could not save new cover image.", variant: "destructive" });
+        }
+      };
+      reader.onerror = () => {
+        toast({ title: "Error", description: "Could not read selected file.", variant: "destructive" });
+      };
+      reader.readAsDataURL(file);
+    }
+    if (coverImageInputRef.current) coverImageInputRef.current.value = "";
   };
 
   const handleDeleteAccount = () => {
@@ -98,7 +155,6 @@ export default function SettingsPage() {
     });
     // In a real app: clear localStorage, redirect to login/signup
     // localStorage.removeItem("loggedInUser");
-    // localStorage.removeItem("pokerConnectUser");
     // router.push('/login');
   };
 
@@ -109,7 +165,6 @@ export default function SettingsPage() {
         <p className="text-muted-foreground">Manage your account and app preferences.</p>
       </div>
 
-      {/* Profile Settings */}
       <Card className="shadow-lg rounded-xl">
         <CardHeader>
           <div className="flex items-center gap-3">
@@ -160,19 +215,27 @@ export default function SettingsPage() {
            {currentUser && (
             <Link href={`/profile/${currentUser.username}`} passHref>
               <Button variant="outline" className="w-full">
-                View/Edit Full Profile Page
+                View Full Profile Page
               </Button>
             </Link>
           )}
           <div>
-            <Label>Cover Image</Label>
+            <Label htmlFor="cover-image-upload-settings">Cover Image</Label>
              <Button
                 variant="outline"
                 className="w-full mt-1"
-                onClick={() => toast({ title: "Coming Soon!", description: "Cover image change functionality will be available soon."})}
+                onClick={() => coverImageInputRef.current?.click()}
             >
-                <ImageIcon className="mr-2 h-4 w-4" /> Change Cover Image (Simulated)
+                <Upload className="mr-2 h-4 w-4" /> Change Cover Image
             </Button>
+            <input
+              id="cover-image-upload-settings"
+              type="file"
+              className="sr-only"
+              accept="image/*"
+              onChange={handleCoverImageChange}
+              ref={coverImageInputRef}
+            />
           </div>
         </CardContent>
       </Card>
