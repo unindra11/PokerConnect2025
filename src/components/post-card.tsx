@@ -26,10 +26,10 @@ interface PostCardProps {
   onCommentPost?: (postId: string, commentText: string) => void;
 }
 
-export function PostCard({ 
-  post, 
-  showManagementControls = false, 
-  onDeletePost, 
+export function PostCard({
+  post,
+  showManagementControls = false,
+  onDeletePost,
   onLikePost,
   onCommentPost
 }: PostCardProps) {
@@ -46,9 +46,7 @@ export function PostCard({
   const handleLike = () => {
     if (onLikePost) {
       onLikePost(post.id);
-      // The parent component (e.g., MyPostsPage) will show a toast upon successful localStorage update.
     } else {
-      // This case is for static posts (e.g., on home feed) not managed by parent state/localStorage
       toast({
         title: "Post Liked!",
         description: `You liked "${post.content.substring(0,20)}...".`,
@@ -57,24 +55,30 @@ export function PostCard({
   };
 
   const handleComment = () => {
+    // Diagnostic toast:
+    toast({ title: "Comment Button Clicked!", description: `Post ID: ${post.id}. Prompt should appear next.` });
+
+    // Original logic:
     const commentText = window.prompt("Enter your comment:");
     if (commentText && commentText.trim() !== "") {
       if (onCommentPost) {
         onCommentPost(post.id, commentText);
-         // The parent component (e.g., MyPostsPage) will show a toast upon successful localStorage update.
       } else {
-        // For static posts
          toast({
           title: "Comment Added",
           description: "Your comment has been added (simulated).",
         });
       }
-    } else if (commentText !== null) { 
+    } else if (commentText === "") { // Check for empty string specifically if user clicks OK on empty prompt
       toast({
         title: "Empty Comment",
         description: "Comment cannot be empty.",
         variant: "destructive"
       });
+    } else if (commentText === null) {
+      // User clicked Cancel on the prompt, do nothing or show a subtle message
+      // For now, we'll do nothing.
+      console.log("User cancelled comment input.");
     }
   };
 
@@ -84,10 +88,8 @@ export function PostCard({
 
   const handleDelete = () => {
     if (onDeletePost) {
-      onDeletePost(post.id); 
-       // The parent component (e.g., MyPostsPage) will show a toast upon successful localStorage update.
+      onDeletePost(post.id);
     } else {
-      // For static posts or if no specific handler provided
       toast({
         title: "Post Deleted",
         description: `Post "${post.content.substring(0,20)}..." has been removed (simulated).`,
@@ -114,7 +116,7 @@ export function PostCard({
             {post.timestamp}
           </CardDescription>
         </div>
-        {showManagementControls && onDeletePost && ( // Ensure onDeletePost is present for delete button
+        {showManagementControls && onDeletePost && (
           <div className="flex gap-2">
             <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleEdit}>
               <Edit3 className="h-4 w-4" />
