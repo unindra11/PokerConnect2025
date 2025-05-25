@@ -1,5 +1,5 @@
 // src/app/signup/page.tsx
-"use client"; // Add this directive
+"use client"; 
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
@@ -7,13 +7,18 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import Link from "next/link";
 import { UserPlus } from "lucide-react";
+import { useRouter } from "next/navigation"; // Import useRouter
 
 export default function SignupPage() {
+  const router = useRouter(); // Initialize router
+
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    alert("Sign Up button clicked! Form data would be processed here.");
     // In a real application, you would handle form submission logic here,
     // like validating input and sending data to a server.
+    // For now, we'll simulate a successful signup and redirect.
+    console.log("Sign Up button clicked! Form data would be processed here.");
+    router.push("/login"); // Redirect to login page
   };
 
   return (
