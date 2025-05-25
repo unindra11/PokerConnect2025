@@ -26,62 +26,6 @@ export interface MockUserPin { // Exporting for use in signup page
   aiHint?: string;
 }
 
-const indianCities = [
-  { name: "Delhi", lat: 28.6139, lng: 77.2090 },
-  { name: "Mumbai", lat: 19.0760, lng: 72.8777 },
-  { name: "Bangalore", lat: 12.9716, lng: 77.5946 },
-  { name: "Kolkata", lat: 22.5726, lng: 88.3639 },
-  { name: "Chennai", lat: 13.0827, lng: 80.2707 },
-  { name: "Hyderabad", lat: 17.3850, lng: 78.4867 },
-  { name: "Pune", lat: 18.5204, lng: 73.8567 },
-  { name: "Ahmedabad", lat: 23.0225, lng: 72.5714 },
-  { name: "Jaipur", lat: 26.9124, lng: 75.7873 },
-  { name: "Lucknow", lat: 26.8467, lng: 80.9462 },
-  { name: "Chandigarh", lat: 30.7333, lng: 76.7794 },
-  { name: "Bhopal", lat: 23.2599, lng: 77.4126 },
-  { name: "Kochi", lat: 9.9312, lng: 76.2673 },
-  { name: "Guwahati", lat: 26.1445, lng: 91.7362 },
-  { name: "Bhubaneswar", lat: 20.2961, lng: 85.8245 },
-  { name: "Patna", lat: 25.5941, lng: 85.1376 },
-  { name: "Indore", lat: 22.7196, lng: 75.8577 },
-  { name: "Nagpur", lat: 21.1458, lng: 79.0882 },
-  { name: "Srinagar", lat: 34.0837, lng: 74.7973 },
-  { name: "Visakhapatnam", lat: 17.6868, lng: 83.2185 }
-];
-
-const firstNames = ["Aarav", "Vivaan", "Aditya", "Vihaan", "Arjun", "Sai", "Reyansh", "Krishna", "Ishaan", "Ananya", "Diya", "Saanvi", "Aanya", "Myra", "Aarohi", "Pari", "Khushi", "Riya"];
-const lastNames = ["Sharma", "Verma", "Gupta", "Singh", "Kumar", "Patel", "Reddy", "Shah", "Das", "Jain", "Mehta", "Rao", "Iyer", "Menon", "Nair"];
-
-const generateDefaultMockUsers = (): MockUserPin[] => {
-  const users: MockUserPin[] = [];
-  let userCounter = 1;
-  for (let i = 0; i < 100; i++) {
-    const city = indianCities[i % indianCities.length];
-    const randomOffsetLat = (Math.random() - 0.5) * 0.1; 
-    const randomOffsetLng = (Math.random() - 0.5) * 0.1;
-    
-    const firstName = firstNames[Math.floor(Math.random() * firstNames.length)];
-    const lastName = lastNames[Math.floor(Math.random() * lastNames.length)];
-    const name = `${firstName} ${lastName}`;
-    const username = `${firstName.toLowerCase()}${city.name.substring(0,3).toLowerCase()}${userCounter}`;
-
-    users.push({
-      id: `mapuser${userCounter}`,
-      username: username,
-      name: name,
-      avatar: `https://placehold.co/40x40.png?text=${firstName.substring(0,1)}${lastName.substring(0,1)}&c=${i}`,
-      position: { 
-        lat: city.lat + randomOffsetLat, 
-        lng: city.lng + randomOffsetLng 
-      },
-      aiHint: "profile picture",
-    });
-    userCounter++;
-  }
-  return users;
-};
-
-const defaultMockUsersData: MockUserPin[] = generateDefaultMockUsers();
 const googleMapsApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
 
 // COMMON ERROR: RefererNotAllowedMapError
@@ -96,7 +40,7 @@ const googleMapsApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
 export default function MapPage() {
   const [selectedUser, setSelectedUser] = useState<MockUserPin | null>(null);
   const [mapReady, setMapReady] = useState(false);
-  const [mapMarkersData, setMapMarkersData] = useState<MockUserPin[]>(defaultMockUsersData);
+  const [mapMarkersData, setMapMarkersData] = useState<MockUserPin[]>([]); // Initialize with empty array
 
   useEffect(() => {
     console.log("MapPage Mount: Initializing map data source determination.");
@@ -108,16 +52,16 @@ export default function MapPage() {
           console.log("MapPage: Found users in localStorage. Using them for markers.", storedMapUsers);
           setMapMarkersData(storedMapUsers);
         } else {
-          console.log("MapPage: localStorage users empty or invalid. Falling back to default mock users.");
-          setMapMarkersData(defaultMockUsersData);
+          console.log("MapPage: localStorage users empty or invalid. Displaying an empty map.");
+          setMapMarkersData([]); // Ensure it's an empty array
         }
       } else {
-        console.log("MapPage: No users in localStorage. Using default mock users.");
-        setMapMarkersData(defaultMockUsersData);
+        console.log("MapPage: No users in localStorage. Displaying an empty map.");
+        setMapMarkersData([]); // Ensure it's an empty array
       }
     } catch (error) {
-      console.error("MapPage: Error reading map users from localStorage. Falling back to default.", error);
-      setMapMarkersData(defaultMockUsersData);
+      console.error("MapPage: Error reading map users from localStorage. Displaying an empty map.", error);
+      setMapMarkersData([]); // Ensure it's an empty array on error
     }
   }, []);
 
@@ -224,12 +168,13 @@ export default function MapPage() {
             )}
           </LoadScript>
           <p className="text-sm text-muted-foreground mt-4">
-            This map shows approximate locations of PokerConnect users across India. Click on a marker to see more details.
-            Number of users shown: {mapMarkersData.length}
+            {mapMarkersData.length > 0 
+              ? `This map shows approximate locations of ${mapMarkersData.length} PokerConnect user(s) across India. Click on a marker to see more details.`
+              : "No signed-up users with location data to display on the map yet. Sign up to appear!"
+            }
           </p>
         </CardContent>
       </Card>
     </div>
   );
 }
-
