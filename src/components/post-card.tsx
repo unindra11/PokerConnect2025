@@ -47,17 +47,15 @@ export function PostCard({
     if (onLikePost) {
       onLikePost(post.id);
     } else {
+      // Fallback toast if onLikePost is not provided
       toast({
-        title: "Post Liked!",
-        description: `You liked "${post.content.substring(0,20)}...".`,
+        title: post.likedByCurrentUser ? "Like Removed" : "Post Liked!",
+        description: `You reacted to "${post.content.substring(0,20)}...".`,
       });
     }
   };
 
   const handleComment = () => {
-    // Diagnostic toast:
-    toast({ title: "Comment Button Clicked!", description: `Post ID: ${post.id}. Prompt should appear next.` });
-
     // Original logic:
     const commentText = window.prompt("Enter your comment:");
     if (commentText && commentText.trim() !== "") {
