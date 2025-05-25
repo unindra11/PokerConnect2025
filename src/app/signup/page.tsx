@@ -12,7 +12,7 @@ import { UserPlus } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/hooks/use-toast";
 import { LoadScript, Autocomplete } from "@react-google-maps/api";
-import type { MockUserPin } from "@/app/(app)/map/page";
+import type { MockUserPin } from "@/app/(app)/map/page"; // Ensure this type is correctly imported
 
 const googleMapsApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
 const libraries: ("places")[] = ['places'];
@@ -42,21 +42,20 @@ export default function SignupPage() {
       if (place && place.formatted_address) {
         setLocation(place.formatted_address);
         if (place.geometry?.location) {
-          setSelectedLocationCoords({
+          const coords = {
             lat: place.geometry.location.lat(),
             lng: place.geometry.location.lng(),
-          });
-          console.log("Selected location coordinates:", {
-            lat: place.geometry.location.lat(),
-            lng: place.geometry.location.lng(),
-          });
+          };
+          setSelectedLocationCoords(coords);
+          console.log("Selected location coordinates:", coords);
         } else {
           setSelectedLocationCoords(null);
           console.warn("Autocomplete place selected, but no geometry/location data found.");
         }
       } else if (locationInputRef.current) {
+        // User might have typed something without selecting a suggestion
         setLocation(locationInputRef.current.value);
-        setSelectedLocationCoords(null); 
+        setSelectedLocationCoords(null); // No specific coords if not selected from list
       }
     }
   };
@@ -89,22 +88,24 @@ export default function SignupPage() {
       password, 
       location,
       bio: "", 
-      avatar: "", // Will be default or uploaded later
-      coverImage: "", // Initialize coverImage
+      avatar: "", 
+      coverImage: "", 
     };
 
     try {
       localStorage.setItem("pokerConnectUser", JSON.stringify(newUser));
       
       if (selectedLocationCoords) {
-        const initials = newUser.fullName.split(' ').map(n => n[0]).join('').substring(0,2).toUpperCase();
+        const initials = newUser.fullName.split(' ').map(n => n[0]).join('').substring(0,2).toUpperCase() || 'P';
         const mapUser: MockUserPin = { 
           id: newUser.username, 
           username: newUser.username,
           name: newUser.fullName,
-          avatar: `https://placehold.co/40x40.png?text=${initials}&c=${Math.random().toString(36).substring(7)}`,
+          avatar: newUser.avatar || `https://placehold.co/40x40.png?text=${initials}&c=${Math.random().toString(36).substring(7)}`,
           position: selectedLocationCoords,
           aiHint: "profile picture",
+          bio: newUser.bio || "", // Ensure bio is included
+          coverImage: newUser.coverImage || `https://placehold.co/1200x300.png?text=Cover&u=${newUser.username}`, // Ensure coverImage is included
         };
 
         const existingMapUsersString = localStorage.getItem("pokerConnectMapUsers");
@@ -118,6 +119,7 @@ export default function SignupPage() {
             mapUsers = []; 
           }
         }
+        // Prevent duplicate users by username
         mapUsers = mapUsers.filter(user => user.id !== mapUser.id);
         mapUsers.push(mapUser);
         localStorage.setItem("pokerConnectMapUsers", JSON.stringify(mapUsers));
@@ -241,7 +243,7 @@ export default function SignupPage() {
                     onLoad={onLoad}
                     onPlaceChanged={onPlaceChanged}
                     restrictions={{ country: "in" }} 
-                    fields={["formatted_address", "geometry", "name"]} 
+                    fields={["formatted_address", "geometry.location", "name"]} // ensure geometry.location is requested
                   >
                     <Input
                       id="location"
@@ -251,7 +253,7 @@ export default function SignupPage() {
                       value={location} 
                       onChange={(e) => {
                         setLocation(e.target.value);
-                        setSelectedLocationCoords(null); 
+                        setSelectedLocationCoords(null); // Clear coords if user types manually
                       }} 
                       ref={locationInputRef} 
                       required
@@ -286,4 +288,3 @@ export default function SignupPage() {
     </div>
   );
 }
-

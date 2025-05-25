@@ -2,19 +2,20 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import { GoogleMap, useJsApiLoader, Marker, InfoWindow } from "@react-google-maps/api"; // Updated import
+import { GoogleMap, useJsApiLoader, Marker, InfoWindow } from "@react-google-maps/api";
 import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Loader2 } from "lucide-react"; // For loading state
+import { Loader2 } from "lucide-react";
 
 const containerStyle = {
   width: "100%",
   height: "600px",
 };
 
+// Centered broadly on India
 const initialCenter = {
-  lat: 22.9734, // Centered more broadly on India
+  lat: 22.9734,
   lng: 78.6569,
 };
 
@@ -25,6 +26,8 @@ export interface MockUserPin {
   avatar: string;
   position: { lat: number; lng: number };
   aiHint?: string;
+  coverImage?: string; // Added
+  bio?: string;        // Added
 }
 
 const googleMapsApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
@@ -37,15 +40,14 @@ const googleMapsApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
 // 4. Add the current development URL (e.g., https://YOUR_DEV_DOMAIN.cloudworkstations.dev/* or http://localhost:PORT/*)
 // 5. Save changes. It might take a few minutes to propagate.
 
-
 export default function MapPage() {
   const [selectedUser, setSelectedUser] = useState<MockUserPin | null>(null);
   const [mapMarkersData, setMapMarkersData] = useState<MockUserPin[]>([]);
 
   const { isLoaded, loadError } = useJsApiLoader({
-    id: 'google-map-script', // Optional: A specific ID for the script
-    googleMapsApiKey: googleMapsApiKey || "", // Ensure API key is a string
-    // libraries: ['places'], // Add any other libraries you need, e.g. 'places'
+    id: 'google-map-script',
+    googleMapsApiKey: googleMapsApiKey || "",
+    // libraries: ['places'], // Not strictly needed for just map display and markers
   });
 
   useEffect(() => {
@@ -59,7 +61,7 @@ export default function MapPage() {
           setMapMarkersData(storedMapUsers);
         } else {
           console.log("MapPage: localStorage users empty or invalid. Displaying an empty map.");
-          setMapMarkersData([]);
+          setMapMarkersData([]); // Ensure it's an empty array if no valid users
         }
       } else {
         console.log("MapPage: No users in localStorage. Displaying an empty map.");
@@ -71,12 +73,13 @@ export default function MapPage() {
     }
   }, []);
 
+
   useEffect(() => {
     console.log(
       `%cMapPage Update: isLoaded=${isLoaded}, selectedUser=${selectedUser?.id || 'null'}, markerCount=${mapMarkersData.length}`,
       'color: blue; font-weight: bold;'
     );
-     if (loadError) {
+    if (loadError) {
       console.error("%cMapPage: Error loading Google Maps script via useJsApiLoader:", 'color: red; font-weight: bold;', loadError);
     }
   }, [isLoaded, selectedUser, mapMarkersData, loadError]);
@@ -117,7 +120,7 @@ export default function MapPage() {
             <p className="text-destructive">
               Could not load the Google Maps script. Please check your API key, internet connection, and the browser console for more details.
             </p>
-             <p className="text-xs text-muted-foreground mt-2">{loadError.message}</p>
+            <p className="text-xs text-muted-foreground mt-2">{loadError.message}</p>
           </CardContent>
         </Card>
       </div>
@@ -141,19 +144,20 @@ export default function MapPage() {
             <GoogleMap
               mapContainerStyle={containerStyle}
               center={initialCenter}
-              zoom={5}
+              zoom={5} // Adjusted zoom for a broader view of India
               onLoad={(map) => console.log("%cGoogleMap: component mounted (onLoad event). Map instance:", 'color: purple;', map)}
               onUnmount={() => console.log("%cGoogleMap: component unmounted (onUnmount event).", 'color: red;')}
-              options={{ zoomControl: true, mapId: "POKER_CONNECT_MAP_ID" }}
+              options={{ zoomControl: true, mapId: "POKER_CONNECT_MAP_ID" }} // Ensure zoomControl is true
             >
               {mapMarkersData.map((user) => (
                 <Marker
                   key={user.id}
                   position={user.position}
                   onClick={() => {
+                    console.log(`Marker clicked: ${user.username}`);
                     setSelectedUser(user);
                   }}
-                  // Custom icons can be re-added here if stable
+                  // Default Google Maps red pin markers will be used
                 />
               ))}
 
@@ -161,6 +165,7 @@ export default function MapPage() {
                 <InfoWindow
                   position={selectedUser.position}
                   onCloseClick={() => {
+                    console.log("InfoWindow closed.");
                     setSelectedUser(null);
                   }}
                 >
@@ -182,8 +187,8 @@ export default function MapPage() {
           )}
           <p className="text-sm text-muted-foreground mt-4">
             {mapMarkersData.length > 0
-              ? `This map shows approximate locations of ${mapMarkersData.length} PokerConnect user(s) across India. Click on a marker to see more details.`
-              : "No signed-up users with location data to display on the map yet. Sign up to appear!"
+              ? `This map shows approximate locations of ${mapMarkersData.length} PokerConnect user(s) across India who have shared their location. Click on a marker to see more details.`
+              : "No signed-up users with location data to display on the map yet. Sign up and select a location to appear!"
             }
           </p>
         </CardContent>

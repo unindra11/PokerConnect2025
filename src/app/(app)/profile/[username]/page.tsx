@@ -10,21 +10,23 @@ import { UserCog, ShieldCheck, Edit3, UserPlus, Loader2, Users, Camera, UserChec
 import Image from "next/image";
 import Link from "next/link";
 import { PostCard } from "@/components/post-card";
-import type { Post, User as PostUser } from "@/types/post";
+import type { Post, User as PostUser } from "@/types/post"; // Assuming User is also in post.ts or similar
 import { useToast } from "@/hooks/use-toast";
 import { useRouter } from "next/navigation";
+import type { MockUserPin } from "@/app/(app)/map/page";
 
-interface LoggedInUser {
+
+interface LoggedInUser { // This represents the structure in localStorage for "loggedInUser" and "pokerConnectUser"
   username: string;
   fullName?: string;
   email?: string;
   avatar?: string; 
   bio?: string;
   coverImage?: string; 
-  friendsCount?: number;
+  friendsCount?: number; // Added for consistency, though might be mocked
 }
 
-interface StoredNotification {
+interface StoredNotification { // For friend request status checking
   id: string;
   type: string; 
   user: { name: string; avatar: string; handle: string; username?: string; }; 
@@ -82,87 +84,106 @@ export default function UserProfilePage({ params }: { params: { username: string
         loggedInUserForState = loggedInUser;
         setCurrentLoggedInUser(loggedInUser);
 
-        if (loggedInUser && loggedInUser.username === resolvedParams.username) {
+        if (loggedInUser.username === resolvedParams.username) { // Viewing own profile
           setIsCurrentUserProfile(true);
-          userForProfile = loggedInUser; 
-          if (loggedInUser.avatar) {
-            avatarForProfile = loggedInUser.avatar;
-          }
-          if (loggedInUser.coverImage) {
-            coverForProfile = loggedInUser.coverImage;
-          }
-        } else {
+          userForProfile = loggedInUser;
+        } else { // Viewing someone else's profile
           setIsCurrentUserProfile(false);
-           const pokerConnectUserString = localStorage.getItem("pokerConnectUser"); 
-           if (pokerConnectUserString) {
-             // This logic block might be for viewing other stored users;
-             // for now, it's simplified as we assume only one 'pokerConnectUser' entry
-             // or we are creating a generic profile for any non-logged-in user.
-             // Let's assume for simplicity, if not the loggedInUser, we construct a mock.
-             const allUsersString = localStorage.getItem("pokerConnectMapUsers"); // A potential source for other users
-             let foundOtherUser = false;
-             if (allUsersString) {
-                const allUsers: {username: string, name: string, avatar?: string, bio?:string, coverImage?:string, friendsCount?: number}[] = JSON.parse(allUsersString);
-                const otherUser = allUsers.find(u => u.username === resolvedParams.username);
-                if (otherUser) {
-                    userForProfile = {
-                        username: otherUser.username,
-                        fullName: otherUser.name,
-                        bio: otherUser.bio || "A passionate poker player.",
-                        avatar: otherUser.avatar,
-                        coverImage: otherUser.coverImage,
-                        friendsCount: otherUser.friendsCount || Math.floor(Math.random() * 100)
-                    };
-                    if (userForProfile.avatar) avatarForProfile = userForProfile.avatar;
-                    if (userForProfile.coverImage) coverForProfile = userForProfile.coverImage;
+          const allUsersString = localStorage.getItem("pokerConnectMapUsers");
+          let foundOtherUser = false;
+          if (allUsersString) {
+             const allUsers: MockUserPin[] = JSON.parse(allUsersString);
+             const otherUser = allUsers.find(u => u.username === resolvedParams.username);
+             if (otherUser) {
+                 userForProfile = { // Construct a LoggedInUser compatible object
+                     username: otherUser.username,
+                     fullName: otherUser.name,
+                     bio: otherUser.bio || "A passionate poker player enjoying the game.",
+                     avatar: otherUser.avatar,
+                     coverImage: otherUser.coverImage || `https://placehold.co/1200x300.png?u=${otherUser.username}&cover=map`,
+                     email: "", // Not typically stored in mapUsers for privacy
+                     friendsCount: Math.floor(Math.random() * 200) // MockUserPin doesn't store this
+                 };
+                 foundOtherUser = true;
+             }
+          }
+
+          if (!foundOtherUser) { // If not in mapUsers, try the main "pokerConnectUser" storage (could be unindra111)
+            const pokerConnectUserString = localStorage.getItem("pokerConnectUser");
+            if (pokerConnectUserString) {
+                const mainStoredUser: LoggedInUser = JSON.parse(pokerConnectUserString);
+                if (mainStoredUser.username === resolvedParams.username) {
+                    userForProfile = mainStoredUser;
                     foundOtherUser = true;
                 }
-             }
-
-             if (!foundOtherUser) {
-                 userForProfile = { 
-                    username: resolvedParams.username, 
-                    fullName: resolvedParams.username.charAt(0).toUpperCase() + resolvedParams.username.slice(1),
-                    bio: "A passionate poker player enjoying the game.",
-                    friendsCount: Math.floor(Math.random() * 200) 
-                };
-             }
-           } else { // No pokerConnectUser (the one created at signup)
-             userForProfile = { 
-                username: resolvedParams.username, 
-                fullName: resolvedParams.username.charAt(0).toUpperCase() + resolvedParams.username.slice(1),
-                bio: "A passionate poker player enjoying the game.",
-                friendsCount: Math.floor(Math.random() * 200) 
-            };
-           }
-        }
-      } else { 
-        setIsCurrentUserProfile(false);
-         const pokerConnectUserString = localStorage.getItem("pokerConnectUser"); 
-         if (pokerConnectUserString) {
-           const pokerConnectUser: LoggedInUser = JSON.parse(pokerConnectUserString);
-           if (pokerConnectUser.username === resolvedParams.username) {
-              userForProfile = pokerConnectUser; // Should be the signed up user
-              if(pokerConnectUser.avatar) avatarForProfile = pokerConnectUser.avatar;
-              if(pokerConnectUser.coverImage) coverForProfile = pokerConnectUser.coverImage;
-           } else { // Viewing someone else who isn't the main "pokerConnectUser"
-               userForProfile = { 
-                  username: resolvedParams.username,
-                  fullName: resolvedParams.username.charAt(0).toUpperCase() + resolvedParams.username.slice(1),
-                  bio: "A passionate poker player enjoying the game.",
-                  friendsCount: Math.floor(Math.random() * 200)
-              };
-           }
-         } else { // No loggedInUser and no pokerConnectUser
-            userForProfile = { 
+            }
+          }
+          
+          if (!foundOtherUser) { // Fallback if not loggedInUser, not in mapUsers, not the mainPokerConnectUser
+             userForProfile = {
                 username: resolvedParams.username,
                 fullName: resolvedParams.username.charAt(0).toUpperCase() + resolvedParams.username.slice(1),
                 bio: "A passionate poker player enjoying the game.",
+                avatar: `https://placehold.co/150x150.png?u=${resolvedParams.username}`,
+                coverImage: `https://placehold.co/1200x300.png?u=${resolvedParams.username}&cover=fallback`,
+                email: "",
                 friendsCount: Math.floor(Math.random() * 100)
             };
-         }
+          }
+        }
+      } else { // No loggedInUser session active (public view)
+        setIsCurrentUserProfile(false);
+        const allUsersString = localStorage.getItem("pokerConnectMapUsers");
+        let foundPublicUser = false;
+        if (allUsersString) {
+           const allUsers: MockUserPin[] = JSON.parse(allUsersString);
+           const publicUser = allUsers.find(u => u.username === resolvedParams.username);
+           if (publicUser) {
+               userForProfile = {
+                   username: publicUser.username,
+                   fullName: publicUser.name,
+                   bio: publicUser.bio || "A passionate poker player.",
+                   avatar: publicUser.avatar,
+                   coverImage: publicUser.coverImage || `https://placehold.co/1200x300.png?u=${publicUser.username}&cover=publicmap`,
+                   email: "",
+                   friendsCount: Math.floor(Math.random() * 150)
+               };
+               foundPublicUser = true;
+           }
+        }
+        if (!foundPublicUser) {
+          const pokerConnectUserString = localStorage.getItem("pokerConnectUser");
+          if (pokerConnectUserString) {
+              const mainStoredUser: LoggedInUser = JSON.parse(pokerConnectUserString);
+              if (mainStoredUser.username === resolvedParams.username) {
+                  userForProfile = mainStoredUser;
+                  foundPublicUser = true;
+              }
+          }
+        }
+        if (!foundPublicUser) { // Absolute fallback
+           userForProfile = {
+              username: resolvedParams.username,
+              fullName: resolvedParams.username.charAt(0).toUpperCase() + resolvedParams.username.slice(1),
+              bio: "A passionate poker player.",
+              avatar: `https://placehold.co/150x150.png?u=${resolvedParams.username}`,
+              coverImage: `https://placehold.co/1200x300.png?u=${resolvedParams.username}&cover=publicfallback`,
+              email: "",
+              friendsCount: Math.floor(Math.random() * 50)
+           };
+        }
       }
 
+      // Set avatar and cover based on the determined userForProfile
+      if (userForProfile) {
+          console.log(`[Profile Page for ${resolvedParams.username}] Determined userForProfile:`, userForProfile);
+          avatarForProfile = userForProfile.avatar || `https://placehold.co/150x150.png?u=${userForProfile.username}&ava=1`;
+          coverForProfile = userForProfile.coverImage || `https://placehold.co/1200x300.png?u=${userForProfile.username}&cover=1`;
+          console.log(`[Profile Page for ${resolvedParams.username}] Using avatar: ${avatarForProfile}`);
+          console.log(`[Profile Page for ${resolvedParams.username}] Using cover: ${coverForProfile}`);
+      }
+
+      // Check friend request status
       if (loggedInUserForState && userForProfile && loggedInUserForState.username !== userForProfile.username) {
         const notificationsKey = `pokerConnectNotifications_${loggedInUserForState.username}`;
         const storedNotificationsString = localStorage.getItem(notificationsKey);
@@ -179,18 +200,20 @@ export default function UserProfilePage({ params }: { params: { username: string
 
     } catch (error) {
       console.error("Error reading user data from localStorage for profile page:", error);
-      setIsCurrentUserProfile(false);
       userForProfile = { 
         username: resolvedParams.username,
         fullName: resolvedParams.username.charAt(0).toUpperCase() + resolvedParams.username.slice(1),
-        bio: "A passionate poker player enjoying the game.",
-        friendsCount: Math.floor(Math.random() * 100)
+        bio: "Error loading profile. Please try again.",
+        avatar: `https://placehold.co/150x150.png?u=${resolvedParams.username}`,
+        coverImage: `https://placehold.co/1200x300.png?u=${resolvedParams.username}&cover=error`,
+        email: "",
+        friendsCount: 0
       };
     }
     setProfileUser(userForProfile);
     setProfileAvatarUrl(avatarForProfile);
     setProfileCoverImageUrl(coverForProfile);
-  }, [resolvedParams.username]);
+  }, [resolvedParams.username]); // Re-run if username in URL changes
 
 
   useEffect(() => {
@@ -248,16 +271,15 @@ export default function UserProfilePage({ params }: { params: { username: string
   const handleLikePost = (postId: string) => {
     setProfilePosts(prevPosts =>
       prevPosts.map(p =>
-        p.id === postId ? { ...p, likes: p.likes + 1 } : p
+        p.id === postId ? { ...p, likes: p.likes + (p.likedByCurrentUser ? -1 : 1), likedByCurrentUser: !p.likedByCurrentUser } : p
       )
     );
-
     try {
       const allStoredPostsString = localStorage.getItem(USER_POSTS_STORAGE_KEY);
       if (allStoredPostsString) {
         let allStoredPosts: Post[] = JSON.parse(allStoredPostsString);
         allStoredPosts = allStoredPosts.map(p =>
-          p.id === postId ? { ...p, likes: p.likes + 1 } : p
+          p.id === postId ? { ...p, likes: p.likes + (p.likedByCurrentUser ? -1 : 1), likedByCurrentUser: !p.likedByCurrentUser } : p
         );
         localStorage.setItem(USER_POSTS_STORAGE_KEY, JSON.stringify(allStoredPosts));
       }
@@ -296,13 +318,12 @@ export default function UserProfilePage({ params }: { params: { username: string
 
         try {
           const loggedInUserString = localStorage.getItem("loggedInUser");
-          if (loggedInUserString) {
+          if (loggedInUserString && profileUser && profileUser.username === JSON.parse(loggedInUserString).username) {
             const loggedInUser: LoggedInUser = JSON.parse(loggedInUserString);
             loggedInUser.avatar = newAvatarDataUrl;
             localStorage.setItem("loggedInUser", JSON.stringify(loggedInUser));
             
-            // Additionally update the general pokerConnectUser if it's the same user
-            // This helps if profile page is for a user not currently "loggedInUser" but is the main "pokerConnectUser"
+            // Also update the general pokerConnectUser if it's the same user
             const pokerConnectUserString = localStorage.getItem("pokerConnectUser");
             if (pokerConnectUserString) {
                 let pokerConnectUser: LoggedInUser = JSON.parse(pokerConnectUserString);
@@ -311,6 +332,15 @@ export default function UserProfilePage({ params }: { params: { username: string
                     localStorage.setItem("pokerConnectUser", JSON.stringify(pokerConnectUser));
                 }
             }
+            // Also update in pokerConnectMapUsers if the user exists there
+            const mapUsersString = localStorage.getItem("pokerConnectMapUsers");
+            if (mapUsersString) {
+              let mapUsers: MockUserPin[] = JSON.parse(mapUsersString);
+              mapUsers = mapUsers.map(mu => mu.username === loggedInUser.username ? {...mu, avatar: newAvatarDataUrl} : mu);
+              localStorage.setItem("pokerConnectMapUsers", JSON.stringify(mapUsers));
+            }
+
+
             toast({
               title: "Profile Picture Updated!",
               description: "Your new profile picture has been saved.",
@@ -380,19 +410,19 @@ export default function UserProfilePage({ params }: { params: { username: string
   };
 
 
-  const mockUser = {
+  const mockUser = { // This is for display purposes, data comes from profileUser state
     name: profileUser?.fullName || resolvedParams.username.charAt(0).toUpperCase() + resolvedParams.username.slice(1), 
     username: resolvedParams.username,
     avatar: profileAvatarUrl || `https://placehold.co/150x150.png?u=${resolvedParams.username}`,
     bio: profileUser?.bio || "Passionate poker player, always learning and looking for the next big win. Specializing in Texas Hold'em tournaments.",
-    joinedDate: "Joined January 2023", 
-    friendsCount: profileUser?.friendsCount || Math.floor(Math.random() * 100), 
+    joinedDate: "Joined January 2023", // This can be made dynamic if signup date is stored
+    friendsCount: profileUser?.friendsCount || 0, 
     totalPosts: profilePosts.length, 
     coverImage: profileCoverImageUrl || "https://placehold.co/1200x300.png?cover=1",
     coverImageAiHint: "poker table background",
   };
 
-  if (!profileUser) {
+  if (!profileUser) { // Initial loading state before useEffect finishes
     return (
         <div className="container mx-auto max-w-4xl text-center py-10">
             <Loader2 className="h-12 w-12 animate-spin text-primary mx-auto" />
@@ -411,8 +441,8 @@ export default function UserProfilePage({ params }: { params: { username: string
             fill
             style={{objectFit: "cover"}}
             data-ai-hint={mockUser.coverImageAiHint}
-            priority
-            key={mockUser.coverImage} 
+            priority // Good for LCP elements
+            key={mockUser.coverImage} // Re-render if source changes
           />
           <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/70 to-transparent">
             <div className="flex flex-col sm:flex-row items-center sm:items-end space-x-0 sm:space-x-4">
