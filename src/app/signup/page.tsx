@@ -12,7 +12,7 @@ import { UserPlus, Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/hooks/use-toast";
 import { LoadScript, Autocomplete } from "@react-google-maps/api";
-import type { MockUserPin } from "@/app/(app)/map/page"; // Ensure this path is correct and type is exported
+import type { MockUserPin } from "@/app/(app)/map/page";
 import { auth, firestore } from "@/lib/firebase";
 import { createUserWithEmailAndPassword } from "firebase/auth";
 import { doc, setDoc } from "firebase/firestore";
@@ -57,7 +57,6 @@ export default function SignupPage() {
           console.warn("SignupPage: Autocomplete place selected, but no geometry/location data found.");
         }
       } else if (locationInputRef.current) {
-        // User typed something but didn't select from autocomplete
         setLocation(locationInputRef.current.value);
         setSelectedLocationCoords(null);
         console.log("SignupPage: Location input changed manually:", locationInputRef.current.value);
@@ -93,21 +92,34 @@ export default function SignupPage() {
         email,
         username,
         location,
-        locationCoords: selectedLocationCoords || null, // Ensure it's explicitly null if not set
+        locationCoords: selectedLocationCoords || null,
         bio: "",
-        avatar: "", // Placeholder for Firebase Storage URL
-        coverImage: "", // Placeholder for Firebase Storage URL
+        avatar: "", 
+        coverImage: "", 
         createdAt: new Date().toISOString(),
       };
 
       console.log("SignupPage: Preparing to write to Firestore. UserProfile object:", JSON.stringify(userProfile, null, 2));
-      await setDoc(doc(firestore, "users", user.uid), userProfile);
-      console.log("SignupPage: User profile successfully written to Firestore for UID:", user.uid);
+      try {
+        await setDoc(doc(firestore, "users", user.uid), userProfile);
+        console.log("SignupPage: User profile successfully written to Firestore for UID:", user.uid);
+      } catch (firestoreError: any) {
+        console.error("SignupPage: Firestore setDoc error:", firestoreError);
+        toast({
+          title: "Profile Save Error",
+          description: `Could not save profile to database: ${firestoreError.message}. Auth succeeded.`,
+          variant: "destructive",
+        });
+        setIsLoading(false);
+        // Decide if you want to proceed or ask user to retry profile save
+        return; 
+      }
+
 
       if (selectedLocationCoords) {
         const initials = fullName.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase() || 'P';
         const mapUser: MockUserPin = {
-          id: user.uid,
+          id: user.uid, // Use UID from Firebase Auth
           username: username,
           name: fullName,
           avatar: userProfile.avatar || `https://placehold.co/40x40.png?text=${initials}&c=${Math.random().toString(36).substring(7)}`,
@@ -123,7 +135,7 @@ export default function SignupPage() {
           try { mapUsers = JSON.parse(existingMapUsersString); if (!Array.isArray(mapUsers)) mapUsers = []; }
           catch (parseError) { console.error("SignupPage: Error parsing pokerConnectMapUsers from localStorage:", parseError); mapUsers = []; }
         }
-        mapUsers = mapUsers.filter(u => u.id !== mapUser.id); // Remove existing if any, then add
+        mapUsers = mapUsers.filter(u => u.id !== mapUser.id); 
         mapUsers.push(mapUser);
         localStorage.setItem("pokerConnectMapUsers", JSON.stringify(mapUsers));
         console.log("SignupPage: Added/Updated user in pokerConnectMapUsers localStorage:", mapUser);
@@ -139,8 +151,6 @@ export default function SignupPage() {
         errorMessage = "This email is already in use. Please use a different email or log in.";
       } else if (error.code === "auth/weak-password") {
         errorMessage = "Password is too weak. Please choose a stronger password.";
-      } else if (error.message && error.message.includes("firestore")) {
-        errorMessage = "Signup succeeded with Auth, but failed to save profile to database. Please contact support or try again later.";
       }
       toast({ title: "Signup Error", description: errorMessage, variant: "destructive" });
     } finally {
@@ -227,24 +237,24 @@ export default function SignupPage() {
             <div>
               <Label htmlFor="location">Location (Select from suggestions for map)</Label>
               {googleMapsApiKey ? (
-                <LoadScript
+                 <LoadScript
                   googleMapsApiKey={googleMapsApiKey}
                   libraries={libraries}
                   loadingElement={<Input placeholder="Loading location suggestions..." disabled className="mt-1" />}
                   onError={(error) => {
                     console.error("SignupPage: Error loading Google Maps for Autocomplete", error);
                     toast({
-                      title: "Location Error",
+                      title: "Location API Error",
                       description: "Could not load location suggestions. Please enter manually.",
-                      variant: "destructive",
+                      variant: "default", // Less intrusive than destructive
                     });
                   }}
                 >
                   <Autocomplete
                     onLoad={onLoad}
                     onPlaceChanged={onPlaceChanged}
-                    restrictions={{ country: "in" }}
-                    fields={["formatted_address", "geometry.location", "name"]} // Added name for better debugging
+                    restrictions={{ country: "in" }} 
+                    fields={["formatted_address", "geometry.location", "name"]}
                   >
                     <Input
                       id="location"
@@ -254,7 +264,6 @@ export default function SignupPage() {
                       value={location}
                       onChange={(e) => {
                         setLocation(e.target.value);
-                        // If user types manually after selecting, clear coords
                         if (autocompleteRef.current && autocompleteRef.current.getPlace()?.formatted_address !== e.target.value) {
                             setSelectedLocationCoords(null);
                         }
