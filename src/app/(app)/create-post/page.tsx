@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useForm, SubmitHandler } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -10,28 +10,37 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
-import { ImagePlus, Send, Edit, Loader2, X, ArrowLeft } from "lucide-react"; // Added ArrowLeft
+import { ImagePlus, Send, Edit, Loader2, X, ArrowLeft } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useRouter, useSearchParams } from "next/navigation";
+import type { Post, User } from "@/types/post";
+
+const MAX_FILE_SIZE_MB = 5; // Max 5MB for Data URI storage
+const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
 
 const createPostSchema = z.object({
   postContent: z.string().min(1, "Post content cannot be empty.").max(1000, "Post content is too long."),
-  mediaFile: z.any().optional(),
+  // We don't use react-hook-form to directly manage the file input for Data URI conversion
 });
 
 type CreatePostFormValues = z.infer<typeof createPostSchema>;
 
+const USER_POSTS_STORAGE_KEY = "pokerConnectUserPosts";
+
 export default function CreatePostPage() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null); // This will hold the Data URI
   const [isLoading, setIsLoading] = useState(false);
   const { toast } = useToast();
   const router = useRouter();
   const searchParams = useSearchParams();
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const editPostId = searchParams.get("editPostId");
-  const editContent = searchParams.get("editContent");
-  const editImage = searchParams.get("editImage"); 
+  // editContent and editImage will be used to prefill, but actual post data comes from localStorage for editing
+  const initialEditContent = searchParams.get("editContent"); 
+  const initialEditImage = searchParams.get("editImage"); // This would be a Data URI if editing a post with an image
+
   const isEditMode = !!editPostId;
 
   const form = useForm<CreatePostFormValues>({
@@ -42,22 +51,78 @@ export default function CreatePostPage() {
   });
 
   useEffect(() => {
-    if (isEditMode && editContent) {
-      form.setValue("postContent", decodeURIComponent(editContent));
+    if (isEditMode) {
+      try {
+        const storedPostsString = localStorage.getItem(USER_POSTS_STORAGE_KEY);
+        if (storedPostsString) {
+          const storedPosts: Post[] = JSON.parse(storedPostsString);
+          const postToEdit = storedPosts.find(p => p.id === editPostId);
+          if (postToEdit) {
+            form.setValue("postContent", postToEdit.content);
+            if (postToEdit.image) {
+              setPreviewUrl(postToEdit.image); // This is the Data URI from localStorage
+            }
+          } else {
+             // Fallback if post not found in storage, use URL params (less reliable for image)
+            if (initialEditContent) form.setValue("postContent", decodeURIComponent(initialEditContent));
+            if (initialEditImage) setPreviewUrl(decodeURIComponent(initialEditImage));
+          }
+        } else if (initialEditContent) { // Fallback if no local storage item at all
+            form.setValue("postContent", decodeURIComponent(initialEditContent));
+            if (initialEditImage) setPreviewUrl(decodeURIComponent(initialEditImage));
+        }
+      } catch (error) {
+        console.error("Error loading post for editing from localStorage:", error);
+        toast({ title: "Error", description: "Could not load post data for editing.", variant: "destructive" });
+        // Fallback to URL params if localStorage fails
+        if (initialEditContent) form.setValue("postContent", decodeURIComponent(initialEditContent));
+        if (initialEditImage) setPreviewUrl(decodeURIComponent(initialEditImage));
+      }
     }
-    if (isEditMode && editImage) {
-        setPreviewUrl(decodeURIComponent(editImage));
-    }
-  }, [isEditMode, editContent, editImage, form]);
+  }, [isEditMode, editPostId, initialEditContent, initialEditImage, form]);
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
+      if (file.size > MAX_FILE_SIZE_BYTES) {
+        toast({
+          title: "File Too Large",
+          description: `Please select a file smaller than ${MAX_FILE_SIZE_MB}MB. Videos are not recommended for local storage.`,
+          variant: "destructive",
+        });
+        if (fileInputRef.current) {
+          fileInputRef.current.value = ""; // Reset file input
+        }
+        setSelectedFile(null);
+        setPreviewUrl(null);
+        return;
+      }
+
+      // Only process images for Data URI for localStorage to be safe
+      if (!file.type.startsWith("image/")) {
+        toast({
+          title: "Unsupported File Type",
+          description: "For local storage, only image uploads are reliably supported. Video Data URIs can be too large.",
+          variant: "destructive",
+        });
+         if (fileInputRef.current) {
+          fileInputRef.current.value = "";
+        }
+        setSelectedFile(null);
+        setPreviewUrl(null);
+        return;
+      }
+      
       setSelectedFile(file);
       const reader = new FileReader();
       reader.onloadend = () => {
-        setPreviewUrl(reader.result as string);
+        setPreviewUrl(reader.result as string); // This is the Data URI
       };
+      reader.onerror = () => {
+        toast({ title: "Error", description: "Could not read the selected file.", variant: "destructive"});
+        setSelectedFile(null);
+        setPreviewUrl(null);
+      }
       reader.readAsDataURL(file);
     } else {
       setSelectedFile(null);
@@ -65,27 +130,95 @@ export default function CreatePostPage() {
     }
   };
 
-  const onSubmit: SubmitHandler<CreatePostFormValues> = async (data) => {
-    setIsLoading(true);
-    console.log(isEditMode ? "Updating post with data:" : "Creating post with data:", data);
-    console.log("Selected file:", selectedFile);
-    console.log("Post ID (if editing):", editPostId);
-
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 1500));
-
-    toast({
-      title: isEditMode ? "Post Updated!" : "Post Created!",
-      description: isEditMode ? "Your changes have been saved." : "Your thoughts have been shared with the community.",
-    });
-    
-    form.reset();
+  const clearMedia = () => {
     setSelectedFile(null);
     setPreviewUrl(null);
-    setIsLoading(false);
-    
-    // Navigate back to My Posts if editing, or Home if creating a new post
-    router.push(isEditMode ? "/my-posts" : "/home"); 
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+    // If in edit mode and an existing image was being shown (from localStorage initially, or from URL fallback)
+    // we don't need to manipulate URL params here as the main source of truth for edit is localStorage or the new file.
+    // The X button just clears the current selection/preview.
+  };
+
+  const onSubmit: SubmitHandler<CreatePostFormValues> = async (data) => {
+    setIsLoading(true);
+
+    let loggedInUser: User | null = null;
+    try {
+        const loggedInUserString = localStorage.getItem("loggedInUser");
+        if (loggedInUserString) {
+            const parsedUser = JSON.parse(loggedInUserString);
+            loggedInUser = {
+                name: parsedUser.fullName || parsedUser.username || "Anonymous",
+                avatar: `https://placehold.co/100x100.png?text=${(parsedUser.fullName || parsedUser.username || "A").substring(0,1)}`,
+                handle: `@${parsedUser.username || 'anonymous'}`
+            };
+        } else {
+             loggedInUser = { name: "Player One", avatar: "https://placehold.co/100x100.png", handle: "@playerone" }; // Fallback mock
+        }
+    } catch (e) {
+        console.error("Error getting logged in user for post:", e);
+        loggedInUser = { name: "Player One", avatar: "https://placehold.co/100x100.png", handle: "@playerone" }; // Fallback mock
+    }
+
+
+    try {
+      const storedPostsString = localStorage.getItem(USER_POSTS_STORAGE_KEY);
+      let posts: Post[] = storedPostsString ? JSON.parse(storedPostsString) : [];
+
+      if (isEditMode && editPostId) {
+        // Editing existing post
+        posts = posts.map(p => {
+          if (p.id === editPostId) {
+            return {
+              ...p,
+              content: data.postContent,
+              image: previewUrl || undefined, // Use new Data URI, or undefined if cleared
+              timestamp: new Date().toLocaleString(), // Update timestamp
+            };
+          }
+          return p;
+        });
+      } else {
+        // Creating new post
+        const newPost: Post = {
+          id: `post_${Date.now()}_${Math.random().toString(36).substring(2,9)}`,
+          user: loggedInUser!,
+          content: data.postContent,
+          image: previewUrl || undefined, // Data URI if present
+          imageAiHint: selectedFile ? "user uploaded image" : undefined,
+          likes: 0,
+          comments: 0,
+          shares: 0,
+          timestamp: new Date().toLocaleString(),
+        };
+        posts = [newPost, ...posts]; // Add to the beginning
+      }
+      
+      localStorage.setItem(USER_POSTS_STORAGE_KEY, JSON.stringify(posts));
+      
+      toast({
+        title: isEditMode ? "Post Updated!" : "Post Created!",
+        description: isEditMode ? "Your changes have been saved to local storage." : "Your thoughts have been saved to local storage.",
+      });
+      
+      form.reset();
+      setSelectedFile(null);
+      setPreviewUrl(null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      router.push("/my-posts");
+
+    } catch (error) {
+      console.error("Error saving post to localStorage:", error);
+      toast({
+        title: "Storage Error",
+        description: "Could not save your post. Local storage might be full or unavailable.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -96,7 +229,7 @@ export default function CreatePostPage() {
             <div>
               <CardTitle className="text-2xl">{isEditMode ? "Edit Your Post" : "Share Your Poker Story"}</CardTitle>
               <CardDescription>
-                {isEditMode ? "Make changes to your post below." : "Post updates, ask questions, or share your experiences with the PokerConnect community."}
+                {isEditMode ? "Make changes to your post below." : "Post updates, ask questions, or share your experiences. Images are saved locally."}
               </CardDescription>
             </div>
             {isEditMode && (
@@ -122,7 +255,7 @@ export default function CreatePostPage() {
             </div>
             
             <div>
-              <Label htmlFor="mediaFile">Add Image or Video (Optional)</Label>
+              <Label htmlFor="mediaFile">Add Image (Optional, max {MAX_FILE_SIZE_MB}MB)</Label>
               <div className="mt-2 flex flex-col items-center justify-center px-6 pt-5 pb-6 border-2 border-dashed rounded-md hover:border-primary transition-colors">
                 {!previewUrl && (
                   <div className="space-y-1 text-center">
@@ -132,62 +265,42 @@ export default function CreatePostPage() {
                         htmlFor="mediaFile-upload"
                         className="relative cursor-pointer rounded-md font-medium text-primary hover:text-primary/80 focus-within:outline-none focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-primary"
                       >
-                        <span>Upload a file</span>
+                        <span>Upload an image</span>
                         <Input 
                           id="mediaFile-upload" 
                           type="file" 
                           className="sr-only"
-                          accept="image/*,video/*"
-                          onChange={handleFileChange} 
+                          accept="image/*" // Primarily images for localStorage
+                          onChange={handleFileChange}
+                          ref={fileInputRef}
                         />
                       </label>
                       <p className="pl-1">or drag and drop</p>
                     </div>
-                    <p className="text-xs text-muted-foreground">PNG, JPG, GIF, MP4, MOV up to 50MB</p>
+                    <p className="text-xs text-muted-foreground">PNG, JPG, GIF up to {MAX_FILE_SIZE_MB}MB</p>
                   </div>
                 )}
                 {previewUrl && (
                   <div className="mt-2 w-full flex justify-center">
-                    <div className="relative inline-block"> {/* Wrapper for preview and X button */}
-                      {selectedFile?.type.startsWith("image/") || (previewUrl && !selectedFile && editImage?.match(/\.(jpeg|jpg|gif|png)$/) != null) ? (
+                    <div className="relative inline-block">
+                      {previewUrl.startsWith("data:image/") ? (
                         <img src={previewUrl} alt="Preview" className="max-h-60 rounded-md" data-ai-hint="image preview" />
-                      ) : selectedFile?.type.startsWith("video/") || (previewUrl && !selectedFile && editImage?.match(/\.(mp4|mov|avi)$/) != null) ? (
-                        <video src={previewUrl} controls className="max-h-60 rounded-md" data-ai-hint="video preview" />
-                      ) : selectedFile ? (
+                      ) : ( // Fallback for potentially other Data URIs, though we restrict to images
                          <div className="p-4 bg-muted rounded-md text-sm max-h-60 w-full text-left">
-                           <p>Cannot preview this file type.</p>
-                           <p className="truncate">{selectedFile.name}</p>
-                         </div>
-                      ) : ( // If previewUrl exists but not selectedFile (i.e. from editImage) and not image/video
-                          <div className="p-4 bg-muted rounded-md text-sm max-h-60 w-full text-left">
-                           <p>Preview for existing media (if any).</p>
-                           <a href={previewUrl} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">View media</a>
+                           <p>Preview for selected media.</p>
+                           <p className="truncate">{selectedFile?.name || 'Existing media'}</p>
                          </div>
                       )}
-
-                      {/* X button to remove media */}
-                      {(selectedFile || (isEditMode && editImage && previewUrl)) && (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => {
-                              setSelectedFile(null);
-                              setPreviewUrl(null);
-                              // Reset the file input value so the same file can be selected again if needed
-                              (document.getElementById('mediaFile-upload') as HTMLInputElement).value = '';
-                              // If in edit mode and an existing image was being shown, remove it from the URL params
-                              if (isEditMode && editImage) {
-                                  // This will reload the page with the image query param removed
-                                  router.replace(`/create-post?editPostId=${editPostId}&editContent=${encodeURIComponent(form.getValues("postContent"))}`);
-                              }
-                          }}
-                          className="absolute -top-2 -right-2 bg-destructive text-destructive-foreground hover:bg-destructive/90 p-1 rounded-full h-6 w-6 z-10"
-                          aria-label="Remove media"
-                        >
-                          <X className="h-4 w-4" />
-                        </Button>
-                      )}
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        onClick={clearMedia}
+                        className="absolute -top-2 -right-2 bg-destructive text-destructive-foreground hover:bg-destructive/90 p-1 rounded-full h-6 w-6 z-10"
+                        aria-label="Remove media"
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
                     </div>
                   </div>
                 )}
@@ -215,3 +328,5 @@ export default function CreatePostPage() {
     </div>
   );
 }
+
+    

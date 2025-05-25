@@ -1,46 +1,94 @@
 
-"use client"; // Make this a client component
+"use client"; 
 
-import { useState } from "react"; // Import useState
+import { useState, useEffect } from "react"; 
 import { Button } from "@/components/ui/button";
-import { Card, CardDescription, CardTitle } from "@/components/ui/card";
+import { Card, CardDescription, CardTitle, CardContent } from "@/components/ui/card"; // Added CardContent
 import Link from "next/link";
 import { PlusCircle } from "lucide-react";
 import { PostCard } from "@/components/post-card";
 import type { Post } from "@/types/post";
+import { useToast } from "@/hooks/use-toast"; // Import useToast
 
-// Initial data - will be moved to state
-const initialUserPostsData: Post[] = [
-  {
-    id: "mypost1",
-    user: { name: "Player One", avatar: "https://placehold.co/100x100.png", handle: "@playerone" },
-    content: "Had a great session last night! Practicing my bluffing game. #PokerJourney",
-    image: "https://placehold.co/600x400.png?t=mp1",
-    imageAiHint: "poker table chips",
-    likes: 45,
-    comments: 8,
-    shares: 2,
-    timestamp: "1d ago",
-  },
-  {
-    id: "mypost2",
-    user: { name: "Player One", avatar: "https://placehold.co/100x100.png", handle: "@playerone" },
-    content: "Thinking about starting a study group for GTO strategies. Who's interested?",
-    likes: 22,
-    comments: 12,
-    shares: 1,
-    timestamp: "3d ago",
-  },
-];
+const USER_POSTS_STORAGE_KEY = "pokerConnectUserPosts";
 
 export default function MyPostsPage() {
-  const [userPosts, setUserPosts] = useState<Post[]>(initialUserPostsData); // Manage posts in state
+  const [userPosts, setUserPosts] = useState<Post[]>([]);
+  const [isLoading, setIsLoading] = useState(true); // For loading state
+  const { toast } = useToast(); // Initialize toast
 
-  // Function to handle deleting a post
+  useEffect(() => {
+    setIsLoading(true);
+    try {
+      const storedPostsString = localStorage.getItem(USER_POSTS_STORAGE_KEY);
+      if (storedPostsString) {
+        const storedPosts: Post[] = JSON.parse(storedPostsString);
+        // Filter posts to show only those by the "logged-in" user (mocked for now)
+        // In a real app, you'd compare against the actual logged-in user's ID/username
+        const loggedInUserString = localStorage.getItem("loggedInUser");
+        let currentUsername = "playerone"; // Default mock username
+        if (loggedInUserString) {
+            try {
+                const loggedInUser = JSON.parse(loggedInUserString);
+                currentUsername = loggedInUser.username || currentUsername;
+            } catch (e) { console.error("Error parsing loggedInUser for MyPosts", e); }
+        }
+        
+        // Assuming post.user.handle is like "@username"
+        const filteredPosts = storedPosts.filter(post => post.user.handle === `@${currentUsername}`);
+        setUserPosts(filteredPosts);
+
+      } else {
+        setUserPosts([]); // No posts stored yet
+      }
+    } catch (error) {
+      console.error("Error loading posts from localStorage:", error);
+      toast({
+        title: "Error Loading Posts",
+        description: "Could not retrieve your posts from local storage.",
+        variant: "destructive",
+      });
+      setUserPosts([]);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [toast]); // Add toast to dependency array if used in effect (though not directly here, good practice)
+
   const handleDeletePost = (postId: string) => {
-    setUserPosts(prevPosts => prevPosts.filter(post => post.id !== postId));
-    // The toast notification will still be handled by PostCard
+    try {
+      const updatedPosts = userPosts.filter(post => post.id !== postId);
+      setUserPosts(updatedPosts);
+      
+      // Update localStorage by re-fetching all posts and removing the specific one
+      // This is safer than just saving 'updatedPosts' if other users' posts are stored globally.
+      // However, for 'pokerConnectUserPosts', it's expected to be only the current user's posts if filtered on creation.
+      // For simplicity, we'll update based on the current `userPosts` state, assuming it's correctly loaded/filtered.
+      
+      const allStoredPostsString = localStorage.getItem(USER_POSTS_STORAGE_KEY);
+      if (allStoredPostsString) {
+          let allStoredPosts: Post[] = JSON.parse(allStoredPostsString);
+          allStoredPosts = allStoredPosts.filter(p => p.id !== postId);
+          localStorage.setItem(USER_POSTS_STORAGE_KEY, JSON.stringify(allStoredPosts));
+      }
+
+      // Toast notification is handled by PostCard, but we could add another one here if needed.
+    } catch (error) {
+      console.error("Error deleting post from localStorage:", error);
+      toast({
+        title: "Error Deleting Post",
+        description: "Could not remove the post from local storage.",
+        variant: "destructive",
+      });
+    }
   };
+
+  if (isLoading) {
+    return (
+        <div className="container mx-auto max-w-2xl text-center py-10">
+            <p>Loading your posts...</p>
+        </div>
+    );
+  }
 
   return (
     <div className="container mx-auto max-w-2xl">
@@ -56,11 +104,15 @@ export default function MyPostsPage() {
       <div className="space-y-6">
         {userPosts.length === 0 && (
           <Card className="text-center p-8 shadow-lg rounded-xl">
-            <CardTitle className="text-xl mb-2">No Posts Yet!</CardTitle>
-            <CardDescription className="mb-4">Start sharing your poker journey with the community.</CardDescription>
-            <Link href="/create-post" passHref>
-              <Button>Create Your First Post</Button>
-            </Link>
+            <CardHeader> {/* Wrap title and description in CardHeader */}
+              <CardTitle className="text-xl mb-2">No Posts Yet!</CardTitle>
+              <CardDescription className="mb-4">Start sharing your poker journey with the community.</CardDescription>
+            </CardHeader>
+            <CardContent> {/* Wrap button in CardContent for consistency or CardFooter */}
+              <Link href="/create-post" passHref>
+                <Button>Create Your First Post</Button>
+              </Link>
+            </CardContent>
           </Card>
         )}
         {userPosts.map((post) => (
@@ -68,10 +120,12 @@ export default function MyPostsPage() {
             key={post.id} 
             post={post} 
             showManagementControls={true} 
-            onDeletePost={handleDeletePost} // Pass the delete handler
+            onDeletePost={handleDeletePost}
           />
         ))}
       </div>
     </div>
   );
 }
+
+    
