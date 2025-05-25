@@ -1,6 +1,6 @@
 
 // src/app/signup/page.tsx
-"use client"; 
+"use client";
 
 import { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
@@ -8,11 +8,11 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter }
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import Link from "next/link";
-import { UserPlus } from "lucide-react";
+import { UserPlus, Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/hooks/use-toast";
 import { LoadScript, Autocomplete } from "@react-google-maps/api";
-import type { MockUserPin } from "@/app/(app)/map/page";
+import type { MockUserPin } from "@/app/(app)/map/page"; // Ensure this path is correct and type is exported
 import { auth, firestore } from "@/lib/firebase";
 import { createUserWithEmailAndPassword } from "firebase/auth";
 import { doc, setDoc } from "firebase/firestore";
@@ -23,6 +23,7 @@ const libraries: ("places")[] = ['places'];
 export default function SignupPage() {
   const router = useRouter();
   const { toast } = useToast();
+  const [isLoading, setIsLoading] = useState(false);
 
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
@@ -31,7 +32,7 @@ export default function SignupPage() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [location, setLocation] = useState("");
   const [selectedLocationCoords, setSelectedLocationCoords] = useState<{ lat: number; lng: number } | null>(null);
-  
+
   const autocompleteRef = useRef<google.maps.places.Autocomplete | null>(null);
   const locationInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -50,69 +51,68 @@ export default function SignupPage() {
             lng: place.geometry.location.lng(),
           };
           setSelectedLocationCoords(coords);
-          console.log("Selected location coordinates:", coords);
+          console.log("SignupPage: Selected location via Autocomplete:", place.formatted_address, "Coords:", coords);
         } else {
           setSelectedLocationCoords(null);
-          console.warn("Autocomplete place selected, but no geometry/location data found.");
+          console.warn("SignupPage: Autocomplete place selected, but no geometry/location data found.");
         }
       } else if (locationInputRef.current) {
+        // User typed something but didn't select from autocomplete
         setLocation(locationInputRef.current.value);
-        setSelectedLocationCoords(null); 
+        setSelectedLocationCoords(null);
+        console.log("SignupPage: Location input changed manually:", locationInputRef.current.value);
       }
     }
   };
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    setIsLoading(true);
 
     if (password !== confirmPassword) {
-      toast({
-        title: "Signup Error",
-        description: "Passwords do not match.",
-        variant: "destructive",
-      });
+      toast({ title: "Signup Error", description: "Passwords do not match.", variant: "destructive" });
+      setIsLoading(false);
       return;
     }
 
     if (!fullName || !email || !username || !password || !location) {
-      toast({
-        title: "Signup Error",
-        description: "Please fill in all required fields.",
-        variant: "destructive",
-      });
+      toast({ title: "Signup Error", description: "Please fill in all required fields.", variant: "destructive" });
+      setIsLoading(false);
       return;
     }
 
     try {
-      // Create user with Firebase Auth
+      console.log("SignupPage: Attempting Firebase Auth signup for email:", email);
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
+      console.log("SignupPage: Firebase Auth signup successful. UID:", user.uid);
 
-      // Store additional user info in Firestore
       const userProfile = {
         uid: user.uid,
         fullName,
-        email, // Firebase Auth already stores email, but good to have in profile doc
+        email,
         username,
-        location, // Text location
-        locationCoords: selectedLocationCoords, // Geocoded location if available
-        bio: "", 
-        avatar: "", // Placeholder, to be updated via Firebase Storage URL later
-        coverImage: "", // Placeholder
+        location,
+        locationCoords: selectedLocationCoords || null, // Ensure it's explicitly null if not set
+        bio: "",
+        avatar: "", // Placeholder for Firebase Storage URL
+        coverImage: "", // Placeholder for Firebase Storage URL
         createdAt: new Date().toISOString(),
       };
-      await setDoc(doc(firestore, "users", user.uid), userProfile);
 
-      // Add to pokerConnectMapUsers in localStorage if coordinates exist
+      console.log("SignupPage: Preparing to write to Firestore. UserProfile object:", JSON.stringify(userProfile, null, 2));
+      await setDoc(doc(firestore, "users", user.uid), userProfile);
+      console.log("SignupPage: User profile successfully written to Firestore for UID:", user.uid);
+
       if (selectedLocationCoords) {
-        const initials = fullName.split(' ').map(n => n[0]).join('').substring(0,2).toUpperCase() || 'P';
-        const mapUser: MockUserPin = { 
-          id: user.uid, // Use Firebase UID for map user ID
+        const initials = fullName.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase() || 'P';
+        const mapUser: MockUserPin = {
+          id: user.uid,
           username: username,
           name: fullName,
           avatar: userProfile.avatar || `https://placehold.co/40x40.png?text=${initials}&c=${Math.random().toString(36).substring(7)}`,
           position: selectedLocationCoords,
-          aiHint: "profile picture",
+          aiHint: "profile picture user",
           bio: userProfile.bio,
           coverImage: userProfile.coverImage,
         };
@@ -120,37 +120,31 @@ export default function SignupPage() {
         const existingMapUsersString = localStorage.getItem("pokerConnectMapUsers");
         let mapUsers: MockUserPin[] = [];
         if (existingMapUsersString) {
-          try { mapUsers = JSON.parse(existingMapUsersString); if (!Array.isArray(mapUsers)) mapUsers = []; } 
-          catch (parseError) { console.error("Error parsing map users:", parseError); mapUsers = []; }
+          try { mapUsers = JSON.parse(existingMapUsersString); if (!Array.isArray(mapUsers)) mapUsers = []; }
+          catch (parseError) { console.error("SignupPage: Error parsing pokerConnectMapUsers from localStorage:", parseError); mapUsers = []; }
         }
-        mapUsers = mapUsers.filter(u => u.id !== mapUser.id);
+        mapUsers = mapUsers.filter(u => u.id !== mapUser.id); // Remove existing if any, then add
         mapUsers.push(mapUser);
         localStorage.setItem("pokerConnectMapUsers", JSON.stringify(mapUsers));
-        toast({
-          title: "Signup Successful!",
-          description: `Welcome, ${fullName}! Your location will be on the map. Please log in.`,
-        });
-      } else {
-         toast({
-          title: "Signup Successful (Location Note)",
-          description: `Welcome, ${fullName}! Location coordinates not found, you might not appear on map. Please log in.`,
-          duration: 7000, 
-        });
+        console.log("SignupPage: Added/Updated user in pokerConnectMapUsers localStorage:", mapUser);
       }
+
+      toast({ title: "Signup Successful!", description: `Welcome, ${fullName}! Please log in.`, });
       router.push("/login");
+
     } catch (error: any) {
-      console.error("Error signing up:", error);
+      console.error("SignupPage: Error signing up:", error);
       let errorMessage = "Could not sign up. Please try again.";
       if (error.code === "auth/email-already-in-use") {
         errorMessage = "This email is already in use. Please use a different email or log in.";
       } else if (error.code === "auth/weak-password") {
         errorMessage = "Password is too weak. Please choose a stronger password.";
+      } else if (error.message && error.message.includes("firestore")) {
+        errorMessage = "Signup succeeded with Auth, but failed to save profile to database. Please contact support or try again later.";
       }
-      toast({
-        title: "Signup Error",
-        description: errorMessage,
-        variant: "destructive",
-      });
+      toast({ title: "Signup Error", description: errorMessage, variant: "destructive" });
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -159,7 +153,6 @@ export default function SignupPage() {
       console.warn("SignupPage: NEXT_PUBLIC_GOOGLE_MAPS_API_KEY is not set. Location autocomplete will be disabled.");
     }
   }, []);
-
 
   return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-br from-background to-muted/50 p-4">
@@ -174,9 +167,9 @@ export default function SignupPage() {
           <CardContent className="space-y-5">
             <div>
               <Label htmlFor="fullName">Full Name</Label>
-              <Input 
-                id="fullName" 
-                placeholder="e.g., John Wick" 
+              <Input
+                id="fullName"
+                placeholder="e.g., John Wick"
                 className="mt-1"
                 value={fullName}
                 onChange={(e) => setFullName(e.target.value)}
@@ -185,10 +178,10 @@ export default function SignupPage() {
             </div>
             <div>
               <Label htmlFor="email">Email Address</Label>
-              <Input 
-                id="email" 
-                type="email" 
-                placeholder="you@example.com" 
+              <Input
+                id="email"
+                type="email"
+                placeholder="you@example.com"
                 className="mt-1"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -197,9 +190,9 @@ export default function SignupPage() {
             </div>
             <div>
               <Label htmlFor="username">Username</Label>
-              <Input 
-                id="username" 
-                placeholder="e.g., johnwick" 
+              <Input
+                id="username"
+                placeholder="e.g., johnwick"
                 className="mt-1"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
@@ -208,22 +201,23 @@ export default function SignupPage() {
             </div>
             <div>
               <Label htmlFor="password">Password</Label>
-              <Input 
-                id="password" 
-                type="password" 
-                placeholder="••••••••" 
+              <Input
+                id="password"
+                type="password"
+                placeholder="•••••••• (min. 6 characters)"
                 className="mt-1"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
+                minLength={6}
               />
             </div>
-             <div>
+            <div>
               <Label htmlFor="confirmPassword">Confirm Password</Label>
-              <Input 
-                id="confirmPassword" 
-                type="password" 
-                placeholder="••••••••" 
+              <Input
+                id="confirmPassword"
+                type="password"
+                placeholder="••••••••"
                 className="mt-1"
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
@@ -236,9 +230,9 @@ export default function SignupPage() {
                 <LoadScript
                   googleMapsApiKey={googleMapsApiKey}
                   libraries={libraries}
-                  loadingElement={<Input placeholder="Loading location..." disabled className="mt-1" />}
+                  loadingElement={<Input placeholder="Loading location suggestions..." disabled className="mt-1" />}
                   onError={(error) => {
-                    console.error("Error loading Google Maps for Autocomplete", error);
+                    console.error("SignupPage: Error loading Google Maps for Autocomplete", error);
                     toast({
                       title: "Location Error",
                       description: "Could not load location suggestions. Please enter manually.",
@@ -249,28 +243,31 @@ export default function SignupPage() {
                   <Autocomplete
                     onLoad={onLoad}
                     onPlaceChanged={onPlaceChanged}
-                    restrictions={{ country: "in" }} 
-                    fields={["formatted_address", "geometry.location", "name"]}
+                    restrictions={{ country: "in" }}
+                    fields={["formatted_address", "geometry.location", "name"]} // Added name for better debugging
                   >
                     <Input
                       id="location"
                       type="text"
                       placeholder="e.g., Mumbai, India"
                       className="mt-1"
-                      value={location} 
+                      value={location}
                       onChange={(e) => {
                         setLocation(e.target.value);
-                        setSelectedLocationCoords(null); 
-                      }} 
-                      ref={locationInputRef} 
+                        // If user types manually after selecting, clear coords
+                        if (autocompleteRef.current && autocompleteRef.current.getPlace()?.formatted_address !== e.target.value) {
+                            setSelectedLocationCoords(null);
+                        }
+                      }}
+                      ref={locationInputRef}
                       required
                     />
                   </Autocomplete>
                 </LoadScript>
               ) : (
-                <Input 
-                  id="location" 
-                  placeholder="e.g., Mumbai, India (Location suggestions unavailable)" 
+                <Input
+                  id="location"
+                  placeholder="e.g., Mumbai, India (Location suggestions unavailable)"
                   className="mt-1"
                   value={location}
                   onChange={(e) => setLocation(e.target.value)}
@@ -280,8 +277,9 @@ export default function SignupPage() {
             </div>
           </CardContent>
           <CardFooter className="flex flex-col gap-4">
-            <Button type="submit" className="w-full text-lg py-3">
-              <UserPlus className="mr-2 h-5 w-5" /> Sign Up
+            <Button type="submit" className="w-full text-lg py-3" disabled={isLoading}>
+              {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <UserPlus className="mr-2 h-5 w-5" />}
+              {isLoading ? "Signing Up..." : "Sign Up"}
             </Button>
             <p className="text-sm text-muted-foreground">
               Already have an account?{" "}
