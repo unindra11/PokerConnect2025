@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect } from "react";
 import { GoogleMap, LoadScript, Marker, InfoWindow } from "@react-google-maps/api";
 import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -63,97 +63,15 @@ const googleMapsApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
 // 4. Add the current development URL (e.g., https://YOUR_DEV_DOMAIN.cloudworkstations.dev/* or http://localhost:PORT/*)
 // 5. Save changes. It might take a few minutes to propagate.
 
-// Helper function to generate a round SVG marker
-const generateRoundMarkerIcon = (
-  fillColor: string,
-  borderColor: string,
-  diameter: number
-): google.maps.Icon | undefined => {
-  console.log(`%cgenerateRoundMarkerIcon CALLED with fillColor: ${fillColor}, borderColor: ${borderColor}, diameter: ${diameter}`, 'color: #FFD700;');
-  const radius = diameter / 2;
-  const strokeWidth = 2;
-
-  const svg = `
-    <svg width="${diameter}" height="${diameter}" viewBox="0 0 ${diameter} ${diameter}" xmlns="http://www.w3.org/2000/svg">
-      <circle 
-        cx="${radius}" 
-        cy="${radius}" 
-        r="${radius - strokeWidth}" 
-        fill="${fillColor}" 
-      />
-      <circle
-        cx="${radius}"
-        cy="${radius}"
-        r="${radius - strokeWidth / 2}"
-        fill="none"
-        stroke="${borderColor}"
-        stroke-width="${strokeWidth}"
-      />
-    </svg>
-  `.replace(/\n\s*/g, "").replace(/\s\s+/g, " ");
-
-  if (typeof window !== 'undefined' && window.google?.maps?.Size && window.google?.maps?.Point) {
-    const size = new window.google.maps.Size(diameter, diameter);
-    const anchorPoint = new window.google.maps.Point(radius, radius);
-    const iconObject = {
-      url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`,
-      scaledSize: size,
-      anchor: anchorPoint,
-    };
-    console.log('%cgenerateRoundMarkerIcon: Successfully created icon object.', 'color: green;');
-    return iconObject;
-  }
-  console.warn("%cgenerateRoundMarkerIcon: Google Maps API objects (Size/Point) not ready, or not on client. Default marker may be used. fillColor was:", 'color: orange;', fillColor);
-  return undefined; 
-};
-
 
 export default function MapPage() {
   const [selectedUser, setSelectedUser] = useState<MockUserPin | null>(null);
   const [mapReady, setMapReady] = useState(false);
-  const [resolvedPrimaryColor, setResolvedPrimaryColor] = useState<string | null>(null);
 
   console.log(
-    `%cMapPage render: mapReady=${mapReady}, resolvedPrimaryColor=${resolvedPrimaryColor}, selectedUser=${selectedUser?.id || 'null'}`,
+    `%cMapPage render: mapReady=${mapReady}, selectedUser=${selectedUser?.id || 'null'}`,
     'color: blue; font-weight: bold;'
   );
-
-  useEffect(() => {
-    console.log('%cMapPage: useEffect for color resolution - MOUNTING', 'color: green;');
-    if (typeof window !== 'undefined') {
-      const rootStyle = getComputedStyle(document.documentElement);
-      const primaryVar = rootStyle.getPropertyValue('--primary').trim(); 
-      if (primaryVar) {
-        // CSS HSL variables are typically stored as space-separated numbers: H S% L% or H S L
-        // The `hsl()` CSS function can take `hsl(H, S%, L%)` or `hsl(H S L / A)`.
-        // We need to ensure the format is correct for SVG/CSS string usage.
-        // Example: if primaryVar is "36 100% 50%", colorString should be "hsl(36, 100%, 50%)" or "hsl(36 100% 50%)".
-        // Let's assume the variable is stored as "H S% L%" or "H S L".
-        // For simplicity, we'll use space-separated values as they are common for CSS vars.
-        const colorString = `hsl(${primaryVar})`; // e.g., "hsl(36 100% 50%)"
-        console.log(`%cMapPage: Resolved primary color from CSS variable '--primary' ("${primaryVar}") to: "${colorString}"`, 'color: green;');
-        setResolvedPrimaryColor(colorString);
-      } else {
-        console.warn("%cMapPage: --primary CSS variable not found. Falling back to default 'orange'.", 'color: orange;');
-        setResolvedPrimaryColor('orange'); 
-      }
-    }
-    return () => {
-      console.log('%cMapPage: useEffect for color resolution - UNMOUNTING', 'color: red;');
-    };
-  }, []);
-
-  const processedUsersOnMap = useMemo(() => {
-    if (!mapReady || !resolvedPrimaryColor) {
-      console.log('%cprocessedUsersOnMap: Not ready or no color, returning empty.', 'color: orange;');
-      return [];
-    }
-    console.log('%cprocessedUsersOnMap: Generating markers with color:', 'color: purple;', resolvedPrimaryColor);
-    return mockUsersData.map((user) => {
-      const icon = generateRoundMarkerIcon(resolvedPrimaryColor, 'hsl(240 50% 50%)', 35);
-      return { ...user, icon };
-    });
-  }, [mapReady, resolvedPrimaryColor]);
 
 
   if (!googleMapsApiKey) {
@@ -201,55 +119,53 @@ export default function MapPage() {
             }}
             loadingElement={<div style={{ height: "100%" }}>Loading map...</div>}
           >
-            <GoogleMap
-              mapContainerStyle={containerStyle}
-              center={initialCenter}
-              zoom={5}
-              onLoad={() => console.log("%cGoogleMap: component mounted (onLoad event).", 'color: purple;')}
-              onUnmount={() => console.log("%cGoogleMap: component unmounted (onUnmount event).", 'color: red;')}
-            >
-              {processedUsersOnMap.map((user) => {
-                // console.log(`%cGoogleMap Child Loop: Rendering marker for ${user.id}. Icon object:`, 'color: teal', user.icon);
-                if (!user.icon) {
-                  console.warn(`%cGoogleMap Child Loop: Custom icon was NOT generated (is undefined) for user ${user.id}. Google Maps should use default marker.`, 'color: orange');
-                }
-                
-                return (
-                  <Marker
-                    key={user.id}
-                    position={user.position}
-                    onClick={() => {
-                      console.log(`%cMarker Click: User ${user.id} clicked. Setting selectedUser.`, 'color: brown');
-                      setSelectedUser(user);
-                    }}
-                    icon={user.icon} // If icon is undefined, Google Maps uses its default marker
-                  />
-                );
-              })}
+            {mapReady && (
+              <GoogleMap
+                mapContainerStyle={containerStyle}
+                center={initialCenter}
+                zoom={5}
+                onLoad={() => console.log("%cGoogleMap: component mounted (onLoad event).", 'color: purple;')}
+                onUnmount={() => console.log("%cGoogleMap: component unmounted (onUnmount event).", 'color: red;')}
+              >
+                {mockUsersData.map((user) => {
+                  console.log(`%cGoogleMap Child Loop: Rendering default marker for ${user.id}.`, 'color: teal');
+                  return (
+                    <Marker
+                      key={user.id}
+                      position={user.position}
+                      onClick={() => {
+                        console.log(`%cMarker Click: User ${user.id} clicked. Setting selectedUser.`, 'color: brown');
+                        setSelectedUser(user);
+                      }}
+                      // No custom icon prop, so Google Maps uses its default red pin
+                    />
+                  );
+                })}
 
-              {selectedUser && (
-                <InfoWindow
-                  position={selectedUser.position}
-                  onCloseClick={() => {
-                    console.log('%cInfoWindow: Close button clicked. Setting selectedUser to null.', 'color: brown');
-                    setSelectedUser(null);
-                  }}
-                >
-                  <div className="p-2 flex items-center space-x-3">
-                    <Avatar className="h-10 w-10">
-                      <AvatarImage src={selectedUser.avatar} alt={selectedUser.name} data-ai-hint={selectedUser.aiHint || "profile picture"} />
-                      <AvatarFallback>{selectedUser.name.substring(0,1)}</AvatarFallback>
-                    </Avatar>
-                    <div>
-                      <p className="font-semibold">{selectedUser.name}</p>
-                      <Link href={`/profile/${selectedUser.username}`} className="text-sm text-primary hover:underline">
-                        View Profile
-                      </Link>
+                {selectedUser && (
+                  <InfoWindow
+                    position={selectedUser.position}
+                    onCloseClick={() => {
+                      console.log('%cInfoWindow: Close button clicked. Setting selectedUser to null.', 'color: brown');
+                      setSelectedUser(null);
+                    }}
+                  >
+                    <div className="p-2 flex items-center space-x-3">
+                      <Avatar className="h-10 w-10">
+                        <AvatarImage src={selectedUser.avatar} alt={selectedUser.name} data-ai-hint={selectedUser.aiHint || "profile picture"} />
+                        <AvatarFallback>{selectedUser.name.substring(0,1)}</AvatarFallback>
+                      </Avatar>
+                      <div>
+                        <p className="font-semibold">{selectedUser.name}</p>
+                        <Link href={`/profile/${selectedUser.username}`} className="text-sm text-primary hover:underline">
+                          View Profile
+                        </Link>
+                      </div>
                     </div>
-                  </div>
-                </InfoWindow>
-              )}
-            </GoogleMap>
+                  </InfoWindow>
+                )}
+              </GoogleMap>
+            )}
           </LoadScript>
           <p className="text-sm text-muted-foreground mt-4">
             This map shows approximate locations of PokerConnect users in India. Click on a marker to see more details.
