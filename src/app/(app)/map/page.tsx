@@ -69,6 +69,7 @@ const generateRoundMarkerIcon = (
   borderColor: string,
   diameter: number
 ): google.maps.Icon | undefined => {
+  console.log(`%cgenerateRoundMarkerIcon CALLED with fillColor: ${fillColor}, borderColor: ${borderColor}, diameter: ${diameter}`, 'color: #FFD700;');
   const radius = diameter / 2;
   const strokeWidth = 2;
 
@@ -94,13 +95,15 @@ const generateRoundMarkerIcon = (
   if (typeof window !== 'undefined' && window.google?.maps?.Size && window.google?.maps?.Point) {
     const size = new window.google.maps.Size(diameter, diameter);
     const anchorPoint = new window.google.maps.Point(radius, radius);
-    return {
+    const iconObject = {
       url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`,
       scaledSize: size,
       anchor: anchorPoint,
     };
+    console.log('%cgenerateRoundMarkerIcon: Successfully created icon object:', 'color: green;', iconObject);
+    return iconObject;
   }
-  console.warn("Google Maps API objects (Size/Point) not ready for marker icon generation, or not on client. Default marker may be used.");
+  console.warn("%cgenerateRoundMarkerIcon: Google Maps API objects (Size/Point) not ready, or not on client. Default marker may be used. fillColor was:", 'color: orange;', fillColor);
   return undefined; 
 };
 
@@ -123,11 +126,15 @@ export default function MapPage() {
       if (primaryVar) {
         const [h, s, l] = primaryVar.split(' ');
         if (h && s && l) {
-          const colorString = `hsl(${h}, ${s}, ${l})`;
-          console.log(`%cMapPage: Resolved primary color from CSS: ${colorString}`, 'color: green;');
+          // Ensure format is suitable for CSS/SVG e.g. "hsl(H, S%, L%)" or "hsl(H S L)"
+          // CSS variables usually store H, S, L without commas.
+          // For HSL in CSS/SVG, it can be "hsl(H S L)" or "hsl(H, S%, L%)".
+          // Let's ensure the parsed parts are used correctly.
+          const colorString = `hsl(${h} ${s} ${l})`; // Using space separated values as typically stored in CSS vars
+          console.log(`%cMapPage: Resolved primary color from CSS variable '--primary' ("${primaryVar}") to: "${colorString}"`, 'color: green;');
           setResolvedPrimaryColor(colorString);
         } else {
-          console.warn("%cMapPage: Could not parse --primary CSS variable. Falling back to default 'orange'. Parsed: ", 'color: orange;', {h,s,l});
+          console.warn("%cMapPage: Could not parse --primary CSS variable. Falling back to default 'orange'. Parsed values:", 'color: orange;', {h,s,l});
           setResolvedPrimaryColor('orange'); 
         }
       } else {
@@ -174,7 +181,7 @@ export default function MapPage() {
         </CardHeader>
         <CardContent>
           <LoadScript 
-            googleMapsApiKey={googleMapsApiKey} // Already checked googleMapsApiKey is not null/undefined
+            googleMapsApiKey={googleMapsApiKey}
             onLoad={() => {
               console.log("%cLoadScript: Google Maps API script loaded successfully. Setting mapReady=true", 'color: green; font-weight: bold;');
               setMapReady(true);
@@ -194,11 +201,11 @@ export default function MapPage() {
               onUnmount={() => console.log("%cGoogleMap: component unmounted (onUnmount event).", 'color: red;')}
             >
               {mapReady && resolvedPrimaryColor && mockUsersOnMap.map((user) => {
-                console.log(`%cGoogleMap Child Loop: Generating marker for ${user.id}. Resolved color: ${resolvedPrimaryColor}`, 'color: teal');
-                const icon = generateRoundMarkerIcon(resolvedPrimaryColor, 'hsl(240, 50%, 50%)', 35);
+                console.log(`%cGoogleMap Child Loop: Attempting to generate marker for ${user.id}. resolvedPrimaryColor: ${resolvedPrimaryColor}`, 'color: teal');
+                const icon = generateRoundMarkerIcon(resolvedPrimaryColor, 'hsl(240 50% 50%)', 35); // Using space separated HSL for border too
                 
                 if (!icon) {
-                  console.warn(`%cGoogleMap Child Loop: Custom icon NOT generated for user ${user.id}. Icon was undefined. Google Maps should use default marker.`, 'color: orange');
+                  console.warn(`%cGoogleMap Child Loop: Custom icon was NOT generated (returned undefined) for user ${user.id}. Google Maps should use default marker.`, 'color: orange');
                 } else {
                   // console.log(`%cGoogleMap Child Loop: Custom icon generated for user ${user.id}`, 'color: teal', icon);
                 }
@@ -211,7 +218,7 @@ export default function MapPage() {
                       console.log(`%cMarker Click: User ${user.id} clicked. Setting selectedUser.`, 'color: brown');
                       setSelectedUser(user);
                     }}
-                    icon={icon} 
+                    icon={icon} // If icon is undefined, Google Maps uses its default marker
                   />
                 );
               })}
@@ -248,3 +255,4 @@ export default function MapPage() {
     </div>
   );
 }
+
