@@ -91,8 +91,7 @@ const generateRoundMarkerIcon = (
     </svg>
   `.replace(/\n\s*/g, "").replace(/\s\s+/g, " ");
 
-  // Ensure google.maps objects are only accessed when defined (client-side after API load)
-  if (typeof window !== 'undefined' && window.google?.maps) {
+  if (typeof window !== 'undefined' && window.google?.maps?.Size && window.google?.maps?.Point) {
     const size = new window.google.maps.Size(diameter, diameter);
     const anchorPoint = new window.google.maps.Point(radius, radius);
     return {
@@ -101,8 +100,8 @@ const generateRoundMarkerIcon = (
       anchor: anchorPoint,
     };
   }
-  console.warn("Google Maps API objects (Size/Point) not ready for marker icon generation, or not on client.");
-  return undefined; // Fallback to default marker if Google Maps API objects are not ready
+  console.warn("Google Maps API objects (Size/Point) not ready for marker icon generation, or not on client. Default marker may be used.");
+  return undefined; 
 };
 
 
@@ -111,28 +110,39 @@ export default function MapPage() {
   const [mapReady, setMapReady] = useState(false);
   const [resolvedPrimaryColor, setResolvedPrimaryColor] = useState<string | null>(null);
 
+  console.log(
+    `%cMapPage render: mapReady=${mapReady}, resolvedPrimaryColor=${resolvedPrimaryColor}, selectedUser=${selectedUser?.id || 'null'}`,
+    'color: blue; font-weight: bold;'
+  );
+
   useEffect(() => {
-    // This effect runs once on the client after initial mount.
+    console.log('%cMapPage: useEffect for color resolution - MOUNTING', 'color: green;');
     if (typeof window !== 'undefined') {
       const rootStyle = getComputedStyle(document.documentElement);
-      const primaryVar = rootStyle.getPropertyValue('--primary').trim(); // Expected format: "H S L" e.g., "36 100% 50%"
+      const primaryVar = rootStyle.getPropertyValue('--primary').trim(); 
       if (primaryVar) {
         const [h, s, l] = primaryVar.split(' ');
         if (h && s && l) {
-          setResolvedPrimaryColor(`hsl(${h}, ${s}, ${l})`);
+          const colorString = `hsl(${h}, ${s}, ${l})`;
+          console.log(`%cMapPage: Resolved primary color from CSS: ${colorString}`, 'color: green;');
+          setResolvedPrimaryColor(colorString);
         } else {
-          console.warn("Could not parse --primary CSS variable. Falling back to default marker color.");
-          setResolvedPrimaryColor('orange'); // Fallback
+          console.warn("%cMapPage: Could not parse --primary CSS variable. Falling back to default 'orange'. Parsed: ", 'color: orange;', {h,s,l});
+          setResolvedPrimaryColor('orange'); 
         }
       } else {
-        console.warn("--primary CSS variable not found. Falling back to default marker color.");
-        setResolvedPrimaryColor('orange'); // Fallback
+        console.warn("%cMapPage: --primary CSS variable not found. Falling back to default 'orange'.", 'color: orange;');
+        setResolvedPrimaryColor('orange'); 
       }
     }
+    return () => {
+      console.log('%cMapPage: useEffect for color resolution - UNMOUNTING', 'color: red;');
+    };
   }, []);
 
 
   if (!googleMapsApiKey) {
+    console.error("MapPage: NEXT_PUBLIC_GOOGLE_MAPS_API_KEY is not set.");
     return (
       <div className="container mx-auto">
         <h1 className="text-3xl font-bold mb-6">Player Map</h1>
@@ -154,6 +164,7 @@ export default function MapPage() {
     );
   }
 
+  console.log("MapPage: Rendering LoadScript component.");
   return (
     <div className="container mx-auto">
       <h1 className="text-3xl font-bold mb-6">Player Map</h1>
@@ -163,14 +174,15 @@ export default function MapPage() {
         </CardHeader>
         <CardContent>
           <LoadScript 
-            googleMapsApiKey={googleMapsApiKey}
+            googleMapsApiKey={googleMapsApiKey} // Already checked googleMapsApiKey is not null/undefined
             onLoad={() => {
-              console.log("Google Maps API script loaded successfully.");
+              console.log("%cLoadScript: Google Maps API script loaded successfully. Setting mapReady=true", 'color: green; font-weight: bold;');
               setMapReady(true);
             }}
             onError={(error) => {
-                console.error("Error loading Google Maps script:", error);
-                setMapReady(false); // Ensure mapReady is false on error
+                console.error("%cLoadScript: Error loading Google Maps script:", 'color: red; font-weight: bold;', error);
+                console.log("%cLoadScript: Setting mapReady=false due to error.", 'color: red;');
+                setMapReady(false); 
             }}
             loadingElement={<div style={{ height: "100%" }}>Loading map...</div>}
           >
@@ -178,23 +190,27 @@ export default function MapPage() {
               mapContainerStyle={containerStyle}
               center={initialCenter}
               zoom={5}
-              onLoad={() => console.log("GoogleMap component mounted.")}
-              onUnmount={() => console.log("GoogleMap component unmounted.")}
+              onLoad={() => console.log("%cGoogleMap: component mounted (onLoad event).", 'color: purple;')}
+              onUnmount={() => console.log("%cGoogleMap: component unmounted (onUnmount event).", 'color: red;')}
             >
               {mapReady && resolvedPrimaryColor && mockUsersOnMap.map((user) => {
-                // Use resolvedPrimaryColor for fill, and a fixed color for border
+                console.log(`%cGoogleMap Child Loop: Generating marker for ${user.id}. Resolved color: ${resolvedPrimaryColor}`, 'color: teal');
                 const icon = generateRoundMarkerIcon(resolvedPrimaryColor, 'hsl(240, 50%, 50%)', 35);
                 
                 if (!icon) {
-                  console.warn(`Custom icon not generated for user ${user.id}, Google Maps should use default marker.`);
+                  console.warn(`%cGoogleMap Child Loop: Custom icon NOT generated for user ${user.id}. Icon was undefined. Google Maps should use default marker.`, 'color: orange');
+                } else {
+                  // console.log(`%cGoogleMap Child Loop: Custom icon generated for user ${user.id}`, 'color: teal', icon);
                 }
                 
                 return (
                   <Marker
                     key={user.id}
                     position={user.position}
-                    onClick={() => setSelectedUser(user)}
-                    // If icon is undefined, Google Maps API uses its default marker icon
+                    onClick={() => {
+                      console.log(`%cMarker Click: User ${user.id} clicked. Setting selectedUser.`, 'color: brown');
+                      setSelectedUser(user);
+                    }}
                     icon={icon} 
                   />
                 );
@@ -203,7 +219,10 @@ export default function MapPage() {
               {selectedUser && (
                 <InfoWindow
                   position={selectedUser.position}
-                  onCloseClick={() => setSelectedUser(null)}
+                  onCloseClick={() => {
+                    console.log('%cInfoWindow: Close button clicked. Setting selectedUser to null.', 'color: brown');
+                    setSelectedUser(null);
+                  }}
                 >
                   <div className="p-2 flex items-center space-x-3">
                     <Avatar className="h-10 w-10">
@@ -229,4 +248,3 @@ export default function MapPage() {
     </div>
   );
 }
-
