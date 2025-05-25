@@ -15,7 +15,7 @@ import { LoadScript, Autocomplete } from "@react-google-maps/api";
 import type { MockUserPin } from "@/app/(app)/map/page";
 import { auth, firestore } from "@/lib/firebase";
 import { createUserWithEmailAndPassword } from "firebase/auth";
-import { doc, setDoc, serverTimestamp } from "firebase/firestore"; // Import serverTimestamp
+import { doc, setDoc, serverTimestamp, Timestamp } from "firebase/firestore";
 
 const googleMapsApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
 const libraries: ("places")[] = ['places'];
@@ -58,7 +58,7 @@ export default function SignupPage() {
         }
       } else if (locationInputRef.current) {
         setLocation(locationInputRef.current.value);
-        setSelectedLocationCoords(null);
+        setSelectedLocationCoords(null); // Clear coords if user types manually after selecting
         console.log("SignupPage: Location input changed manually:", locationInputRef.current.value);
       }
     }
@@ -100,34 +100,24 @@ export default function SignupPage() {
       const userProfile = {
         uid: user.uid,
         fullName: fullName,
-        email: user.email,
+        email: user.email, // Use email from auth user object for consistency
         username: username,
         location: location || "",
-        locationCoords: selectedLocationCoords,
+        locationCoords: selectedLocationCoords, // This can be null
         bio: "",
-        avatar: "",
-        coverImage: "",
-        createdAt: serverTimestamp(), // Use serverTimestamp
+        avatar: "", // Will be Firebase Storage URL later
+        coverImage: "", // Will be Firebase Storage URL or Data URI later
+        createdAt: serverTimestamp(),
       };
 
       console.log("SignupPage: Preparing to write to Firestore. UserProfile object:", userProfile );
-      
-      try {
-        await setDoc(doc(firestore, "users", user.uid), userProfile);
-        console.log("SignupPage: User profile successfully written to Firestore for UID:", user.uid);
-      } catch (firestoreError: any) {
-        console.error("SignupPage: Firestore setDoc error:", firestoreError.message, firestoreError.code, firestoreError.stack);
-        console.error("Full Firestore error object for setDoc:", firestoreError);
-        toast({
-          title: "Profile Save Error",
-          description: `Could not save profile to database: ${firestoreError.message}. Auth succeeded, but profile save failed. Please check Firestore rules and setup.`,
-          variant: "destructive",
-          duration: 10000,
-        });
-        setIsLoading(false);
-        return; 
-      }
+      console.log("SignupPage: Firestore instance being used for setDoc:", firestore); // Diagnostic log
 
+      await setDoc(doc(firestore, "users", user.uid), userProfile);
+      console.log("SignupPage: User profile successfully written to Firestore for UID:", user.uid);
+      
+
+      // Save to pokerConnectMapUsers for map display (client-side mock)
       if (selectedLocationCoords) {
         const initials = fullName.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase() || username.substring(0,1).toUpperCase() || 'P';
         const mapUser: MockUserPin = {
@@ -151,7 +141,7 @@ export default function SignupPage() {
         localStorage.setItem("pokerConnectMapUsers", JSON.stringify(mapUsers));
         console.log("SignupPage: Added/Updated user in pokerConnectMapUsers localStorage:", mapUser);
       } else {
-        toast({
+         toast({
           title: "Location Notice",
           description: "Location coordinates not available. User will not appear on the map.",
           variant: "default"
@@ -162,7 +152,8 @@ export default function SignupPage() {
       router.push("/login");
 
     } catch (error: any) {
-      console.error("SignupPage: Error signing up:", error);
+      console.error("SignupPage: Error during signup process:", error.message, error.code, error.stack);
+      console.error("Full error object:", error);
       let errorMessage = "Could not sign up. Please try again.";
       if (error.code === "auth/email-already-in-use") {
         errorMessage = "This email is already in use. Please use a different email or log in.";
@@ -170,8 +161,10 @@ export default function SignupPage() {
         errorMessage = "Password is too weak. Please choose a stronger password.";
       } else if (error.code === 'auth/invalid-email') {
         errorMessage = "The email address is not valid."
+      } else if (error.message && error.message.includes("firestore")) {
+        errorMessage = `Failed to save profile to database: ${error.message}. Please ensure Firestore is set up correctly in your Firebase project.`
       }
-      toast({ title: "Signup Error", description: errorMessage, variant: "destructive" });
+      toast({ title: "Signup Error", description: errorMessage, variant: "destructive", duration: 7000 });
     } finally {
       setIsLoading(false);
     }
@@ -283,6 +276,7 @@ export default function SignupPage() {
                       value={location}
                       onChange={(e) => {
                         setLocation(e.target.value);
+                        // If user types manually after selecting a place, clear selected coords
                         if (autocompleteRef.current && autocompleteRef.current.getPlace()?.formatted_address !== e.target.value) {
                             setSelectedLocationCoords(null);
                         }
@@ -309,7 +303,7 @@ export default function SignupPage() {
             </Button>
             <p className="text-sm text-muted-foreground">
               Already have an account?{" "}
-              <Link href="/quiz" className="text-primary hover:underline">
+              <Link href="/login" className="text-primary hover:underline">
                 Log In
               </Link>
             </p>

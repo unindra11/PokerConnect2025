@@ -3,7 +3,7 @@
 import { initializeApp, getApp, getApps, type FirebaseOptions } from "firebase/app";
 import { getStorage } from "firebase/storage";
 import { getAuth } from "firebase/auth";
-import { getFirestore } from "firebase/firestore";
+import { getFirestore } from "firebase/firestore"; // Ensure this is here
 
 const firebaseConfig: FirebaseOptions = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -29,5 +29,6 @@ if (!getApps().length) {
 const storage = getStorage(app);
 const auth = getAuth(app);
 const firestore = getFirestore(app);
+console.log("Firebase.ts: Firestore instance initialized:", firestore); // Log instance
 
 export { app, storage, auth, firestore };
