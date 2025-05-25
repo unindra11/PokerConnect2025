@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { GoogleMap, LoadScript, Marker, InfoWindow } from "@react-google-maps/api";
 import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -68,8 +68,68 @@ const googleMapsApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
 // 4. Add the current development URL (e.g., https://your-dev-domain.com/*) to the list.
 // 5. Save changes. It might take a few minutes to propagate.
 
+
+// Helper function to generate a round SVG marker with a border
+const generateRoundMarkerIcon = (avatarUrl: string, borderColor: string = 'hsl(36, 100%, 50%)', diameter: number = 35) => {
+  const radius = diameter / 2;
+  const strokeWidth = 2; // Border thickness
+  const imageRadius = radius - strokeWidth; // Image will be clipped to this radius
+  const imageDiameter = imageRadius * 2;
+  const imageOffset = strokeWidth; // Image x,y offset from top-left of SVG
+
+  // Using a unique ID for clipPath is good practice, especially if SVGs were inlined.
+  // For data URIs, it's less critical but doesn't hurt.
+  const clipPathId = `clip_${Math.random().toString(36).substr(2, 9)}`;
+
+  const svg = `
+    <svg width="${diameter}" height="${diameter}" viewBox="0 0 ${diameter} ${diameter}" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+      <defs>
+        <clipPath id="${clipPathId}">
+          <circle cx="${radius}" cy="${radius}" r="${imageRadius}" />
+        </clipPath>
+      </defs>
+      {/* Optional: A white background circle if avatars might have transparency, helps with visibility */}
+      <circle cx="${radius}" cy="${radius}" r="${imageRadius}" fill="white" />
+      <image
+        href="${avatarUrl}"
+        x="${imageOffset}"
+        y="${imageOffset}"
+        width="${imageDiameter}"
+        height="${imageDiameter}"
+        clip-path="url(#${clipPathId})"
+        preserveAspectRatio="xMidYMid slice"
+      />
+      {/* Border circle */}
+      <circle
+        cx="${radius}"
+        cy="${radius}"
+        r="${imageRadius + strokeWidth / 2 - 0.5}" // Adjusted for stroke alignment (center of stroke)
+        fill="none"
+        stroke="${borderColor}"
+        stroke-width="${strokeWidth}"
+      />
+    </svg>
+  `.replace(/\n\s*/g, "").replace(/\s\s+/g, " "); // Basic minification
+
+  return {
+    url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`,
+    scaledSize: typeof window !== 'undefined' && window.google?.maps?.Size ? new window.google.maps.Size(diameter, diameter) : undefined,
+    anchor: typeof window !== 'undefined' && window.google?.maps?.Point ? new window.google.maps.Point(radius, radius) : undefined,
+  };
+};
+
+
 export default function MapPage() {
   const [selectedUser, setSelectedUser] = useState<MockUserPin | null>(null);
+  const [mapReady, setMapReady] = useState(false);
+
+  // Ensure window-dependent Google Maps objects are only created client-side
+  useEffect(() => {
+    if (typeof window !== 'undefined' && window.google) {
+      setMapReady(true);
+    }
+  }, []);
+
 
   if (!googleMapsApiKey) {
     return (
@@ -101,22 +161,18 @@ export default function MapPage() {
           <CardTitle>Interactive Player Map - India</CardTitle>
         </CardHeader>
         <CardContent>
-          <LoadScript googleMapsApiKey={googleMapsApiKey}>
+          <LoadScript googleMapsApiKey={googleMapsApiKey} onLoad={() => setMapReady(true)}>
             <GoogleMap
               mapContainerStyle={containerStyle}
               center={center}
               zoom={5} // Adjusted zoom level for India
             >
-              {mockUsersOnMap.map((user) => (
+              {mapReady && mockUsersOnMap.map((user) => (
                 <Marker
                   key={user.id}
                   position={user.position}
                   onClick={() => setSelectedUser(user)}
-                  icon={{
-                    url: user.avatar,
-                    scaledSize: typeof window !== 'undefined' && window.google?.maps?.Size ? new window.google.maps.Size(35, 35) : undefined,
-                    anchor: typeof window !== 'undefined' && window.google?.maps?.Point ? new window.google.maps.Point(17.5, 17.5) : undefined,
-                  }}
+                  icon={generateRoundMarkerIcon(user.avatar, 'hsl(36, 100%, 50%)', 35)}
                 />
               ))}
 
