@@ -8,13 +8,14 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter }
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import Link from "next/link";
-import { LogInIcon } from "lucide-react";
+import { LogInIcon, Eye, EyeOff } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 export default function LoginPage() {
   const router = useRouter();
   const [emailOrUsername, setEmailOrUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   // const [error, setError] = useState(""); // Future: for login error messages
 
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
@@ -32,6 +33,10 @@ export default function LoginPage() {
     }
   };
 
+  const togglePasswordVisibility = () => {
+    setShowPassword(!showPassword);
+  };
+
   return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-br from-background to-muted/50 p-4">
       <Card className="w-full max-w-md shadow-2xl rounded-xl">
@@ -45,24 +50,36 @@ export default function LoginPage() {
           <CardContent className="space-y-5">
             <div>
               <Label htmlFor="emailOrUsername">Email or Username</Label>
-              <Input 
-                id="emailOrUsername" 
-                placeholder="unindra111@gmail.com" 
+              <Input
+                id="emailOrUsername"
+                placeholder="unindra111@gmail.com"
                 className="mt-1"
                 value={emailOrUsername}
-                onChange={(e) => setEmailOrUsername(e.target.value)} 
+                onChange={(e) => setEmailOrUsername(e.target.value)}
               />
             </div>
             <div>
               <Label htmlFor="password">Password</Label>
-              <Input 
-                id="password" 
-                type="password" 
-                placeholder="qwerty" 
-                className="mt-1"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)} 
-              />
+              <div className="relative mt-1">
+                <Input
+                  id="password"
+                  type={showPassword ? "text" : "password"}
+                  placeholder="qwerty"
+                  className="pr-10" // Add padding for the icon
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="absolute inset-y-0 right-0 h-full px-3 text-muted-foreground hover:text-primary"
+                  onClick={togglePasswordVisibility}
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                >
+                  {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                </Button>
+              </div>
             </div>
             {/* Future: Display error message
             {error && (
