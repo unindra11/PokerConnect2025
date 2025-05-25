@@ -6,7 +6,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { UserCog, ShieldCheck, Edit3, UserPlus, Loader2, Users, Camera } from "lucide-react";
+import { UserCog, ShieldCheck, Edit3, UserPlus, Loader2, Users, Camera, UserCheck } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { PostCard } from "@/components/post-card";
@@ -21,14 +21,13 @@ interface LoggedInUser {
   avatar?: string; 
   bio?: string;
   coverImage?: string; 
-  friendsCount?: number; // Added for consistency
+  friendsCount?: number;
 }
 
-// Define a simple structure for notifications stored in localStorage
 interface StoredNotification {
   id: string;
-  type: string; // e.g., 'friend_request_sent_confirmation', 'post_like', etc.
-  user: { name: string; avatar: string; handle: string; username?: string; }; // 'user' here is context-dependent based on type
+  type: string; 
+  user: { name: string; avatar: string; handle: string; username?: string; }; 
   message: string;
   timestamp: string;
 }
@@ -64,19 +63,25 @@ export default function UserProfilePage({ params }: { params: { username: string
   const [isLoadingPosts, setIsLoadingPosts] = useState(true);
   const [profileUser, setProfileUser] = useState<LoggedInUser | null>(null);
   const [profileAvatarUrl, setProfileAvatarUrl] = useState<string | undefined>(undefined);
-  const [profileCoverImageUrl, setProfileCoverImageUrl] = useState<string | undefined>("https://placehold.co/1200x300.png?cover=1"); // Default placeholder
+  const [profileCoverImageUrl, setProfileCoverImageUrl] = useState<string | undefined>("https://placehold.co/1200x300.png?cover=1"); 
   const { toast } = useToast();
   const profileAvatarInputRef = useRef<HTMLInputElement>(null);
+  const [friendRequestStatus, setFriendRequestStatus] = useState<'idle' | 'sent' | 'friends'>('idle');
+  const [currentLoggedInUser, setCurrentLoggedInUser] = useState<LoggedInUser | null>(null);
   
   useEffect(() => {
     let userForProfile: LoggedInUser | null = null;
     let avatarForProfile: string | undefined = `https://placehold.co/150x150.png?u=${resolvedParams.username}`; 
     let coverForProfile: string | undefined = "https://placehold.co/1200x300.png?cover=1";
+    let loggedInUserForState: LoggedInUser | null = null;
 
     try {
       const loggedInUserString = localStorage.getItem("loggedInUser");
       if (loggedInUserString) {
         const loggedInUser: LoggedInUser = JSON.parse(loggedInUserString);
+        loggedInUserForState = loggedInUser;
+        setCurrentLoggedInUser(loggedInUser);
+
         if (loggedInUser && loggedInUser.username === resolvedParams.username) {
           setIsCurrentUserProfile(true);
           userForProfile = loggedInUser; 
@@ -88,10 +93,7 @@ export default function UserProfilePage({ params }: { params: { username: string
           }
         } else {
           setIsCurrentUserProfile(false);
-          // For other users, we don't load their specific data from local storage (yet)
-          // So, we create a generic profile.
-          // In a real app, this would fetch data from a backend.
-           const pokerConnectUserString = localStorage.getItem("pokerConnectUser"); // Check if this is the signed up user
+           const pokerConnectUserString = localStorage.getItem("pokerConnectUser"); 
            if (pokerConnectUserString) {
              const pokerConnectUser: LoggedInUser = JSON.parse(pokerConnectUserString);
              if (pokerConnectUser.username === resolvedParams.username) {
@@ -103,7 +105,7 @@ export default function UserProfilePage({ params }: { params: { username: string
                     username: resolvedParams.username, 
                     fullName: resolvedParams.username.charAt(0).toUpperCase() + resolvedParams.username.slice(1),
                     bio: "A passionate poker player enjoying the game.",
-                    friendsCount: Math.floor(Math.random() * 200) // Mock friends count for other users
+                    friendsCount: Math.floor(Math.random() * 200) 
                 };
              }
            } else {
@@ -115,9 +117,9 @@ export default function UserProfilePage({ params }: { params: { username: string
             };
            }
         }
-      } else { // No loggedInUser at all
+      } else { 
         setIsCurrentUserProfile(false);
-         const pokerConnectUserString = localStorage.getItem("pokerConnectUser"); // Check if this is the signed up user
+         const pokerConnectUserString = localStorage.getItem("pokerConnectUser"); 
          if (pokerConnectUserString) {
            const pokerConnectUser: LoggedInUser = JSON.parse(pokerConnectUserString);
            if (pokerConnectUser.username === resolvedParams.username) {
@@ -137,10 +139,26 @@ export default function UserProfilePage({ params }: { params: { username: string
                 username: resolvedParams.username,
                 fullName: resolvedParams.username.charAt(0).toUpperCase() + resolvedParams.username.slice(1),
                 bio: "A passionate poker player enjoying the game.",
-                friendsCount: Math.floor(Math.random() * 200)
+                friendsCount: Math.floor(Math.random() * 100)
             };
          }
       }
+
+      // Check friend request status if a logged-in user and profile user are defined
+      if (loggedInUserForState && userForProfile && loggedInUserForState.username !== userForProfile.username) {
+        const notificationsKey = `pokerConnectNotifications_${loggedInUserForState.username}`;
+        const storedNotificationsString = localStorage.getItem(notificationsKey);
+        if (storedNotificationsString) {
+          const existingNotifications: StoredNotification[] = JSON.parse(storedNotificationsString);
+          const requestSent = existingNotifications.some(
+            (notif) => notif.type === "friend_request_sent_confirmation" && notif.user?.username === userForProfile?.username
+          );
+          if (requestSent) {
+            setFriendRequestStatus('sent');
+          }
+        }
+      }
+
     } catch (error) {
       console.error("Error reading user data from localStorage for profile page:", error);
       setIsCurrentUserProfile(false);
@@ -242,7 +260,6 @@ export default function UserProfilePage({ params }: { params: { username: string
             loggedInUser.avatar = newAvatarDataUrl;
             localStorage.setItem("loggedInUser", JSON.stringify(loggedInUser));
             
-            // Also update pokerConnectUser if it's the same user
             const pokerConnectUserString = localStorage.getItem("pokerConnectUser");
             if (pokerConnectUserString) {
                 let pokerConnectUser: LoggedInUser = JSON.parse(pokerConnectUserString);
@@ -270,36 +287,28 @@ export default function UserProfilePage({ params }: { params: { username: string
   };
 
   const handleSendFriendRequest = () => {
-    if (!profileUser) return;
+    if (!profileUser || !currentLoggedInUser) return;
 
+    if (currentLoggedInUser.username === profileUser.username) {
+      toast({ title: "Info", description: "You cannot send a friend request to yourself." });
+      return;
+    }
+    
     try {
-      const loggedInUserString = localStorage.getItem("loggedInUser");
-      if (!loggedInUserString) {
-        toast({ title: "Error", description: "You must be logged in to send friend requests.", variant: "destructive" });
-        return;
-      }
-      const loggedInUser: LoggedInUser = JSON.parse(loggedInUserString);
-
-      if (loggedInUser.username === profileUser.username) {
-        toast({ title: "Info", description: "You cannot send a friend request to yourself." });
-        return;
-      }
-      
       const newNotification: StoredNotification = {
         id: `notif_sent_to_${profileUser.username}_${Date.now()}`,
         type: "friend_request_sent_confirmation",
-        // For this notification, 'user' is the recipient of the friend request
         user: { 
           name: profileUser.fullName || profileUser.username, 
           avatar: profileAvatarUrl || `https://placehold.co/100x100.png?u=${profileUser.username}`, 
           handle: `@${profileUser.username}`,
           username: profileUser.username
         },
-        message: "Friend request sent.", // Will be displayed as "Friend request sent. to [User Name]"
+        message: "Friend request sent.",
         timestamp: new Date().toLocaleString(),
       };
 
-      const notificationsKey = `pokerConnectNotifications_${loggedInUser.username}`;
+      const notificationsKey = `pokerConnectNotifications_${currentLoggedInUser.username}`;
       let existingNotifications: StoredNotification[] = [];
       const storedNotificationsString = localStorage.getItem(notificationsKey);
       if (storedNotificationsString) {
@@ -312,16 +321,14 @@ export default function UserProfilePage({ params }: { params: { username: string
         }
       }
       
-      existingNotifications.unshift(newNotification); // Add to the beginning
+      existingNotifications.unshift(newNotification); 
       localStorage.setItem(notificationsKey, JSON.stringify(existingNotifications));
 
       toast({
         title: "Friend Request Sent!",
         description: `Your friend request to ${profileUser.fullName || profileUser.username} has been sent.`,
       });
-
-      // Optionally, disable the button or change its text after sending
-      // For a prototype, a toast is often sufficient.
+      setFriendRequestStatus('sent'); 
 
     } catch (error) {
       console.error("Error sending friend request:", error);
@@ -396,21 +403,24 @@ export default function UserProfilePage({ params }: { params: { username: string
                 <h1 className="text-3xl font-bold text-white">{mockUser.name}</h1>
                 <p className="text-sm text-gray-300">@{mockUser.username}</p>
               </div>
-               {isCurrentUserProfile && (
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  className="mt-4 sm:mt-0 sm:ml-auto bg-white/20 hover:bg-white/30 text-white border-white/50"
-                  onClick={() => router.push('/settings')}
-                >
-                  <Edit3 className="mr-2 h-4 w-4" /> Edit Profile
-                </Button>
-              )}
-              {!isCurrentUserProfile && (
-                <Button variant="default" size="sm" className="mt-4 sm:mt-0 sm:ml-auto" onClick={handleSendFriendRequest}>
-                  <UserPlus className="mr-2 h-4 w-4" /> Add Friend
-                </Button>
-              )}
+                {isCurrentUserProfile ? (
+                    <Button 
+                    variant="outline" 
+                    size="sm" 
+                    className="mt-4 sm:mt-0 sm:ml-auto bg-white/20 hover:bg-white/30 text-white border-white/50"
+                    onClick={() => router.push('/settings')}
+                    >
+                    <Edit3 className="mr-2 h-4 w-4" /> Edit Profile
+                    </Button>
+                ) : friendRequestStatus === 'sent' ? (
+                    <Button variant="outline" size="sm" className="mt-4 sm:mt-0 sm:ml-auto" disabled>
+                        <UserCheck className="mr-2 h-4 w-4" /> Request Sent
+                    </Button>
+                ) : (
+                    <Button variant="default" size="sm" className="mt-4 sm:mt-0 sm:ml-auto" onClick={handleSendFriendRequest}>
+                        <UserPlus className="mr-2 h-4 w-4" /> Add Friend
+                    </Button>
+                )}
             </div>
           </div>
         </div>
