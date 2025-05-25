@@ -40,7 +40,6 @@ export function AppNavigation() {
           <SidebarMenuItem key={item.href}>
             <Link href={item.href} asChild>
               <SidebarMenuButton
-                asChild // Explicitly add asChild here for clarity with Link's asChild
                 isActive={pathname === item.href || (item.href !== "/home" && pathname.startsWith(item.href))}
                 tooltip={item.label}
               >
