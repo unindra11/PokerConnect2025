@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { GoogleMap, LoadScript, Marker, InfoWindow } from "@react-google-maps/api";
 import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -26,7 +26,7 @@ interface MockUserPin {
   aiHint?: string;
 }
 
-const mockUsersOnMap: MockUserPin[] = [
+const mockUsersData: MockUserPin[] = [
   {
     id: "mapuser1",
     username: "delhipokerstar",
@@ -100,7 +100,7 @@ const generateRoundMarkerIcon = (
       scaledSize: size,
       anchor: anchorPoint,
     };
-    console.log('%cgenerateRoundMarkerIcon: Successfully created icon object:', 'color: green;', iconObject);
+    console.log('%cgenerateRoundMarkerIcon: Successfully created icon object.', 'color: green;');
     return iconObject;
   }
   console.warn("%cgenerateRoundMarkerIcon: Google Maps API objects (Size/Point) not ready, or not on client. Default marker may be used. fillColor was:", 'color: orange;', fillColor);
@@ -124,19 +124,15 @@ export default function MapPage() {
       const rootStyle = getComputedStyle(document.documentElement);
       const primaryVar = rootStyle.getPropertyValue('--primary').trim(); 
       if (primaryVar) {
-        const [h, s, l] = primaryVar.split(' ');
-        if (h && s && l) {
-          // Ensure format is suitable for CSS/SVG e.g. "hsl(H, S%, L%)" or "hsl(H S L)"
-          // CSS variables usually store H, S, L without commas.
-          // For HSL in CSS/SVG, it can be "hsl(H S L)" or "hsl(H, S%, L%)".
-          // Let's ensure the parsed parts are used correctly.
-          const colorString = `hsl(${h} ${s} ${l})`; // Using space separated values as typically stored in CSS vars
-          console.log(`%cMapPage: Resolved primary color from CSS variable '--primary' ("${primaryVar}") to: "${colorString}"`, 'color: green;');
-          setResolvedPrimaryColor(colorString);
-        } else {
-          console.warn("%cMapPage: Could not parse --primary CSS variable. Falling back to default 'orange'. Parsed values:", 'color: orange;', {h,s,l});
-          setResolvedPrimaryColor('orange'); 
-        }
+        // CSS HSL variables are typically stored as space-separated numbers: H S% L% or H S L
+        // The `hsl()` CSS function can take `hsl(H, S%, L%)` or `hsl(H S L / A)`.
+        // We need to ensure the format is correct for SVG/CSS string usage.
+        // Example: if primaryVar is "36 100% 50%", colorString should be "hsl(36, 100%, 50%)" or "hsl(36 100% 50%)".
+        // Let's assume the variable is stored as "H S% L%" or "H S L".
+        // For simplicity, we'll use space-separated values as they are common for CSS vars.
+        const colorString = `hsl(${primaryVar})`; // e.g., "hsl(36 100% 50%)"
+        console.log(`%cMapPage: Resolved primary color from CSS variable '--primary' ("${primaryVar}") to: "${colorString}"`, 'color: green;');
+        setResolvedPrimaryColor(colorString);
       } else {
         console.warn("%cMapPage: --primary CSS variable not found. Falling back to default 'orange'.", 'color: orange;');
         setResolvedPrimaryColor('orange'); 
@@ -146,6 +142,18 @@ export default function MapPage() {
       console.log('%cMapPage: useEffect for color resolution - UNMOUNTING', 'color: red;');
     };
   }, []);
+
+  const processedUsersOnMap = useMemo(() => {
+    if (!mapReady || !resolvedPrimaryColor) {
+      console.log('%cprocessedUsersOnMap: Not ready or no color, returning empty.', 'color: orange;');
+      return [];
+    }
+    console.log('%cprocessedUsersOnMap: Generating markers with color:', 'color: purple;', resolvedPrimaryColor);
+    return mockUsersData.map((user) => {
+      const icon = generateRoundMarkerIcon(resolvedPrimaryColor, 'hsl(240 50% 50%)', 35);
+      return { ...user, icon };
+    });
+  }, [mapReady, resolvedPrimaryColor]);
 
 
   if (!googleMapsApiKey) {
@@ -200,14 +208,10 @@ export default function MapPage() {
               onLoad={() => console.log("%cGoogleMap: component mounted (onLoad event).", 'color: purple;')}
               onUnmount={() => console.log("%cGoogleMap: component unmounted (onUnmount event).", 'color: red;')}
             >
-              {mapReady && resolvedPrimaryColor && mockUsersOnMap.map((user) => {
-                console.log(`%cGoogleMap Child Loop: Attempting to generate marker for ${user.id}. resolvedPrimaryColor: ${resolvedPrimaryColor}`, 'color: teal');
-                const icon = generateRoundMarkerIcon(resolvedPrimaryColor, 'hsl(240 50% 50%)', 35); // Using space separated HSL for border too
-                
-                if (!icon) {
-                  console.warn(`%cGoogleMap Child Loop: Custom icon was NOT generated (returned undefined) for user ${user.id}. Google Maps should use default marker.`, 'color: orange');
-                } else {
-                  // console.log(`%cGoogleMap Child Loop: Custom icon generated for user ${user.id}`, 'color: teal', icon);
+              {processedUsersOnMap.map((user) => {
+                // console.log(`%cGoogleMap Child Loop: Rendering marker for ${user.id}. Icon object:`, 'color: teal', user.icon);
+                if (!user.icon) {
+                  console.warn(`%cGoogleMap Child Loop: Custom icon was NOT generated (is undefined) for user ${user.id}. Google Maps should use default marker.`, 'color: orange');
                 }
                 
                 return (
@@ -218,7 +222,7 @@ export default function MapPage() {
                       console.log(`%cMarker Click: User ${user.id} clicked. Setting selectedUser.`, 'color: brown');
                       setSelectedUser(user);
                     }}
-                    icon={icon} // If icon is undefined, Google Maps uses its default marker
+                    icon={user.icon} // If icon is undefined, Google Maps uses its default marker
                   />
                 );
               })}
@@ -255,4 +259,3 @@ export default function MapPage() {
     </div>
   );
 }
-
