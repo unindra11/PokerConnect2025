@@ -14,8 +14,10 @@ import { ImagePlus, Send, Edit, Loader2, X, ArrowLeft } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useRouter, useSearchParams } from "next/navigation";
 import type { Post, User } from "@/types/post";
+import { storage } from "@/lib/firebase"; // Import Firebase storage
+import { ref, uploadBytesResumable, getDownloadURL } from "firebase/storage";
 
-const MAX_FILE_SIZE_MB = 5; // Max 5MB for Data URI storage
+const MAX_FILE_SIZE_MB = 5; 
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
 
 const createPostSchema = z.object({
@@ -28,7 +30,8 @@ const USER_POSTS_STORAGE_KEY = "pokerConnectUserPosts";
 
 export default function CreatePostPage() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null); // This will hold Data URI for local preview
+  const [imageToSaveUrl, setImageToSaveUrl] = useState<string | null>(null); // This will hold Firebase URL or existing image URL for saving
   const [isLoading, setIsLoading] = useState(false);
   const { toast } = useToast();
   const router = useRouter();
@@ -36,7 +39,6 @@ export default function CreatePostPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const editPostId = searchParams.get("editPostId");
-
   const isEditMode = !!editPostId;
 
   const form = useForm<CreatePostFormValues>({
@@ -56,10 +58,11 @@ export default function CreatePostPage() {
           if (postToEdit) {
             form.setValue("postContent", postToEdit.content);
             if (postToEdit.image) {
-              setPreviewUrl(postToEdit.image); 
+              setPreviewUrl(postToEdit.image); // For preview
+              setImageToSaveUrl(postToEdit.image); // For saving if not changed
             }
           } else {
-            toast({ title: "Warning", description: "Could not find the original post in storage. Some details might be missing.", variant: "default" });
+            toast({ title: "Warning", description: "Could not find the original post in storage.", variant: "default" });
           }
         }
       } catch (error) {
@@ -75,51 +78,52 @@ export default function CreatePostPage() {
       if (file.size > MAX_FILE_SIZE_BYTES) {
         toast({
           title: "File Too Large",
-          description: `Please select a file smaller than ${MAX_FILE_SIZE_MB}MB. Videos are not recommended for local storage.`,
+          description: `Please select a file smaller than ${MAX_FILE_SIZE_MB}MB.`,
           variant: "destructive",
         });
-        if (fileInputRef.current) {
-          fileInputRef.current.value = "";
-        }
+        if (fileInputRef.current) fileInputRef.current.value = "";
         setSelectedFile(null);
         setPreviewUrl(null);
+        setImageToSaveUrl(isEditMode && imageToSaveUrl ? imageToSaveUrl : null); // Keep existing if in edit mode
         return;
       }
 
       if (!file.type.startsWith("image/")) {
         toast({
           title: "Unsupported File Type",
-          description: "For local storage, only image uploads are reliably supported. Video Data URIs can be too large.",
+          description: "Only image uploads are currently supported for Firebase Storage in this prototype.",
           variant: "destructive",
         });
-         if (fileInputRef.current) {
-          fileInputRef.current.value = "";
-        }
+         if (fileInputRef.current) fileInputRef.current.value = "";
         setSelectedFile(null);
         setPreviewUrl(null);
+        setImageToSaveUrl(isEditMode && imageToSaveUrl ? imageToSaveUrl : null);
         return;
       }
       
-      setSelectedFile(file);
+      setSelectedFile(file); // Store the file object for upload
       const reader = new FileReader();
       reader.onloadend = () => {
-        setPreviewUrl(reader.result as string);
+        setPreviewUrl(reader.result as string); // Set Data URI for local preview
       };
       reader.onerror = () => {
-        toast({ title: "Error", description: "Could not read the selected file.", variant: "destructive"});
+        toast({ title: "Error", description: "Could not read the selected file for preview.", variant: "destructive"});
         setSelectedFile(null);
         setPreviewUrl(null);
       }
       reader.readAsDataURL(file);
+      setImageToSaveUrl(null); // New file selected, so Firebase URL will be generated
     } else {
       setSelectedFile(null);
       setPreviewUrl(null);
+      setImageToSaveUrl(isEditMode && imageToSaveUrl ? imageToSaveUrl : null);
     }
   };
 
   const clearMedia = () => {
     setSelectedFile(null);
     setPreviewUrl(null);
+    setImageToSaveUrl(null); // Also clear the URL to be saved for new posts
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
@@ -129,14 +133,16 @@ export default function CreatePostPage() {
     setIsLoading(true);
 
     let loggedInUser: User | null = null;
+    let currentUsername = "anonymous";
     try {
         const loggedInUserString = localStorage.getItem("loggedInUser");
         if (loggedInUserString) {
             const parsedUser = JSON.parse(loggedInUserString);
+            currentUsername = parsedUser.username || 'anonymous';
             loggedInUser = {
                 name: parsedUser.fullName || parsedUser.username || "Anonymous",
                 avatar: parsedUser.avatar || `https://placehold.co/100x100.png?text=${(parsedUser.fullName || parsedUser.username || "A").substring(0,1)}`,
-                handle: `@${parsedUser.username || 'anonymous'}`
+                handle: `@${currentUsername}`
             };
         } else {
              loggedInUser = { name: "Player One", avatar: "https://placehold.co/100x100.png", handle: "@playerone" };
@@ -145,6 +151,32 @@ export default function CreatePostPage() {
         console.error("Error getting logged in user for post:", e);
         loggedInUser = { name: "Player One", avatar: "https://placehold.co/100x100.png", handle: "@playerone" };
     }
+
+    let finalImageUrl: string | undefined = imageToSaveUrl || undefined; // Use existing if not changed, or undefined
+
+    if (selectedFile) {
+      // Upload to Firebase Storage
+      // IMPORTANT: For production, ensure Firebase Storage rules are set up for security.
+      // e.g., allow write only for authenticated users to paths like `posts/${userID}/${filename}`
+      const storageRef = ref(storage, `posts/${currentUsername}/${Date.now()}_${selectedFile.name}`);
+      const uploadTask = uploadBytesResumable(storageRef, selectedFile);
+
+      try {
+        await uploadTask;
+        finalImageUrl = await getDownloadURL(uploadTask.snapshot.ref);
+        toast({ title: "Image Uploaded", description: "Image successfully uploaded to Firebase Storage." });
+      } catch (error: any) {
+        console.error("Firebase Storage upload error:", error);
+        toast({
+          title: "Upload Failed",
+          description: `Could not upload image: ${error.message}. Post will be saved without image.`,
+          variant: "destructive",
+        });
+        setIsLoading(false);
+        return; // Or proceed to save post without image
+      }
+    }
+
 
     try {
       const storedPostsString = localStorage.getItem(USER_POSTS_STORAGE_KEY);
@@ -156,7 +188,7 @@ export default function CreatePostPage() {
             return {
               ...p,
               content: data.postContent,
-              image: previewUrl || p.image,
+              image: finalImageUrl || p.image, // Use new URL, or keep old if no new upload
               timestamp: new Date().toLocaleString(), 
             };
           }
@@ -167,12 +199,12 @@ export default function CreatePostPage() {
           id: `post_${Date.now()}_${Math.random().toString(36).substring(2,9)}`,
           user: loggedInUser!,
           content: data.postContent,
-          image: previewUrl || undefined, 
+          image: finalImageUrl, 
           imageAiHint: selectedFile ? "user uploaded image" : undefined,
           likes: 0,
           likedByCurrentUser: false,
           comments: 0,
-          commentTexts: [], // Initialize commentTexts
+          commentTexts: [],
           shares: 0,
           timestamp: new Date().toLocaleString(),
         };
@@ -189,6 +221,7 @@ export default function CreatePostPage() {
       form.reset();
       setSelectedFile(null);
       setPreviewUrl(null);
+      setImageToSaveUrl(null);
       if (fileInputRef.current) fileInputRef.current.value = "";
       router.push(isEditMode ? "/my-posts" : "/community-wall");
 
@@ -196,7 +229,7 @@ export default function CreatePostPage() {
       console.error("Error saving post to localStorage:", error);
       toast({
         title: "Storage Error",
-        description: "Could not save your post. Local storage might be full or unavailable.",
+        description: "Could not save your post details to local storage.",
         variant: "destructive",
       });
     } finally {
@@ -212,7 +245,7 @@ export default function CreatePostPage() {
             <div>
               <CardTitle className="text-2xl">{isEditMode ? "Edit Your Post" : "Share Your Poker Story"}</CardTitle>
               <CardDescription>
-                {isEditMode ? "Make changes to your post below." : "Post updates, ask questions, or share your experiences. Images are saved locally."}
+                {isEditMode ? "Make changes to your post below." : "Post updates, ask questions, or share experiences. Images are uploaded to Firebase Storage."}
               </CardDescription>
             </div>
             {isEditMode && (
@@ -253,7 +286,7 @@ export default function CreatePostPage() {
                           id="mediaFile-upload" 
                           type="file" 
                           className="sr-only"
-                          accept="image/*"
+                          accept="image/*" 
                           onChange={handleFileChange}
                           ref={fileInputRef}
                         />
@@ -266,14 +299,7 @@ export default function CreatePostPage() {
                 {previewUrl && (
                   <div className="mt-2 w-full flex justify-center">
                     <div className="relative inline-block">
-                      {previewUrl.startsWith("data:image/") ? (
-                        <img src={previewUrl} alt="Preview" className="max-h-60 rounded-md" data-ai-hint="image preview" />
-                      ) : ( 
-                         <div className="p-4 bg-muted rounded-md text-sm max-h-60 w-full text-left">
-                           <p>Preview for selected media.</p>
-                           <p className="truncate">{selectedFile?.name || 'Existing media'}</p>
-                         </div>
-                      )}
+                        <img src={previewUrl} alt="Preview" className="max-h-60 rounded-md object-contain" data-ai-hint="image preview" />
                       <Button
                         type="button"
                         variant="ghost"
@@ -288,6 +314,9 @@ export default function CreatePostPage() {
                   </div>
                 )}
               </div>
+               <p className="text-xs text-muted-foreground mt-2 text-center">
+                Images will be uploaded to Firebase Cloud Storage. Ensure your Firebase project and Storage rules are configured.
+              </p>
             </div>
             
           </CardContent>
