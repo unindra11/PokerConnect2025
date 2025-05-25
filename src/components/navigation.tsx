@@ -1,3 +1,4 @@
+
 "use client";
 
 import Link from "next/link";
@@ -11,7 +12,6 @@ import {
   Lightbulb,
   LayoutGrid,
   MessageSquarePlus,
-  Spades,
 } from "lucide-react";
 import {
   SidebarMenu,
@@ -40,21 +40,19 @@ export function AppNavigation() {
         const Icon = item.icon;
         return (
           <SidebarMenuItem key={item.href}>
-            <Link href={item.href} legacyBehavior passHref>
+            <Link href={item.href} asChild>
               <SidebarMenuButton
-                asChild
                 isActive={pathname === item.href || (item.href !== "/home" && pathname.startsWith(item.href))}
                 tooltip={item.label}
                 className={cn(
                   "flex items-center justify-start gap-2"
                 )}
               >
-                <a>
-                  <Icon size={20} />
-                  <span className="group-data-[collapsible=icon]:hidden delay-300 whitespace-nowrap">
-                    {item.label}
-                  </span>
-                </a>
+                {/* Content is now direct children of SidebarMenuButton, which Link makes navigable */}
+                <Icon size={20} />
+                <span className="group-data-[collapsible=icon]:hidden delay-300 whitespace-nowrap">
+                  {item.label}
+                </span>
               </SidebarMenuButton>
             </Link>
           </SidebarMenuItem>
