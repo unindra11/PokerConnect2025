@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
-import { MessageCircle, Heart, Repeat, Edit3, Trash2 } from "lucide-react";
+import { MessageCircle, Heart, Repeat, Edit3, Trash2, CornerDownRight } from "lucide-react";
 import type { Post } from "@/types/post";
 import { useToast } from "@/hooks/use-toast";
 import { useRouter } from "next/navigation";
@@ -47,7 +47,6 @@ export function PostCard({
     if (onLikePost) {
       onLikePost(post.id);
     } else {
-      // Fallback toast if onLikePost is not provided (e.g., on Home feed)
       toast({
         title: "Action Simulated",
         description: `Like action for "${post.content.substring(0,20)}...".`,
@@ -57,8 +56,7 @@ export function PostCard({
 
   const handleComment = () => {
     const commentText = window.prompt("Enter your comment:");
-    if (commentText === null) { // User cancelled
-      console.log("User cancelled comment input.");
+    if (commentText === null) {
       return;
     }
     if (commentText.trim() !== "") {
@@ -123,7 +121,7 @@ export function PostCard({
               variant="ghost"
               size="icon"
               className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
-              onClick={onDeletePost ? handleDelete : undefined} // Only attach if onDeletePost is provided
+              onClick={onDeletePost ? handleDelete : undefined}
             >
               <Trash2 className="h-4 w-4" />
               <span className="sr-only">Delete Post</span>
@@ -146,16 +144,39 @@ export function PostCard({
           </div>
         )}
       </CardContent>
-      <CardFooter className="flex justify-around p-2 border-t">
-        <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-primary" onClick={handleComment}>
-          <MessageCircle className="mr-1 h-4 w-4" /> {post.comments}
-        </Button>
-        <Button variant="ghost" size="sm" className={`${post.likedByCurrentUser ? 'text-primary' : 'text-muted-foreground'} hover:text-primary`} onClick={handleLike}>
-          <Heart className={`mr-1 h-4 w-4 ${post.likedByCurrentUser ? 'fill-primary' : ''}`} /> {post.likes}
-        </Button>
-        <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-primary" onClick={handleShare}>
-          <Repeat className="mr-1 h-4 w-4" /> {post.shares}
-        </Button>
+      <CardFooter className="flex flex-col items-start p-2 border-t">
+        <div className="flex justify-around w-full px-2 py-1">
+            <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-primary" onClick={handleComment}>
+            <MessageCircle className="mr-1 h-4 w-4" /> {post.comments}
+            </Button>
+            <Button variant="ghost" size="sm" className={`${post.likedByCurrentUser ? 'text-primary' : 'text-muted-foreground'} hover:text-primary`} onClick={handleLike}>
+            <Heart className={`mr-1 h-4 w-4 ${post.likedByCurrentUser ? 'fill-primary' : ''}`} /> {post.likes}
+            </Button>
+            <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-primary" onClick={handleShare}>
+            <Repeat className="mr-1 h-4 w-4" /> {post.shares}
+            </Button>
+        </div>
+        {post.commentTexts && post.commentTexts.length > 0 && (
+          <div className="w-full px-4 pt-2 mt-2 border-t border-dashed">
+            <h4 className="text-sm font-semibold mb-2 text-foreground/80">Comments:</h4>
+            <ul className="space-y-2 max-h-40 overflow-y-auto">
+              {post.commentTexts.slice(0).reverse().map((comment, index) => ( // Show newest comments first
+                <li key={index} className="text-xs text-muted-foreground bg-muted/50 p-2 rounded-md flex items-start">
+                  <CornerDownRight className="h-3 w-3 mr-2 mt-0.5 flex-shrink-0 text-primary" />
+                  <span>{comment}</span>
+                </li>
+              ))}
+            </ul>
+            {post.commentTexts.length > 3 && (
+                 <p className="text-xs text-center text-muted-foreground mt-2 italic">Scroll for more comments</p>
+            )}
+          </div>
+        )}
+         {(!post.commentTexts || post.commentTexts.length === 0) && post.comments > 0 && (
+            <div className="w-full px-4 pt-2 mt-2 border-t border-dashed">
+                 <p className="text-xs text-muted-foreground italic">This post has {post.comments} {post.comments === 1 ? "comment" : "comments"}, but text is not available.</p>
+            </div>
+        )}
       </CardFooter>
     </Card>
   );
