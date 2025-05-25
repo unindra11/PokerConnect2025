@@ -1,8 +1,7 @@
-
 // src/app/login/page.tsx
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -10,30 +9,74 @@ import { Label } from "@/components/ui/label";
 import Link from "next/link";
 import { LogInIcon, Eye, EyeOff } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { useToast } from "@/hooks/use-toast";
 
 export default function LoginPage() {
   const router = useRouter();
+  const { toast } = useToast();
   const [emailOrUsername, setEmailOrUsername] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  // const [error, setError] = useState(""); // Future: for login error messages
 
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    // setError(""); // Future: reset error on new submit
-
     console.log("Login attempt submitted.");
     console.log("Entered Email/Username:", emailOrUsername);
     console.log("Entered Password:", password);
 
-    if (emailOrUsername === "unindra111@gmail.com" && password === "qwerty") {
-      console.log("Login successful! Redirecting to /home...");
+    let loginSuccess = false;
+    let loggedInUser = null;
+
+    // Try to get user from localStorage
+    try {
+      const storedUserString = localStorage.getItem("pokerConnectUser");
+      if (storedUserString) {
+        const storedUser = JSON.parse(storedUserString);
+        if (
+          (storedUser.email === emailOrUsername || storedUser.username === emailOrUsername) &&
+          storedUser.password === password
+        ) {
+          loginSuccess = true;
+          loggedInUser = storedUser;
+          console.log("Login successful with localStorage user:", storedUser.username);
+        }
+      }
+    } catch (error) {
+      console.error("Error reading from localStorage:", error);
+    }
+
+    // Fallback to hardcoded admin user if localStorage login failed
+    if (!loginSuccess) {
+      if (emailOrUsername === "unindra111@gmail.com" && password === "qwerty") {
+        loginSuccess = true;
+        loggedInUser = { 
+          fullName: "Player One", 
+          email: "unindra111@gmail.com", 
+          username: "playerone_admin" // or some admin username
+        }; // Mock admin user object
+        console.log("Login successful with hardcoded admin user.");
+      }
+    }
+
+    if (loginSuccess && loggedInUser) {
+      try {
+        localStorage.setItem("loggedInUser", JSON.stringify(loggedInUser));
+      } catch (error) {
+        console.error("Error saving loggedInUser to localStorage:", error);
+        // Non-critical error, proceed with login
+      }
+      toast({
+        title: "Login Successful!",
+        description: `Welcome back, ${loggedInUser.fullName || loggedInUser.username}!`,
+      });
       router.push("/home");
     } else {
       console.log("Login failed: Invalid credentials entered.");
-      console.log("Expected email: unindra111@gmail.com, Actual:", emailOrUsername);
-      console.log("Expected password: qwerty, Actual:", password);
-      alert("Invalid email or password. Please use unindra111@gmail.com and qwerty. Check the browser console for more details.");
+      toast({
+        title: "Login Failed",
+        description: "Invalid email/username or password. Please try again.",
+        variant: "destructive",
+      });
     }
   };
 
@@ -56,7 +99,7 @@ export default function LoginPage() {
               <Label htmlFor="emailOrUsername">Email or Username</Label>
               <Input
                 id="emailOrUsername"
-                placeholder="unindra111@gmail.com"
+                placeholder="Your email or username"
                 className="mt-1"
                 value={emailOrUsername}
                 onChange={(e) => setEmailOrUsername(e.target.value)}
@@ -68,8 +111,8 @@ export default function LoginPage() {
                 <Input
                   id="password"
                   type={showPassword ? "text" : "password"}
-                  placeholder="qwerty"
-                  className="pr-10" // Add padding for the icon
+                  placeholder="Your password"
+                  className="pr-10"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                 />
@@ -85,11 +128,6 @@ export default function LoginPage() {
                 </Button>
               </div>
             </div>
-            {/* Future: Display error message
-            {error && (
-              <p className="text-sm text-destructive text-center">{error}</p>
-            )}
-            */}
           </CardContent>
           <CardFooter className="flex flex-col gap-4">
             <Button type="submit" className="w-full text-lg py-3">

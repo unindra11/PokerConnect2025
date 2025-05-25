@@ -1,24 +1,73 @@
 // src/app/signup/page.tsx
 "use client"; 
 
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import Link from "next/link";
 import { UserPlus } from "lucide-react";
-import { useRouter } from "next/navigation"; // Import useRouter
+import { useRouter } from "next/navigation";
+import { useToast } from "@/hooks/use-toast";
 
 export default function SignupPage() {
-  const router = useRouter(); // Initialize router
+  const router = useRouter();
+  const { toast } = useToast();
+
+  const [fullName, setFullName] = useState("");
+  const [email, setEmail] = useState("");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [location, setLocation] = useState("");
+  // const [error, setError] = useState(""); // Future: for error messages
 
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    // In a real application, you would handle form submission logic here,
-    // like validating input and sending data to a server.
-    // For now, we'll simulate a successful signup and redirect.
-    console.log("Sign Up button clicked! Form data would be processed here.");
-    router.push("/login"); // Redirect to login page
+    // setError(""); // Future: reset error
+
+    if (password !== confirmPassword) {
+      toast({
+        title: "Signup Error",
+        description: "Passwords do not match.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (!fullName || !email || !username || !password || !location) {
+      toast({
+        title: "Signup Error",
+        description: "Please fill in all fields.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const newUser = {
+      fullName,
+      email,
+      username,
+      password, // In a real app, hash this password
+      location,
+    };
+
+    try {
+      localStorage.setItem("pokerConnectUser", JSON.stringify(newUser));
+      toast({
+        title: "Signup Successful!",
+        description: `Welcome, ${newUser.fullName}! Please log in.`,
+      });
+      router.push("/login");
+    } catch (storageError) {
+      console.error("Error saving to localStorage:", storageError);
+      toast({
+        title: "Signup Error",
+        description: "Could not save your details. Please try again.",
+        variant: "destructive",
+      });
+    }
   };
 
   return (
@@ -34,28 +83,78 @@ export default function SignupPage() {
           <CardContent className="space-y-5">
             <div>
               <Label htmlFor="fullName">Full Name</Label>
-              <Input id="fullName" placeholder="John Doe" className="mt-1" />
+              <Input 
+                id="fullName" 
+                placeholder="e.g., John Wick" 
+                className="mt-1"
+                value={fullName}
+                onChange={(e) => setFullName(e.target.value)}
+                required
+              />
             </div>
             <div>
               <Label htmlFor="email">Email Address</Label>
-              <Input id="email" type="email" placeholder="you@example.com" className="mt-1" />
+              <Input 
+                id="email" 
+                type="email" 
+                placeholder="you@example.com" 
+                className="mt-1"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+              />
             </div>
             <div>
               <Label htmlFor="username">Username</Label>
-              <Input id="username" placeholder="pokerace123" className="mt-1" />
+              <Input 
+                id="username" 
+                placeholder="e.g., johnwick" 
+                className="mt-1"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                required
+              />
             </div>
             <div>
               <Label htmlFor="password">Password</Label>
-              <Input id="password" type="password" placeholder="••••••••" className="mt-1" />
+              <Input 
+                id="password" 
+                type="password" 
+                placeholder="••••••••" 
+                className="mt-1"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+              />
             </div>
              <div>
               <Label htmlFor="confirmPassword">Confirm Password</Label>
-              <Input id="confirmPassword" type="password" placeholder="••••••••" className="mt-1" />
+              <Input 
+                id="confirmPassword" 
+                type="password" 
+                placeholder="••••••••" 
+                className="mt-1"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                required
+              />
             </div>
             <div>
               <Label htmlFor="location">Location</Label>
-              <Input id="location" placeholder="e.g., City, Country" className="mt-1" />
+              <Input 
+                id="location" 
+                placeholder="e.g., New York, USA" 
+                className="mt-1"
+                value={location}
+                onChange={(e) => setLocation(e.target.value)}
+                required
+              />
             </div>
+            {/* Future: Display error message
+            {error && (
+              <p className="text-sm text-destructive text-center">{error}</p>
+            )}
+            */}
           </CardContent>
           <CardFooter className="flex flex-col gap-4">
             <Button type="submit" className="w-full text-lg py-3">
