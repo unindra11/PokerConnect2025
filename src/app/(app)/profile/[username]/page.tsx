@@ -6,7 +6,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { UserCog, ShieldCheck, Edit3, UserPlus, Loader2, Users, Camera, UserCheck } from "lucide-react";
+import { Edit3, UserPlus, Loader2, Users, Camera, UserCheck } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { PostCard } from "@/components/post-card";
@@ -216,6 +216,7 @@ export default function UserProfilePage({ params }: { params: { username: string
 
   useEffect(() => {
     setIsLoadingPosts(true);
+    if (!resolvedParams.username) return; // Don't fetch if username isn't resolved
     try {
       const storedPostsString = localStorage.getItem(USER_POSTS_STORAGE_KEY);
       if (storedPostsString) {
@@ -287,11 +288,10 @@ export default function UserProfilePage({ params }: { params: { username: string
         let allStoredPosts: Post[] = JSON.parse(allStoredPostsString);
         allStoredPosts = allStoredPosts.map(p => {
           if (p.id === postId) {
-             // We need to find the current liked status from *allStoredPosts* for consistency
              const storedPost = allStoredPosts.find(sp => sp.id === postId);
-             const alreadyLiked = !!storedPost?.likedByCurrentUser; // Use stored post's status
+             const alreadyLiked = !!storedPost?.likedByCurrentUser;
              return { 
-              ...p, // Keep the structure of p from state
+              ...p, 
               likes: (storedPost?.likes || 0) + (alreadyLiked ? -1 : 1), 
               likedByCurrentUser: !alreadyLiked 
             };
@@ -432,7 +432,6 @@ export default function UserProfilePage({ params }: { params: { username: string
     }
     
     try {
-      // 1. Create "request sent" notification for the sender (currentLoggedInUser)
       const sentNotification: StoredNotification = {
         id: `notif_sent_to_${profileUser.username}_${Date.now()}`,
         type: "friend_request_sent_confirmation",
@@ -458,11 +457,10 @@ export default function UserProfilePage({ params }: { params: { username: string
       senderExistingNotifications.unshift(sentNotification); 
       localStorage.setItem(senderNotificationsKey, JSON.stringify(senderExistingNotifications));
 
-      // 2. Create "incoming request" notification for the recipient (profileUser)
       const incomingRequestNotification: StoredNotification = {
         id: `notif_received_from_${currentLoggedInUser.username}_${Date.now()}`,
-        type: "friend_request", // This is the type for an incoming request
-        user: { // Details of the sender
+        type: "friend_request", 
+        user: { 
             name: currentLoggedInUser.fullName || currentLoggedInUser.username,
             avatar: currentLoggedInUser.avatar || `https://placehold.co/100x100.png?u=${currentLoggedInUser.username}`,
             handle: `@${currentLoggedInUser.username}`,
@@ -676,5 +674,3 @@ export default function UserProfilePage({ params }: { params: { username: string
     </div>
   );
 }
-
-    

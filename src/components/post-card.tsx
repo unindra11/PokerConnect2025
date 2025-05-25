@@ -47,41 +47,40 @@ export function PostCard({
     if (onLikePost) {
       onLikePost(post.id);
     } else {
-      // Fallback toast if onLikePost is not provided
+      // Fallback toast if onLikePost is not provided (e.g., on Home feed)
       toast({
-        title: post.likedByCurrentUser ? "Like Removed" : "Post Liked!",
-        description: `You reacted to "${post.content.substring(0,20)}...".`,
+        title: "Action Simulated",
+        description: `Like action for "${post.content.substring(0,20)}...".`,
       });
     }
   };
 
   const handleComment = () => {
-    // Original logic:
     const commentText = window.prompt("Enter your comment:");
-    if (commentText && commentText.trim() !== "") {
+    if (commentText === null) { // User cancelled
+      console.log("User cancelled comment input.");
+      return;
+    }
+    if (commentText.trim() !== "") {
       if (onCommentPost) {
         onCommentPost(post.id, commentText);
       } else {
          toast({
-          title: "Comment Added",
-          description: "Your comment has been added (simulated).",
+          title: "Comment Simulated",
+          description: "Your comment would be added here.",
         });
       }
-    } else if (commentText === "") { // Check for empty string specifically if user clicks OK on empty prompt
+    } else { 
       toast({
         title: "Empty Comment",
         description: "Comment cannot be empty.",
         variant: "destructive"
       });
-    } else if (commentText === null) {
-      // User clicked Cancel on the prompt, do nothing or show a subtle message
-      // For now, we'll do nothing.
-      console.log("User cancelled comment input.");
     }
   };
 
   const handleEdit = () => {
-    router.push(`/create-post?editPostId=${post.id}&editContent=${encodeURIComponent(post.content)}${post.image ? `&editImage=${encodeURIComponent(post.image)}` : ''}`);
+    router.push(`/create-post?editPostId=${post.id}`);
   };
 
   const handleDelete = () => {
@@ -89,8 +88,8 @@ export function PostCard({
       onDeletePost(post.id);
     } else {
       toast({
-        title: "Post Deleted",
-        description: `Post "${post.content.substring(0,20)}..." has been removed (simulated).`,
+        title: "Delete Simulated",
+        description: `Post "${post.content.substring(0,20)}..." would be removed.`,
       });
     }
   };
@@ -114,7 +113,7 @@ export function PostCard({
             {post.timestamp}
           </CardDescription>
         </div>
-        {showManagementControls && onDeletePost && (
+        {showManagementControls && (
           <div className="flex gap-2">
             <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleEdit}>
               <Edit3 className="h-4 w-4" />
@@ -124,7 +123,7 @@ export function PostCard({
               variant="ghost"
               size="icon"
               className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
-              onClick={handleDelete}
+              onClick={onDeletePost ? handleDelete : undefined} // Only attach if onDeletePost is provided
             >
               <Trash2 className="h-4 w-4" />
               <span className="sr-only">Delete Post</span>

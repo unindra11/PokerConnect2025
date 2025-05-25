@@ -98,10 +98,11 @@ export default function MyPostsPage() {
         let allStoredPosts: Post[] = JSON.parse(allStoredPostsString);
         allStoredPosts = allStoredPosts.map(p => {
           if (p.id === postId) {
-            const alreadyLiked = !!p.likedByCurrentUser;
+            const storedPost = allStoredPosts.find(sp => sp.id === postId);
+            const alreadyLiked = !!storedPost?.likedByCurrentUser;
             return { 
               ...p, 
-              likes: p.likes + (alreadyLiked ? -1 : 1), 
+              likes: (storedPost?.likes || 0) + (alreadyLiked ? -1 : 1), 
               likedByCurrentUser: !alreadyLiked 
             };
           }
@@ -109,7 +110,7 @@ export default function MyPostsPage() {
         });
         localStorage.setItem(USER_POSTS_STORAGE_KEY, JSON.stringify(allStoredPosts));
         toast({
-          title: userPosts.find(p=>p.id === postId)?.likedByCurrentUser ? "Post Liked!" : "Like Removed",
+          title: allStoredPosts.find(p=>p.id === postId)?.likedByCurrentUser ? "Post Liked!" : "Like Removed",
           description: `You reacted to "${postContentForToast}".`,
         });
       }

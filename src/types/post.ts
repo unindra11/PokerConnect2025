@@ -12,9 +12,9 @@ export interface Post {
   image?: string;
   imageAiHint?: string;
   likes: number;
-  likedByCurrentUser?: boolean; // Added to track if current user liked this
+  likedByCurrentUser?: boolean;
   comments: number;
-  commentTexts?: string[]; // To store actual comment strings
+  commentTexts?: string[]; // Ensure this is present
   shares: number;
   timestamp: string;
 }

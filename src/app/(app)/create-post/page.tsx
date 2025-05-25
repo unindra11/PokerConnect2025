@@ -36,8 +36,6 @@ export default function CreatePostPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const editPostId = searchParams.get("editPostId");
-  const initialEditContent = searchParams.get("editContent"); 
-  const initialEditImage = searchParams.get("editImage"); 
 
   const isEditMode = !!editPostId;
 
@@ -49,7 +47,7 @@ export default function CreatePostPage() {
   });
 
   useEffect(() => {
-    if (isEditMode) {
+    if (isEditMode && editPostId) {
       try {
         const storedPostsString = localStorage.getItem(USER_POSTS_STORAGE_KEY);
         if (storedPostsString) {
@@ -58,24 +56,18 @@ export default function CreatePostPage() {
           if (postToEdit) {
             form.setValue("postContent", postToEdit.content);
             if (postToEdit.image) {
-              setPreviewUrl(postToEdit.image);
+              setPreviewUrl(postToEdit.image); 
             }
           } else {
-            if (initialEditContent) form.setValue("postContent", decodeURIComponent(initialEditContent));
-            if (initialEditImage) setPreviewUrl(decodeURIComponent(initialEditImage));
+            toast({ title: "Warning", description: "Could not find the original post in storage. Some details might be missing.", variant: "default" });
           }
-        } else if (initialEditContent) {
-            form.setValue("postContent", decodeURIComponent(initialEditContent));
-            if (initialEditImage) setPreviewUrl(decodeURIComponent(initialEditImage));
         }
       } catch (error) {
         console.error("Error loading post for editing from localStorage:", error);
         toast({ title: "Error", description: "Could not load post data for editing.", variant: "destructive" });
-        if (initialEditContent) form.setValue("postContent", decodeURIComponent(initialEditContent));
-        if (initialEditImage) setPreviewUrl(decodeURIComponent(initialEditImage));
       }
     }
-  }, [isEditMode, editPostId, initialEditContent, initialEditImage, form, toast]);
+  }, [isEditMode, editPostId, form, toast]);
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -164,7 +156,7 @@ export default function CreatePostPage() {
             return {
               ...p,
               content: data.postContent,
-              image: previewUrl || p.image, // Use new Data URI, or keep existing if new one is null/undefined
+              image: previewUrl || p.image,
               timestamp: new Date().toLocaleString(), 
             };
           }
@@ -178,9 +170,9 @@ export default function CreatePostPage() {
           image: previewUrl || undefined, 
           imageAiHint: selectedFile ? "user uploaded image" : undefined,
           likes: 0,
-          likedByCurrentUser: false, // Initialize likedByCurrentUser
+          likedByCurrentUser: false,
           comments: 0,
-          commentTexts: [],
+          commentTexts: [], // Initialize commentTexts
           shares: 0,
           timestamp: new Date().toLocaleString(),
         };
