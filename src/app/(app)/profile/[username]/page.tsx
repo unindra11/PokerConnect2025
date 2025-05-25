@@ -51,8 +51,7 @@ export default function UserProfilePage({ params }: { params: { username: string
     avatar: `https://placehold.co/150x150.png?u=${resolvedParams.username}`,
     bio: "Passionate poker player, always learning and looking for the next big win. Specializing in Texas Hold'em tournaments.",
     joinedDate: "Joined January 2023",
-    followers: 256,
-    following: 180,
+    friendsCount: 78, // New friends count
     totalPosts: profilePosts.length, 
     coverImage: "https://placehold.co/1200x300.png?cover=1",
     coverImageAiHint: "poker table background",
@@ -169,18 +168,14 @@ export default function UserProfilePage({ params }: { params: { username: string
         </div>
         
         <CardContent className="pt-16 sm:pt-8">
-          <div className="grid grid-cols-3 gap-4 text-center my-4 border-b pb-4">
+          <div className="grid grid-cols-2 gap-4 text-center my-4 border-b pb-4"> {/* Changed grid-cols-3 to grid-cols-2 */}
             <div>
               <p className="font-semibold text-lg">{mockUser.totalPosts}</p>
               <p className="text-sm text-muted-foreground">Posts</p>
             </div>
             <div>
-              <p className="font-semibold text-lg">{mockUser.followers}</p>
-              <p className="text-sm text-muted-foreground">Followers</p>
-            </div>
-            <div>
-              <p className="font-semibold text-lg">{mockUser.following}</p>
-              <p className="text-sm text-muted-foreground">Following</p>
+              <p className="font-semibold text-lg">{mockUser.friendsCount}</p>
+              <p className="text-sm text-muted-foreground">Friends</p>
             </div>
           </div>
 
