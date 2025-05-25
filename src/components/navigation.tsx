@@ -42,17 +42,16 @@ export function AppNavigation() {
           <SidebarMenuItem key={item.href}>
             <Link href={item.href} asChild>
               <SidebarMenuButton
-                asChild // Explicitly add asChild here
+                asChild // Explicitly add asChild here for clarity with Link's asChild
                 isActive={pathname === item.href || (item.href !== "/home" && pathname.startsWith(item.href))}
                 tooltip={item.label}
-                className={cn(
-                  "flex items-center justify-start gap-2"
-                )}
               >
-                {/* Content is now direct children of SidebarMenuButton, which Link makes navigable */}
-                <Icon size={20} />
-                <span className="group-data-[collapsible=icon]:hidden delay-300 whitespace-nowrap">
-                  {item.label}
+                {/* Wrap Icon and text span in a single parent for Slot compatibility */}
+                <span className="flex items-center justify-start gap-2 w-full">
+                  <Icon size={20} />
+                  <span className="group-data-[collapsible=icon]:hidden delay-300 whitespace-nowrap truncate">
+                    {item.label}
+                  </span>
                 </span>
               </SidebarMenuButton>
             </Link>
@@ -62,4 +61,3 @@ export function AppNavigation() {
     </SidebarMenu>
   );
 }
-
