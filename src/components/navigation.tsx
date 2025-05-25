@@ -11,7 +11,7 @@ import {
   Bell,
   Lightbulb,
   LayoutGrid,
-  MessageSquarePlus,
+  // MessageSquarePlus, // Removed
 } from "lucide-react";
 import {
   SidebarMenu,
@@ -28,7 +28,7 @@ const menuItems = [
   { href: "/notifications", label: "Notifications", icon: Bell },
   { href: "/poker-tips", label: "Poker Tips", icon: Lightbulb },
   { href: "/community-wall", label: "Community Wall", icon: LayoutGrid },
-  { href: "/create-post", label: "Create Post", icon: MessageSquarePlus },
+  // { href: "/create-post", label: "Create Post", icon: MessageSquarePlus }, // Removed
 ];
 
 export function AppNavigation() {
