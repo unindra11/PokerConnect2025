@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { MessageCircle, Heart, Repeat, Edit3, Trash2 } from "lucide-react";
 import type { Post } from "@/types/post";
 import { useToast } from "@/hooks/use-toast";
+import { useRouter } from "next/navigation"; // New import
 
 interface PostCardProps {
   post: Post;
@@ -24,6 +25,7 @@ interface PostCardProps {
 
 export function PostCard({ post, showManagementControls = false }: PostCardProps) {
   const { toast } = useToast();
+  const router = useRouter(); // New hook
 
   const handleShare = () => {
     toast({
@@ -50,10 +52,8 @@ export function PostCard({ post, showManagementControls = false }: PostCardProps
   };
 
   const handleEdit = () => {
-    toast({
-      title: "Edit Post",
-      description: "You would be able to edit this post (simulated).",
-    });
+    // Navigate to create-post page with post data as query params
+    router.push(`/create-post?editPostId=${post.id}&editContent=${encodeURIComponent(post.content)}${post.image ? `&editImage=${encodeURIComponent(post.image)}` : ''}`);
   };
 
   const handleDelete = () => {

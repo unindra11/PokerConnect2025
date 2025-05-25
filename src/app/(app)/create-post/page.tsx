@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useForm, SubmitHandler } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -9,14 +9,14 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Input } from "@/components/ui/input"; // Added for file input styling
-import { ImagePlus, Send, VideoIcon, Loader2 } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { ImagePlus, Send, Edit, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 
 const createPostSchema = z.object({
   postContent: z.string().min(1, "Post content cannot be empty.").max(1000, "Post content is too long."),
-  mediaFile: z.any().optional(), // Handle file validation separately if needed
+  mediaFile: z.any().optional(),
 });
 
 type CreatePostFormValues = z.infer<typeof createPostSchema>;
@@ -27,6 +27,12 @@ export default function CreatePostPage() {
   const [isLoading, setIsLoading] = useState(false);
   const { toast } = useToast();
   const router = useRouter();
+  const searchParams = useSearchParams();
+
+  const editPostId = searchParams.get("editPostId");
+  const editContent = searchParams.get("editContent");
+  const editImage = searchParams.get("editImage"); // For potential future use if we allow editing existing images
+  const isEditMode = !!editPostId;
 
   const form = useForm<CreatePostFormValues>({
     resolver: zodResolver(createPostSchema),
@@ -34,6 +40,19 @@ export default function CreatePostPage() {
       postContent: "",
     },
   });
+
+  useEffect(() => {
+    if (isEditMode && editContent) {
+      form.setValue("postContent", decodeURIComponent(editContent));
+    }
+    if (isEditMode && editImage) {
+        // If we were actually editing the image, we might fetch it or use the URL
+        // For now, if an editImage URL is provided, we can set it as the preview
+        // This won't allow changing it, but shows it's part of the "edited" post
+        setPreviewUrl(decodeURIComponent(editImage));
+        // Note: `selectedFile` will remain null as we are not re-uploading
+    }
+  }, [isEditMode, editContent, editImage, form]);
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -52,34 +71,32 @@ export default function CreatePostPage() {
 
   const onSubmit: SubmitHandler<CreatePostFormValues> = async (data) => {
     setIsLoading(true);
-    console.log("Creating post with data:", data);
+    console.log(isEditMode ? "Updating post with data:" : "Creating post with data:", data);
     console.log("Selected file:", selectedFile);
+    console.log("Post ID (if editing):", editPostId);
 
-    // Simulate API call
     await new Promise(resolve => setTimeout(resolve, 1500));
 
     toast({
-      title: "Post Created!",
-      description: "Your thoughts have been shared with the community.",
+      title: isEditMode ? "Post Updated!" : "Post Created!",
+      description: isEditMode ? "Your changes have been saved." : "Your thoughts have been shared with the community.",
     });
     
-    // Reset form and state
     form.reset();
     setSelectedFile(null);
     setPreviewUrl(null);
     setIsLoading(false);
     
-    // For now, redirect to home page after posting
-    router.push("/home"); 
+    router.push(isEditMode ? "/my-posts" : "/home"); 
   };
 
   return (
     <div className="container mx-auto max-w-xl">
       <Card className="shadow-xl rounded-xl">
         <CardHeader>
-          <CardTitle className="text-2xl">Share Your Poker Story</CardTitle>
+          <CardTitle className="text-2xl">{isEditMode ? "Edit Your Post" : "Share Your Poker Story"}</CardTitle>
           <CardDescription>
-            Post updates, ask questions, or share your experiences with the PokerConnect community.
+            {isEditMode ? "Make changes to your post below." : "Post updates, ask questions, or share your experiences with the PokerConnect community."}
           </CardDescription>
         </CardHeader>
         <form onSubmit={form.handleSubmit(onSubmit)}>
@@ -113,7 +130,7 @@ export default function CreatePostPage() {
                           id="mediaFile-upload" 
                           type="file" 
                           className="sr-only"
-                          accept="image/*,video/*" // Accept images and videos
+                          accept="image/*,video/*"
                           onChange={handleFileChange} 
                         />
                       </label>
@@ -122,21 +139,41 @@ export default function CreatePostPage() {
                     <p className="text-xs text-muted-foreground">PNG, JPG, GIF, MP4, MOV up to 50MB</p>
                   </div>
                 )}
-                {previewUrl && selectedFile && (
+                {previewUrl && (
                   <div className="mt-2 text-center">
-                    {selectedFile.type.startsWith("image/") ? (
+                    {selectedFile?.type.startsWith("image/") || (previewUrl && !selectedFile && editImage?.match(/\.(jpeg|jpg|gif|png)$/) != null) ? (
                       <img src={previewUrl} alt="Preview" className="max-h-60 rounded-md mx-auto" />
-                    ) : selectedFile.type.startsWith("video/") ? (
+                    ) : selectedFile?.type.startsWith("video/") || (previewUrl && !selectedFile && editImage?.match(/\.(mp4|mov|avi)$/) != null) ? (
                       <video src={previewUrl} controls className="max-h-60 rounded-md mx-auto" />
-                    ) : (
+                    ) : selectedFile ? (
                        <div className="p-4 bg-muted rounded-md text-sm">
                          <p>Cannot preview this file type.</p>
                          <p>{selectedFile.name}</p>
                        </div>
+                    ) : previewUrl ? ( // If previewUrl exists but not selectedFile (i.e. from editImage) and not image/video
+                        <div className="p-4 bg-muted rounded-md text-sm">
+                         <p>Preview for existing media (if any).</p>
+                         <a href={previewUrl} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">View media</a>
+                       </div>
+                    ): null}
+                    {(selectedFile || (isEditMode && editImage)) && ( // Show remove button if there's a selected file OR if we are in edit mode and there was an initial image
+                        <Button 
+                            variant="link" 
+                            size="sm" 
+                            onClick={() => {
+                                setSelectedFile(null); 
+                                setPreviewUrl(null); 
+                                (document.getElementById('mediaFile-upload') as HTMLInputElement).value = '';
+                                if (isEditMode && editImage) {
+                                    // In a real app, you might need to signal that the image should be removed on update
+                                    // For now, we just clear the preview
+                                    router.replace(`/create-post?editPostId=${editPostId}&editContent=${encodeURIComponent(form.getValues("postContent"))}`);
+                                }
+                            }} 
+                            className="mt-2 text-destructive">
+                        Remove file
+                        </Button>
                     )}
-                    <Button variant="link" size="sm" onClick={() => {setSelectedFile(null); setPreviewUrl(null); (document.getElementById('mediaFile-upload') as HTMLInputElement).value = '';}} className="mt-2 text-destructive">
-                      Remove file
-                    </Button>
                   </div>
                 )}
               </div>
@@ -148,11 +185,12 @@ export default function CreatePostPage() {
               {isLoading ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Posting...
+                  {isEditMode ? "Updating..." : "Posting..."}
                 </>
               ) : (
                 <>
-                  <Send className="mr-2 h-4 w-4" /> Post to Wall
+                  {isEditMode ? <Edit className="mr-2 h-4 w-4" /> : <Send className="mr-2 h-4 w-4" />}
+                  {isEditMode ? "Update Post" : "Post to Wall"}
                 </>
               )}
             </Button>
