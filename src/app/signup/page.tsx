@@ -9,6 +9,13 @@ import Link from "next/link";
 import { UserPlus } from "lucide-react";
 
 export default function SignupPage() {
+  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    alert("Sign Up button clicked! Form data would be processed here.");
+    // In a real application, you would handle form submission logic here,
+    // like validating input and sending data to a server.
+  };
+
   return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-br from-background to-muted/50 p-4">
       <Card className="w-full max-w-md shadow-2xl rounded-xl">
@@ -18,7 +25,7 @@ export default function SignupPage() {
             Welcome to PokerConnect! Let's get you set up.
           </CardDescription>
         </CardHeader>
-        <form onSubmit={(e) => e.preventDefault()} className="p-2">
+        <form onSubmit={handleSubmit} className="p-2">
           <CardContent className="space-y-5">
             <div>
               <Label htmlFor="fullName">Full Name</Label>
