@@ -10,7 +10,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
-import { ImagePlus, Send, Edit, Loader2 } from "lucide-react";
+import { ImagePlus, Send, Edit, Loader2, X } from "lucide-react"; // Added X
 import { useToast } from "@/hooks/use-toast";
 import { useRouter, useSearchParams } from "next/navigation";
 
@@ -31,7 +31,7 @@ export default function CreatePostPage() {
 
   const editPostId = searchParams.get("editPostId");
   const editContent = searchParams.get("editContent");
-  const editImage = searchParams.get("editImage"); // For potential future use if we allow editing existing images
+  const editImage = searchParams.get("editImage"); 
   const isEditMode = !!editPostId;
 
   const form = useForm<CreatePostFormValues>({
@@ -46,11 +46,7 @@ export default function CreatePostPage() {
       form.setValue("postContent", decodeURIComponent(editContent));
     }
     if (isEditMode && editImage) {
-        // If we were actually editing the image, we might fetch it or use the URL
-        // For now, if an editImage URL is provided, we can set it as the preview
-        // This won't allow changing it, but shows it's part of the "edited" post
         setPreviewUrl(decodeURIComponent(editImage));
-        // Note: `selectedFile` will remain null as we are not re-uploading
     }
   }, [isEditMode, editContent, editImage, form]);
 
@@ -140,40 +136,45 @@ export default function CreatePostPage() {
                   </div>
                 )}
                 {previewUrl && (
-                  <div className="mt-2 text-center">
-                    {selectedFile?.type.startsWith("image/") || (previewUrl && !selectedFile && editImage?.match(/\.(jpeg|jpg|gif|png)$/) != null) ? (
-                      <img src={previewUrl} alt="Preview" className="max-h-60 rounded-md mx-auto" />
-                    ) : selectedFile?.type.startsWith("video/") || (previewUrl && !selectedFile && editImage?.match(/\.(mp4|mov|avi)$/) != null) ? (
-                      <video src={previewUrl} controls className="max-h-60 rounded-md mx-auto" />
-                    ) : selectedFile ? (
-                       <div className="p-4 bg-muted rounded-md text-sm">
-                         <p>Cannot preview this file type.</p>
-                         <p>{selectedFile.name}</p>
-                       </div>
-                    ) : previewUrl ? ( // If previewUrl exists but not selectedFile (i.e. from editImage) and not image/video
-                        <div className="p-4 bg-muted rounded-md text-sm">
-                         <p>Preview for existing media (if any).</p>
-                         <a href={previewUrl} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">View media</a>
-                       </div>
-                    ): null}
-                    {(selectedFile || (isEditMode && editImage)) && ( // Show remove button if there's a selected file OR if we are in edit mode and there was an initial image
-                        <Button 
-                            variant="link" 
-                            size="sm" 
-                            onClick={() => {
-                                setSelectedFile(null); 
-                                setPreviewUrl(null); 
-                                (document.getElementById('mediaFile-upload') as HTMLInputElement).value = '';
-                                if (isEditMode && editImage) {
-                                    // In a real app, you might need to signal that the image should be removed on update
-                                    // For now, we just clear the preview
-                                    router.replace(`/create-post?editPostId=${editPostId}&editContent=${encodeURIComponent(form.getValues("postContent"))}`);
-                                }
-                            }} 
-                            className="mt-2 text-destructive">
-                        Remove file
+                  <div className="mt-2 w-full flex justify-center">
+                    <div className="relative inline-block"> {/* Wrapper for preview and X button */}
+                      {selectedFile?.type.startsWith("image/") || (previewUrl && !selectedFile && editImage?.match(/\.(jpeg|jpg|gif|png)$/) != null) ? (
+                        <img src={previewUrl} alt="Preview" className="max-h-60 rounded-md" data-ai-hint="image preview" />
+                      ) : selectedFile?.type.startsWith("video/") || (previewUrl && !selectedFile && editImage?.match(/\.(mp4|mov|avi)$/) != null) ? (
+                        <video src={previewUrl} controls className="max-h-60 rounded-md" data-ai-hint="video preview" />
+                      ) : selectedFile ? (
+                         <div className="p-4 bg-muted rounded-md text-sm max-h-60 w-full text-left">
+                           <p>Cannot preview this file type.</p>
+                           <p className="truncate">{selectedFile.name}</p>
+                         </div>
+                      ) : ( // If previewUrl exists but not selectedFile (i.e. from editImage) and not image/video
+                          <div className="p-4 bg-muted rounded-md text-sm max-h-60 w-full text-left">
+                           <p>Preview for existing media (if any).</p>
+                           <a href={previewUrl} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">View media</a>
+                         </div>
+                      )}
+
+                      {/* X button to remove media */}
+                      {(selectedFile || (isEditMode && editImage && previewUrl)) && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => {
+                              setSelectedFile(null);
+                              setPreviewUrl(null);
+                              (document.getElementById('mediaFile-upload') as HTMLInputElement).value = '';
+                              if (isEditMode && editImage) {
+                                  router.replace(`/create-post?editPostId=${editPostId}&editContent=${encodeURIComponent(form.getValues("postContent"))}`);
+                              }
+                          }}
+                          className="absolute -top-2 -right-2 bg-destructive text-destructive-foreground hover:bg-destructive/90 p-1 rounded-full h-6 w-6 z-10"
+                          aria-label="Remove media"
+                        >
+                          <X className="h-4 w-4" />
                         </Button>
-                    )}
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
