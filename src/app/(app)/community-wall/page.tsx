@@ -41,19 +41,41 @@ export default function CommunityWallPage() {
   }, [toast]);
 
   const handleLikePost = (postId: string) => {
+    let postContentForToast = "";
     setCommunityPosts(prevPosts =>
-      prevPosts.map(p =>
-        p.id === postId ? { ...p, likes: p.likes + (p.likedByCurrentUser ? -1 : 1), likedByCurrentUser: !p.likedByCurrentUser } : p
-      )
+      prevPosts.map(p => {
+        if (p.id === postId) {
+          postContentForToast = p.content.substring(0, 20) + "...";
+          const alreadyLiked = !!p.likedByCurrentUser;
+          return { 
+            ...p, 
+            likes: p.likes + (alreadyLiked ? -1 : 1), 
+            likedByCurrentUser: !alreadyLiked 
+          };
+        }
+        return p;
+      })
     );
     try {
       const allStoredPostsString = localStorage.getItem(USER_POSTS_STORAGE_KEY);
       if (allStoredPostsString) {
         let allStoredPosts: Post[] = JSON.parse(allStoredPostsString);
-        allStoredPosts = allStoredPosts.map(p =>
-          p.id === postId ? { ...p, likes: p.likes + (p.likedByCurrentUser ? -1 : 1), likedByCurrentUser: !p.likedByCurrentUser } : p
-        );
+        allStoredPosts = allStoredPosts.map(p => {
+          if (p.id === postId) {
+            const alreadyLiked = !!p.likedByCurrentUser;
+            return { 
+              ...p, 
+              likes: p.likes + (alreadyLiked ? -1 : 1), 
+              likedByCurrentUser: !alreadyLiked 
+            };
+          }
+          return p;
+        });
         localStorage.setItem(USER_POSTS_STORAGE_KEY, JSON.stringify(allStoredPosts));
+        toast({
+          title: communityPosts.find(p=>p.id === postId)?.likedByCurrentUser ? "Post Liked!" : "Like Removed",
+          description: `You reacted to "${postContentForToast}".`,
+        });
       }
     } catch (error) {
       console.error("Error updating likes in localStorage:", error);
@@ -87,6 +109,10 @@ export default function CommunityWallPage() {
           } : p
         );
         localStorage.setItem(USER_POSTS_STORAGE_KEY, JSON.stringify(allStoredPosts));
+        toast({
+            title: "Comment Added",
+            description: "Your comment has been saved.",
+        });
       }
     } catch (error) {
       console.error("Error saving comment to localStorage:", error);

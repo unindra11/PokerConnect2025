@@ -12,7 +12,7 @@ import Link from "next/link";
 import { PostCard } from "@/components/post-card";
 import type { Post, User as PostUser } from "@/types/post"; 
 import { useToast } from "@/hooks/use-toast";
-import { useRouter, useParams } from "next/navigation"; // useParams is fine for client components
+import { useRouter, useParams } from "next/navigation"; 
 import type { MockUserPin } from "@/app/(app)/map/page";
 
 
@@ -56,8 +56,8 @@ const mockProfileConnections: Connection[] = [
 ];
 
 
-export default function UserProfilePage({ params: routeParams }: { params: { username: string } }) {
-  const resolvedParams = use(routeParams); 
+export default function UserProfilePage({ params }: { params: { username: string } }) {
+  const resolvedParams = use(params); 
   const router = useRouter();
 
   const [isCurrentUserProfile, setIsCurrentUserProfile] = useState(false);
@@ -84,10 +84,10 @@ export default function UserProfilePage({ params: routeParams }: { params: { use
         loggedInUserForState = loggedInUser;
         setCurrentLoggedInUser(loggedInUser);
 
-        if (loggedInUser.username === resolvedParams.username) { // Viewing own profile
+        if (loggedInUser.username === resolvedParams.username) { 
           setIsCurrentUserProfile(true);
           userForProfile = loggedInUser;
-        } else { // Viewing someone else's profile
+        } else { 
           setIsCurrentUserProfile(false);
           const allUsersString = localStorage.getItem("pokerConnectMapUsers");
           let foundOtherUser = false;
@@ -254,7 +254,6 @@ export default function UserProfilePage({ params: routeParams }: { params: { use
       toast({
         title: "Post Deleted",
         description: "The post has been removed.",
-        variant: "destructive"
       });
     } catch (error) {
       console.error("Error deleting post from localStorage:", error);
@@ -267,19 +266,41 @@ export default function UserProfilePage({ params: routeParams }: { params: { use
   };
   
   const handleLikePost = (postId: string) => {
+    let postContentForToast = "";
     setProfilePosts(prevPosts =>
-      prevPosts.map(p =>
-        p.id === postId ? { ...p, likes: p.likes + (p.likedByCurrentUser ? -1 : 1), likedByCurrentUser: !p.likedByCurrentUser } : p
-      )
+      prevPosts.map(p => {
+        if (p.id === postId) {
+          postContentForToast = p.content.substring(0, 20) + "...";
+          const alreadyLiked = !!p.likedByCurrentUser;
+          return { 
+            ...p, 
+            likes: p.likes + (alreadyLiked ? -1 : 1), 
+            likedByCurrentUser: !alreadyLiked 
+          };
+        }
+        return p;
+      })
     );
     try {
       const allStoredPostsString = localStorage.getItem(USER_POSTS_STORAGE_KEY);
       if (allStoredPostsString) {
         let allStoredPosts: Post[] = JSON.parse(allStoredPostsString);
-        allStoredPosts = allStoredPosts.map(p =>
-          p.id === postId ? { ...p, likes: p.likes + (p.likedByCurrentUser ? -1 : 1), likedByCurrentUser: !p.likedByCurrentUser } : p
-        );
+        allStoredPosts = allStoredPosts.map(p => {
+          if (p.id === postId) {
+             const alreadyLiked = !!p.likedByCurrentUser;
+             return { 
+              ...p, 
+              likes: p.likes + (alreadyLiked ? -1 : 1), 
+              likedByCurrentUser: !alreadyLiked 
+            };
+          }
+          return p;
+        });
         localStorage.setItem(USER_POSTS_STORAGE_KEY, JSON.stringify(allStoredPosts));
+        toast({
+          title: profilePosts.find(p=>p.id === postId)?.likedByCurrentUser ? "Post Liked!" : "Like Removed",
+          description: `You reacted to "${postContentForToast}".`,
+        });
       }
     } catch (error) {
       console.error("Error updating likes in localStorage:", error);
@@ -313,6 +334,10 @@ export default function UserProfilePage({ params: routeParams }: { params: { use
           } : p
         );
         localStorage.setItem(USER_POSTS_STORAGE_KEY, JSON.stringify(allStoredPosts));
+        toast({
+            title: "Comment Added",
+            description: "Your comment has been saved.",
+        });
       }
     } catch (error) {
       console.error("Error saving comment to localStorage:", error);

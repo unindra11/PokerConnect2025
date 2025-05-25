@@ -46,10 +46,9 @@ export function PostCard({
   const handleLike = () => {
     if (onLikePost) {
       onLikePost(post.id);
-    }
-    // Toast for liking can be handled by parent or here.
-    // For consistency, let's assume parent handles primary feedback if onLikePost exists.
-    if (!onLikePost) {
+      // The parent component (e.g., MyPostsPage) will show a toast upon successful localStorage update.
+    } else {
+      // This case is for static posts (e.g., on home feed) not managed by parent state/localStorage
       toast({
         title: "Post Liked!",
         description: `You liked "${post.content.substring(0,20)}...".`,
@@ -62,12 +61,15 @@ export function PostCard({
     if (commentText && commentText.trim() !== "") {
       if (onCommentPost) {
         onCommentPost(post.id, commentText);
+         // The parent component (e.g., MyPostsPage) will show a toast upon successful localStorage update.
+      } else {
+        // For static posts
+         toast({
+          title: "Comment Added",
+          description: "Your comment has been added (simulated).",
+        });
       }
-      toast({
-        title: "Comment Added",
-        description: "Your comment has been added (simulated).",
-      });
-    } else if (commentText !== null) { // User didn't cancel but entered empty string
+    } else if (commentText !== null) { 
       toast({
         title: "Empty Comment",
         description: "Comment cannot be empty.",
@@ -83,12 +85,12 @@ export function PostCard({
   const handleDelete = () => {
     if (onDeletePost) {
       onDeletePost(post.id); 
-    }
-    if (!onDeletePost) {
+       // The parent component (e.g., MyPostsPage) will show a toast upon successful localStorage update.
+    } else {
+      // For static posts or if no specific handler provided
       toast({
         title: "Post Deleted",
-        description: `Post "${post.content.substring(0,20)}..." has been removed.`,
-        variant: "destructive",
+        description: `Post "${post.content.substring(0,20)}..." has been removed (simulated).`,
       });
     }
   };
@@ -112,7 +114,7 @@ export function PostCard({
             {post.timestamp}
           </CardDescription>
         </div>
-        {showManagementControls && (
+        {showManagementControls && onDeletePost && ( // Ensure onDeletePost is present for delete button
           <div className="flex gap-2">
             <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleEdit}>
               <Edit3 className="h-4 w-4" />
@@ -149,8 +151,8 @@ export function PostCard({
         <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-primary" onClick={handleComment}>
           <MessageCircle className="mr-1 h-4 w-4" /> {post.comments}
         </Button>
-        <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-primary" onClick={handleLike}>
-          <Heart className="mr-1 h-4 w-4" /> {post.likes}
+        <Button variant="ghost" size="sm" className={`${post.likedByCurrentUser ? 'text-primary' : 'text-muted-foreground'} hover:text-primary`} onClick={handleLike}>
+          <Heart className={`mr-1 h-4 w-4 ${post.likedByCurrentUser ? 'fill-primary' : ''}`} /> {post.likes}
         </Button>
         <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-primary" onClick={handleShare}>
           <Repeat className="mr-1 h-4 w-4" /> {post.shares}
