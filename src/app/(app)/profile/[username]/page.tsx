@@ -6,7 +6,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { UserCog, ShieldCheck, BarChart3, Edit3, UserPlus, Loader2 } from "lucide-react";
+import { UserCog, ShieldCheck, Edit3, UserPlus, Loader2 } from "lucide-react"; // Removed BarChart3
 import Image from "next/image";
 import Link from "next/link";
 import { PostCard } from "@/components/post-card";
@@ -175,9 +175,8 @@ export default function UserProfilePage({ params }: { params: { username: string
           </div>
 
           <Tabs defaultValue="posts" className="w-full">
-            <TabsList className="grid w-full grid-cols-3">
+            <TabsList className="grid w-full grid-cols-2"> {/* Changed from grid-cols-3 */}
               <TabsTrigger value="posts">Posts</TabsTrigger>
-              <TabsTrigger value="stats">Stats</TabsTrigger>
               <TabsTrigger value="connections">Connections</TabsTrigger>
             </TabsList>
             <TabsContent value="posts" className="mt-6 space-y-6">
@@ -211,23 +210,7 @@ export default function UserProfilePage({ params }: { params: { username: string
                 />
               ))}
             </TabsContent>
-            <TabsContent value="stats" className="mt-6">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2"><BarChart3 /> Poker Statistics</CardTitle>
-                  <CardDescription>An overview of {mockUser.name}'s poker performance and achievements.</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <ul className="space-y-2 text-sm text-muted-foreground">
-                    <li>Win Rate: 60%</li>
-                    <li>Preferred Game: Texas Hold'em</li>
-                    <li>Biggest Win: $5,000</li>
-                    <li>Tournaments Played: 50+</li>
-                  </ul>
-                   <p className="text-xs text-center mt-4 text-muted-foreground">More detailed stats coming soon!</p>
-                </CardContent>
-              </Card>
-            </TabsContent>
+            {/* Removed TabsContent for "stats" */}
             <TabsContent value="connections" className="mt-6">
                <Card>
                 <CardHeader>
@@ -256,4 +239,3 @@ export default function UserProfilePage({ params }: { params: { username: string
     </div>
   );
 }
-
