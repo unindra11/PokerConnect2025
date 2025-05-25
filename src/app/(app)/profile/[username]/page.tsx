@@ -1,12 +1,11 @@
-
 "use client"; 
 
-import { useState, useEffect, use } from "react";
+import { useState, useEffect, use, useRef } from "react"; // Added useRef
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { UserCog, ShieldCheck, Edit3, UserPlus, Loader2, Users } from "lucide-react"; 
+import { UserCog, ShieldCheck, Edit3, UserPlus, Loader2, Users, Camera } from "lucide-react"; // Added Camera
 import Image from "next/image";
 import Link from "next/link";
 import { PostCard } from "@/components/post-card";
@@ -15,10 +14,14 @@ import { useToast } from "@/hooks/use-toast";
 
 interface LoggedInUser {
   username: string;
-  // Add other fields if needed, but username is key for this logic
+  fullName?: string;
+  email?: string;
+  avatar?: string; // Ensure avatar is part of this type
 }
 
 const USER_POSTS_STORAGE_KEY = "pokerConnectUserPosts";
+const MAX_AVATAR_SIZE_MB = 2;
+const MAX_AVATAR_SIZE_BYTES = MAX_AVATAR_SIZE_MB * 1024 * 1024;
 
 interface Connection {
   id: string;
@@ -43,37 +46,53 @@ export default function UserProfilePage({ params }: { params: { username: string
   const [isCurrentUserProfile, setIsCurrentUserProfile] = useState(false);
   const [profilePosts, setProfilePosts] = useState<Post[]>([]);
   const [isLoadingPosts, setIsLoadingPosts] = useState(true);
+  const [profileUser, setProfileUser] = useState<LoggedInUser | null>(null);
+  const [profileAvatarUrl, setProfileAvatarUrl] = useState<string | undefined>(undefined);
   const { toast } = useToast();
+  const profileAvatarInputRef = useRef<HTMLInputElement>(null);
   
-  const mockUser = {
-    name: resolvedParams.username.charAt(0).toUpperCase() + resolvedParams.username.slice(1), 
-    username: resolvedParams.username,
-    avatar: `https://placehold.co/150x150.png?u=${resolvedParams.username}`,
-    bio: "Passionate poker player, always learning and looking for the next big win. Specializing in Texas Hold'em tournaments.",
-    joinedDate: "Joined January 2023",
-    friendsCount: 78, // New friends count
-    totalPosts: profilePosts.length, 
-    coverImage: "https://placehold.co/1200x300.png?cover=1",
-    coverImageAiHint: "poker table background",
-  };
-
+  // Effect to determine current user and load their data for display
   useEffect(() => {
+    let userForProfile: LoggedInUser | null = null;
+    let avatarForProfile: string | undefined = `https://placehold.co/150x150.png?u=${resolvedParams.username}`; // Default placeholder
+
     try {
       const loggedInUserString = localStorage.getItem("loggedInUser");
       if (loggedInUserString) {
         const loggedInUser: LoggedInUser = JSON.parse(loggedInUserString);
         if (loggedInUser && loggedInUser.username === resolvedParams.username) {
           setIsCurrentUserProfile(true);
+          userForProfile = loggedInUser; // This is the current user
+          if (loggedInUser.avatar) {
+            avatarForProfile = loggedInUser.avatar;
+          }
         } else {
           setIsCurrentUserProfile(false);
+          // For other users, we'd typically fetch from a backend. 
+          // For this prototype, we'll construct a mock or use placeholder.
+          userForProfile = { 
+            username: resolvedParams.username, 
+            fullName: resolvedParams.username.charAt(0).toUpperCase() + resolvedParams.username.slice(1),
+            // No email or specific avatar for other mock users unless fetched/set elsewhere
+          };
         }
       } else {
         setIsCurrentUserProfile(false);
+        userForProfile = { 
+          username: resolvedParams.username,
+          fullName: resolvedParams.username.charAt(0).toUpperCase() + resolvedParams.username.slice(1),
+        };
       }
     } catch (error) {
-      console.error("Error reading loggedInUser from localStorage:", error);
+      console.error("Error reading loggedInUser from localStorage for profile page:", error);
       setIsCurrentUserProfile(false);
+      userForProfile = { 
+        username: resolvedParams.username,
+        fullName: resolvedParams.username.charAt(0).toUpperCase() + resolvedParams.username.slice(1),
+      };
     }
+    setProfileUser(userForProfile);
+    setProfileAvatarUrl(avatarForProfile);
   }, [resolvedParams.username]);
 
 
@@ -119,8 +138,7 @@ export default function UserProfilePage({ params }: { params: { username: string
         description: "The post has been removed from local storage.",
         variant: "destructive"
       });
-    } catch (error)
-{
+    } catch (error) {
       console.error("Error deleting post from localStorage:", error);
       toast({
         title: "Error Deleting Post",
@@ -130,6 +148,71 @@ export default function UserProfilePage({ params }: { params: { username: string
     }
   };
 
+  const handleProfileAvatarChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      if (file.size > MAX_AVATAR_SIZE_BYTES) {
+        toast({
+          title: "File Too Large",
+          description: `Please select an image smaller than ${MAX_AVATAR_SIZE_MB}MB.`,
+          variant: "destructive",
+        });
+        if (profileAvatarInputRef.current) profileAvatarInputRef.current.value = "";
+        return;
+      }
+      if (!file.type.startsWith("image/")) {
+        toast({
+          title: "Unsupported File Type",
+          description: "Please select an image file (e.g., PNG, JPG, GIF).",
+          variant: "destructive",
+        });
+        if (profileAvatarInputRef.current) profileAvatarInputRef.current.value = "";
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const newAvatarDataUrl = reader.result as string;
+        setProfileAvatarUrl(newAvatarDataUrl); // Update state for immediate display
+
+        try {
+          const loggedInUserString = localStorage.getItem("loggedInUser");
+          if (loggedInUserString) {
+            const loggedInUser = JSON.parse(loggedInUserString);
+            loggedInUser.avatar = newAvatarDataUrl;
+            localStorage.setItem("loggedInUser", JSON.stringify(loggedInUser));
+            toast({
+              title: "Profile Picture Updated!",
+              description: "Your new profile picture has been saved.",
+            });
+            // Potentially trigger a custom event or other mechanism if sidebar needs immediate update without full refresh
+          }
+        } catch (error) {
+          console.error("Error saving avatar to localStorage from profile:", error);
+          toast({ title: "Storage Error", description: "Could not save new avatar.", variant: "destructive" });
+        }
+      };
+      reader.onerror = () => {
+        toast({ title: "Error", description: "Could not read selected file.", variant: "destructive" });
+      };
+      reader.readAsDataURL(file);
+    }
+    if (profileAvatarInputRef.current) profileAvatarInputRef.current.value = "";
+  };
+
+
+  // Dynamic mockUser based on resolvedParams and profileUser state
+  const mockUser = {
+    name: profileUser?.fullName || resolvedParams.username.charAt(0).toUpperCase() + resolvedParams.username.slice(1), 
+    username: resolvedParams.username,
+    avatar: profileAvatarUrl || `https://placehold.co/150x150.png?u=${resolvedParams.username}`, // Use state for avatar
+    bio: "Passionate poker player, always learning and looking for the next big win. Specializing in Texas Hold'em tournaments.",
+    joinedDate: "Joined January 2023",
+    friendsCount: 78, 
+    totalPosts: profilePosts.length, 
+    coverImage: "https://placehold.co/1200x300.png?cover=1",
+    coverImageAiHint: "poker table background",
+  };
 
   return (
     <div className="container mx-auto max-w-4xl">
@@ -145,10 +228,32 @@ export default function UserProfilePage({ params }: { params: { username: string
           />
           <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/70 to-transparent">
             <div className="flex flex-col sm:flex-row items-center sm:items-end space-x-0 sm:space-x-4">
-              <Avatar className="h-24 w-24 sm:h-32 sm:w-32 border-4 border-background -mb-12 sm:-mb-0 relative z-10">
-                <AvatarImage src={mockUser.avatar} alt={mockUser.name} data-ai-hint="profile picture" />
-                <AvatarFallback>{mockUser.name.substring(0, 2)}</AvatarFallback>
-              </Avatar>
+             
+              <div className="relative group">
+                <label htmlFor={isCurrentUserProfile ? "profile-avatar-upload" : undefined} 
+                       className={isCurrentUserProfile ? "cursor-pointer" : ""}>
+                  <Avatar className="h-24 w-24 sm:h-32 sm:w-32 border-4 border-background -mb-12 sm:-mb-0 relative z-10">
+                    <AvatarImage src={mockUser.avatar} alt={mockUser.name} data-ai-hint="profile picture" />
+                    <AvatarFallback>{mockUser.name.substring(0, 2).toUpperCase() || 'P'}</AvatarFallback>
+                  </Avatar>
+                  {isCurrentUserProfile && (
+                    <div className="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity rounded-full z-20 -mb-12 sm:-mb-0">
+                      <Camera className="h-8 w-8 text-white" />
+                    </div>
+                  )}
+                </label>
+                {isCurrentUserProfile && (
+                  <input
+                    id="profile-avatar-upload"
+                    type="file"
+                    className="sr-only"
+                    accept="image/*"
+                    onChange={handleProfileAvatarChange}
+                    ref={profileAvatarInputRef}
+                  />
+                )}
+              </div>
+
               <div className="text-center sm:text-left pt-12 sm:pt-0 sm:pb-2">
                 <h1 className="text-3xl font-bold text-white">{mockUser.name}</h1>
                 <p className="text-sm text-gray-300">@{mockUser.username}</p>
@@ -168,7 +273,7 @@ export default function UserProfilePage({ params }: { params: { username: string
         </div>
         
         <CardContent className="pt-16 sm:pt-8">
-          <div className="grid grid-cols-2 gap-4 text-center my-4 border-b pb-4"> {/* Changed grid-cols-3 to grid-cols-2 */}
+          <div className="grid grid-cols-2 gap-4 text-center my-4 border-b pb-4">
             <div>
               <p className="font-semibold text-lg">{mockUser.totalPosts}</p>
               <p className="text-sm text-muted-foreground">Posts</p>
@@ -255,4 +360,3 @@ export default function UserProfilePage({ params }: { params: { username: string
     </div>
   );
 }
-
