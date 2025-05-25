@@ -1,4 +1,4 @@
-import { Spades } from 'lucide-react';
+import { Spade } from 'lucide-react';
 
 interface LogoProps {
   size?: number;
@@ -8,7 +8,7 @@ interface LogoProps {
 export function Logo({ size = 24, className }: LogoProps) {
   return (
     <div className={`flex items-center gap-2 ${className}`}>
-      <Spades size={size} className="text-primary" />
+      <Spade size={size} className="text-primary" />
       <span className={`font-semibold text-xl`} style={{ fontSize: `${size * 0.8}px` }}>
         PokerConnect
       </span>
