@@ -6,10 +6,10 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { Separator } from "@/components/ui/separator";
-import { UserCircle, BellDot, Palette, ShieldAlert, Edit3 } from "lucide-react";
+import { Input } from "@/components/ui/input"; // Import Input
+import { Textarea } from "@/components/ui/textarea"; // Import Textarea
+import { UserCircle, BellDot, Palette, ShieldAlert, Image as ImageIcon, Save } from "lucide-react"; // Added ImageIcon, Save
 import { useToast } from "@/hooks/use-toast";
-import Link from "next/link";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -20,45 +20,65 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
   AlertDialogTrigger,
-} from "@/components/ui/alert-dialog"
+} from "@/components/ui/alert-dialog";
 
 interface LoggedInUserDetails {
   fullName: string;
   username: string;
   email: string;
+  bio?: string; // Added bio
+  // avatar and coverImage are handled by their respective uploaders
 }
 
 export default function SettingsPage() {
   const { toast } = useToast();
   const [currentUser, setCurrentUser] = useState<LoggedInUserDetails | null>(null);
+  const [editableFullName, setEditableFullName] = useState("");
+  const [editableBio, setEditableBio] = useState("");
+
   const [notificationsLikes, setNotificationsLikes] = useState(true);
   const [notificationsComments, setNotificationsComments] = useState(true);
   const [notificationsFriendRequests, setNotificationsFriendRequests] = useState(true);
-  const [isDarkMode, setIsDarkMode] = useState(true); // Assuming app is dark by default
+  const [isDarkMode, setIsDarkMode] = useState(true); 
 
   useEffect(() => {
     try {
       const loggedInUserString = localStorage.getItem("loggedInUser");
       if (loggedInUserString) {
-        const userDetails = JSON.parse(loggedInUserString);
-        setCurrentUser({
-          fullName: userDetails.fullName || "User",
-          username: userDetails.username || "user",
-          email: userDetails.email || "user@example.com",
-        });
+        const userDetails: LoggedInUserDetails = JSON.parse(loggedInUserString);
+        setCurrentUser(userDetails);
+        setEditableFullName(userDetails.fullName || "");
+        setEditableBio(userDetails.bio || "");
       }
     } catch (error) {
       console.error("Error loading user from localStorage for settings:", error);
-      // Fallback or handle error if necessary
-      setCurrentUser({ fullName: "Player One", username: "playerone", email: "player@example.com" });
+      setCurrentUser({ fullName: "Player One", username: "playerone", email: "player@example.com", bio: "" });
+      setEditableFullName("Player One");
+      setEditableBio("");
     }
   }, []);
 
   const handleSaveChanges = () => {
-    toast({
-      title: "Settings Saved (Simulated)",
-      description: "Your preferences have been updated.",
-    });
+    if (!currentUser) {
+      toast({ title: "Error", description: "User data not loaded.", variant: "destructive" });
+      return;
+    }
+    try {
+      const updatedUser = {
+        ...currentUser,
+        fullName: editableFullName,
+        bio: editableBio,
+      };
+      localStorage.setItem("loggedInUser", JSON.stringify(updatedUser));
+      setCurrentUser(updatedUser); // Update local state if needed elsewhere on this page
+      toast({
+        title: "Settings Saved!",
+        description: "Your profile information has been updated in local storage.",
+      });
+    } catch (error) {
+      console.error("Error saving user to localStorage:", error);
+      toast({ title: "Error", description: "Could not save settings.", variant: "destructive"});
+    }
   };
 
   const handleDeleteAccount = () => {
@@ -67,6 +87,10 @@ export default function SettingsPage() {
       description: "Your account deletion process has started.",
       variant: "destructive"
     });
+    // In a real app: clear localStorage, redirect to login/signup
+    // localStorage.removeItem("loggedInUser");
+    // localStorage.removeItem("pokerConnectUser");
+    // router.push('/login');
   };
 
   return (
@@ -81,31 +105,60 @@ export default function SettingsPage() {
         <CardHeader>
           <div className="flex items-center gap-3">
             <UserCircle className="h-6 w-6 text-primary" />
-            <CardTitle className="text-xl">Profile Settings</CardTitle>
+            <CardTitle className="text-xl">Profile Information</CardTitle>
           </div>
-          <CardDescription>Update your public profile information.</CardDescription>
+          <CardDescription>Update your public profile details.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="flex justify-between items-center">
-            <Label>Name</Label>
-            <span className="text-muted-foreground">{currentUser?.fullName || "Loading..."}</span>
+          <div>
+            <Label htmlFor="fullName">Full Name</Label>
+            <Input
+              id="fullName"
+              value={editableFullName}
+              onChange={(e) => setEditableFullName(e.target.value)}
+              className="mt-1"
+              placeholder="Your full name"
+            />
           </div>
-           <div className="flex justify-between items-center">
-            <Label>Username</Label>
-            <span className="text-muted-foreground">@{currentUser?.username || "loading..."}</span>
+          <div>
+            <Label htmlFor="username">Username</Label>
+            <Input
+              id="username"
+              value={currentUser?.username || ""}
+              disabled
+              className="mt-1 bg-muted/50"
+            />
+             <p className="text-xs text-muted-foreground mt-1">Username cannot be changed here.</p>
           </div>
-          {currentUser?.username && (
-            <Link href={`/profile/${currentUser.username}`} passHref>
-              <Button variant="outline" className="w-full">
-                <Edit3 className="mr-2 h-4 w-4" /> View/Edit Full Profile
-              </Button>
-            </Link>
-          )}
-          {!currentUser?.username && (
-             <Button variant="outline" className="w-full" disabled>
-                <Edit3 className="mr-2 h-4 w-4" /> View/Edit Full Profile (Loading...)
+          <div>
+            <Label htmlFor="email">Email</Label>
+            <Input
+              id="email"
+              value={currentUser?.email || ""}
+              disabled
+              className="mt-1 bg-muted/50"
+            />
+          </div>
+          <div>
+            <Label htmlFor="bio">Bio</Label>
+            <Textarea
+              id="bio"
+              value={editableBio}
+              onChange={(e) => setEditableBio(e.target.value)}
+              className="mt-1 min-h-[100px]"
+              placeholder="Tell us a bit about yourself..."
+            />
+          </div>
+          <div>
+            <Label>Cover Image</Label>
+             <Button 
+                variant="outline" 
+                className="w-full mt-1"
+                onClick={() => toast({ title: "Coming Soon!", description: "Cover image change functionality will be available soon."})}
+            >
+                <ImageIcon className="mr-2 h-4 w-4" /> Change Cover Image (Simulated)
             </Button>
-          )}
+          </div>
         </CardContent>
       </Card>
 
@@ -162,7 +215,7 @@ export default function SettingsPage() {
               id="dark-mode"
               checked={isDarkMode}
               onCheckedChange={setIsDarkMode}
-              disabled // App is dark by default, this is a placeholder
+              disabled 
             />
           </div>
           <p className="text-xs text-muted-foreground mt-2 text-center">App is currently in Dark Mode by default.</p>
@@ -206,7 +259,9 @@ export default function SettingsPage() {
       </Card>
 
       <div className="flex justify-end pt-4">
-        <Button onClick={handleSaveChanges} size="lg">Save Changes</Button>
+        <Button onClick={handleSaveChanges} size="lg">
+          <Save className="mr-2 h-5 w-5" /> Save Changes
+        </Button>
       </div>
     </div>
   );

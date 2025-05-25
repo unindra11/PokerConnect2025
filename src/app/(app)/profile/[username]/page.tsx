@@ -1,3 +1,4 @@
+
 "use client"; 
 
 import { useState, useEffect, use, useRef } from "react"; // Added useRef
@@ -11,12 +12,14 @@ import Link from "next/link";
 import { PostCard } from "@/components/post-card";
 import type { Post, User as PostUser } from "@/types/post";
 import { useToast } from "@/hooks/use-toast";
+import { useRouter } from "next/navigation"; // Import useRouter
 
 interface LoggedInUser {
   username: string;
   fullName?: string;
   email?: string;
-  avatar?: string; // Ensure avatar is part of this type
+  avatar?: string; 
+  bio?: string; // Added bio
 }
 
 const USER_POSTS_STORAGE_KEY = "pokerConnectUserPosts";
@@ -42,6 +45,7 @@ const mockProfileConnections: Connection[] = [
 
 export default function UserProfilePage({ params }: { params: { username: string } }) {
   const resolvedParams = use(params); 
+  const router = useRouter(); // Initialize useRouter
 
   const [isCurrentUserProfile, setIsCurrentUserProfile] = useState(false);
   const [profilePosts, setProfilePosts] = useState<Post[]>([]);
@@ -51,10 +55,9 @@ export default function UserProfilePage({ params }: { params: { username: string
   const { toast } = useToast();
   const profileAvatarInputRef = useRef<HTMLInputElement>(null);
   
-  // Effect to determine current user and load their data for display
   useEffect(() => {
     let userForProfile: LoggedInUser | null = null;
-    let avatarForProfile: string | undefined = `https://placehold.co/150x150.png?u=${resolvedParams.username}`; // Default placeholder
+    let avatarForProfile: string | undefined = `https://placehold.co/150x150.png?u=${resolvedParams.username}`; 
 
     try {
       const loggedInUserString = localStorage.getItem("loggedInUser");
@@ -62,18 +65,16 @@ export default function UserProfilePage({ params }: { params: { username: string
         const loggedInUser: LoggedInUser = JSON.parse(loggedInUserString);
         if (loggedInUser && loggedInUser.username === resolvedParams.username) {
           setIsCurrentUserProfile(true);
-          userForProfile = loggedInUser; // This is the current user
+          userForProfile = loggedInUser; 
           if (loggedInUser.avatar) {
             avatarForProfile = loggedInUser.avatar;
           }
         } else {
           setIsCurrentUserProfile(false);
-          // For other users, we'd typically fetch from a backend. 
-          // For this prototype, we'll construct a mock or use placeholder.
           userForProfile = { 
             username: resolvedParams.username, 
             fullName: resolvedParams.username.charAt(0).toUpperCase() + resolvedParams.username.slice(1),
-            // No email or specific avatar for other mock users unless fetched/set elsewhere
+            bio: "A passionate poker player enjoying the game." // Default bio for other users
           };
         }
       } else {
@@ -81,6 +82,7 @@ export default function UserProfilePage({ params }: { params: { username: string
         userForProfile = { 
           username: resolvedParams.username,
           fullName: resolvedParams.username.charAt(0).toUpperCase() + resolvedParams.username.slice(1),
+          bio: "A passionate poker player enjoying the game." // Default bio for non-logged-in scenarios
         };
       }
     } catch (error) {
@@ -89,6 +91,7 @@ export default function UserProfilePage({ params }: { params: { username: string
       userForProfile = { 
         username: resolvedParams.username,
         fullName: resolvedParams.username.charAt(0).toUpperCase() + resolvedParams.username.slice(1),
+        bio: "A passionate poker player enjoying the game."
       };
     }
     setProfileUser(userForProfile);
@@ -173,7 +176,7 @@ export default function UserProfilePage({ params }: { params: { username: string
       const reader = new FileReader();
       reader.onloadend = () => {
         const newAvatarDataUrl = reader.result as string;
-        setProfileAvatarUrl(newAvatarDataUrl); // Update state for immediate display
+        setProfileAvatarUrl(newAvatarDataUrl); 
 
         try {
           const loggedInUserString = localStorage.getItem("loggedInUser");
@@ -185,7 +188,6 @@ export default function UserProfilePage({ params }: { params: { username: string
               title: "Profile Picture Updated!",
               description: "Your new profile picture has been saved.",
             });
-            // Potentially trigger a custom event or other mechanism if sidebar needs immediate update without full refresh
           }
         } catch (error) {
           console.error("Error saving avatar to localStorage from profile:", error);
@@ -200,13 +202,11 @@ export default function UserProfilePage({ params }: { params: { username: string
     if (profileAvatarInputRef.current) profileAvatarInputRef.current.value = "";
   };
 
-
-  // Dynamic mockUser based on resolvedParams and profileUser state
   const mockUser = {
     name: profileUser?.fullName || resolvedParams.username.charAt(0).toUpperCase() + resolvedParams.username.slice(1), 
     username: resolvedParams.username,
-    avatar: profileAvatarUrl || `https://placehold.co/150x150.png?u=${resolvedParams.username}`, // Use state for avatar
-    bio: "Passionate poker player, always learning and looking for the next big win. Specializing in Texas Hold'em tournaments.",
+    avatar: profileAvatarUrl || `https://placehold.co/150x150.png?u=${resolvedParams.username}`,
+    bio: profileUser?.bio || "Passionate poker player, always learning and looking for the next big win. Specializing in Texas Hold'em tournaments.",
     joinedDate: "Joined January 2023",
     friendsCount: 78, 
     totalPosts: profilePosts.length, 
@@ -259,7 +259,12 @@ export default function UserProfilePage({ params }: { params: { username: string
                 <p className="text-sm text-gray-300">@{mockUser.username}</p>
               </div>
                {isCurrentUserProfile && (
-                <Button variant="outline" size="sm" className="mt-4 sm:mt-0 sm:ml-auto bg-white/20 hover:bg-white/30 text-white border-white/50">
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  className="mt-4 sm:mt-0 sm:ml-auto bg-white/20 hover:bg-white/30 text-white border-white/50"
+                  onClick={() => router.push('/settings')} // Navigate to settings
+                >
                   <Edit3 className="mr-2 h-4 w-4" /> Edit Profile
                 </Button>
               )}
@@ -360,3 +365,4 @@ export default function UserProfilePage({ params }: { params: { username: string
     </div>
   );
 }
+

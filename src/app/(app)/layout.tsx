@@ -20,7 +20,7 @@ import { Button } from "@/components/ui/button";
 import { Settings, LogOut } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useToast } from "@/hooks/use-toast"; // Import useToast
+import { useToast } from "@/hooks/use-toast"; 
 
 interface AppLayoutProps {
   children: ReactNode;
@@ -31,8 +31,8 @@ const MAX_AVATAR_SIZE_BYTES = MAX_AVATAR_SIZE_MB * 1024 * 1024;
 
 export default function AppLayout({ children }: AppLayoutProps) {
   const [userName, setUserName] = useState("Player One");
-  const [userEmail, setUserEmail] = useState("unindra111@gmail.com");
-  const [avatarUrl, setAvatarUrl] = useState("https://placehold.co/100x100.png"); // Default avatar
+  const [userEmail, setUserEmail] = useState("player@example.com"); // Default email
+  const [avatarUrl, setAvatarUrl] = useState("https://placehold.co/100x100.png"); 
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
@@ -43,15 +43,27 @@ export default function AppLayout({ children }: AppLayoutProps) {
       if (loggedInUserString) {
         const loggedInUser = JSON.parse(loggedInUserString);
         setUserName(loggedInUser.fullName || loggedInUser.username || "User");
-        setUserEmail(loggedInUser.email || "No email");
+        setUserEmail(loggedInUser.email || "No email provided");
         if (loggedInUser.avatar) {
           setAvatarUrl(loggedInUser.avatar);
+        } else {
+          setAvatarUrl(`https://placehold.co/100x100.png?text=${(loggedInUser.fullName || loggedInUser.username || "P").substring(0,1)}`);
         }
+      } else {
+        // If no loggedInUser, set to defaults or push to login
+        setUserName("Player One");
+        setUserEmail("player@example.com");
+        setAvatarUrl("https://placehold.co/100x100.png");
       }
     } catch (error) {
       console.error("Error reading loggedInUser from localStorage:", error);
+      // Fallback to defaults
+      setUserName("Player One");
+      setUserEmail("player@example.com");
+      setAvatarUrl("https://placehold.co/100x100.png");
     }
-  }, []);
+  }, []); // Re-run if router path changes, to potentially update after login/settings
+
 
   const handleAvatarChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -85,7 +97,6 @@ export default function AppLayout({ children }: AppLayoutProps) {
         const newAvatarDataUrl = reader.result as string;
         setAvatarUrl(newAvatarDataUrl);
 
-        // Update localStorage
         try {
           const loggedInUserString = localStorage.getItem("loggedInUser");
           if (loggedInUserString) {
@@ -111,7 +122,6 @@ export default function AppLayout({ children }: AppLayoutProps) {
       };
       reader.readAsDataURL(file);
     }
-    // Reset file input value to allow re-uploading the same file if needed
     if (fileInputRef.current) {
         fileInputRef.current.value = "";
     }
@@ -120,9 +130,10 @@ export default function AppLayout({ children }: AppLayoutProps) {
   const handleLogout = () => {
     try {
       localStorage.removeItem("loggedInUser");
-      localStorage.removeItem("pokerConnectUser");
-      localStorage.removeItem("pokerConnectMapUsers");
-      localStorage.removeItem("pokerConnectUserPosts");
+      // Optional: Clear other app-specific data if desired on logout
+      // localStorage.removeItem("pokerConnectUser"); 
+      // localStorage.removeItem("pokerConnectMapUsers");
+      // localStorage.removeItem("pokerConnectUserPosts");
     } catch (error) {
       console.error("Error clearing localStorage on logout:", error);
     }
@@ -135,7 +146,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
         <SidebarHeader className="p-4 border-b">
           <div className="flex items-center justify-between">
             <Logo className="group-data-[collapsible=icon]:hidden delay-300" />
-            <SidebarTrigger className="md:hidden" /> {/* Mobile trigger */}
+            <SidebarTrigger className="md:hidden" /> {}
           </div>
         </SidebarHeader>
         <SidebarContent className="p-2">
@@ -146,7 +157,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
             <label htmlFor="avatar-upload-sidebar" className="cursor-pointer rounded-full" title="Change avatar">
               <Avatar className="h-9 w-9">
                 <AvatarImage src={avatarUrl} alt="User Avatar" data-ai-hint="user avatar" />
-                <AvatarFallback>{userName.substring(0, 1) || 'P'}</AvatarFallback>
+                <AvatarFallback>{userName.substring(0, 1)?.toUpperCase() || 'P'}</AvatarFallback>
               </Avatar>
             </label>
             <input

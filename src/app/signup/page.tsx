@@ -87,7 +87,9 @@ export default function SignupPage() {
       email,
       username,
       password, 
-      location, 
+      location,
+      bio: "", // Initialize bio
+      // avatar will be set by default or uploaded later
     };
 
     try {
@@ -115,7 +117,6 @@ export default function SignupPage() {
             mapUsers = []; 
           }
         }
-        // Prevent duplicate users on map
         mapUsers = mapUsers.filter(user => user.id !== mapUser.id);
         mapUsers.push(mapUser);
         localStorage.setItem("pokerConnectMapUsers", JSON.stringify(mapUsers));
@@ -233,7 +234,6 @@ export default function SignupPage() {
                       description: "Could not load location suggestions. Please enter manually.",
                       variant: "destructive",
                     });
-                    // Potentially set a state here to fall back to plain input if needed
                   }}
                 >
                   <Autocomplete
