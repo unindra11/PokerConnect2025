@@ -1,3 +1,4 @@
+
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   SidebarProvider,
@@ -36,11 +37,11 @@ export default function AppLayout({
           <div className="flex items-center gap-3 group-data-[collapsible=icon]:justify-center">
             <Avatar className="h-9 w-9">
               <AvatarImage src="https://placehold.co/100x100.png" alt="User Avatar" data-ai-hint="user avatar" />
-              <AvatarFallback>U</AvatarFallback>
+              <AvatarFallback>P</AvatarFallback>
             </Avatar>
             <div className="group-data-[collapsible=icon]:hidden delay-300 flex flex-col">
               <span className="text-sm font-medium">Player One</span>
-              <span className="text-xs text-muted-foreground">player.one@example.com</span>
+              <span className="text-xs text-muted-foreground">unindra111@gmail.com</span>
             </div>
           </div>
           <div className="mt-4 flex flex-col gap-1">
@@ -51,7 +52,7 @@ export default function AppLayout({
                 </Link>
              </SidebarMenuButton>
              <SidebarMenuButton asChild tooltip="Logout" size="sm" className="text-destructive hover:bg-destructive/10 hover:text-destructive data-[active=true]:text-destructive data-[active=true]:bg-destructive/10">
-                <Link href="#">
+                <Link href="/login"> {/* Updated logout to go to login page */}
                     <LogOut size={18} />
                     <span className="group-data-[collapsible=icon]:hidden delay-300">Logout</span>
                 </Link>

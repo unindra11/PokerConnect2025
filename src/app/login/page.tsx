@@ -1,6 +1,8 @@
+
 // src/app/login/page.tsx
 "use client";
 
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -11,13 +13,23 @@ import { useRouter } from "next/navigation";
 
 export default function LoginPage() {
   const router = useRouter();
+  const [emailOrUsername, setEmailOrUsername] = useState("");
+  const [password, setPassword] = useState("");
+  // const [error, setError] = useState(""); // Future: for login error messages
 
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    // In a real application, you would handle login logic here.
-    // For now, we'll simulate a successful login and redirect to home.
-    console.log("Log In button clicked!");
-    router.push("/home"); 
+    // setError(""); // Future: reset error on new submit
+
+    if (emailOrUsername === "unindra111@gmail.com" && password === "qwerty") {
+      console.log("Login successful!");
+      router.push("/home");
+    } else {
+      console.log("Login failed: Invalid credentials");
+      // setError("Invalid email or password."); // Future: show error to user
+      // For now, just log and don't redirect if credentials don't match
+      alert("Invalid email or password. Please use unindra111@gmail.com and qwerty");
+    }
   };
 
   return (
@@ -33,12 +45,30 @@ export default function LoginPage() {
           <CardContent className="space-y-5">
             <div>
               <Label htmlFor="emailOrUsername">Email or Username</Label>
-              <Input id="emailOrUsername" placeholder="you@example.com or pokerace123" className="mt-1" />
+              <Input 
+                id="emailOrUsername" 
+                placeholder="unindra111@gmail.com" 
+                className="mt-1"
+                value={emailOrUsername}
+                onChange={(e) => setEmailOrUsername(e.target.value)} 
+              />
             </div>
             <div>
               <Label htmlFor="password">Password</Label>
-              <Input id="password" type="password" placeholder="••••••••" className="mt-1" />
+              <Input 
+                id="password" 
+                type="password" 
+                placeholder="qwerty" 
+                className="mt-1"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)} 
+              />
             </div>
+            {/* Future: Display error message
+            {error && (
+              <p className="text-sm text-destructive text-center">{error}</p>
+            )}
+            */}
           </CardContent>
           <CardFooter className="flex flex-col gap-4">
             <Button type="submit" className="w-full text-lg py-3">
