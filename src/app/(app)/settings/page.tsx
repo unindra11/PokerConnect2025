@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
@@ -22,12 +22,37 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
 
+interface LoggedInUserDetails {
+  fullName: string;
+  username: string;
+  email: string;
+}
+
 export default function SettingsPage() {
   const { toast } = useToast();
+  const [currentUser, setCurrentUser] = useState<LoggedInUserDetails | null>(null);
   const [notificationsLikes, setNotificationsLikes] = useState(true);
   const [notificationsComments, setNotificationsComments] = useState(true);
   const [notificationsFriendRequests, setNotificationsFriendRequests] = useState(true);
   const [isDarkMode, setIsDarkMode] = useState(true); // Assuming app is dark by default
+
+  useEffect(() => {
+    try {
+      const loggedInUserString = localStorage.getItem("loggedInUser");
+      if (loggedInUserString) {
+        const userDetails = JSON.parse(loggedInUserString);
+        setCurrentUser({
+          fullName: userDetails.fullName || "User",
+          username: userDetails.username || "user",
+          email: userDetails.email || "user@example.com",
+        });
+      }
+    } catch (error) {
+      console.error("Error loading user from localStorage for settings:", error);
+      // Fallback or handle error if necessary
+      setCurrentUser({ fullName: "Player One", username: "playerone", email: "player@example.com" });
+    }
+  }, []);
 
   const handleSaveChanges = () => {
     toast({
@@ -61,20 +86,26 @@ export default function SettingsPage() {
           <CardDescription>Update your public profile information.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          {/* In a real app, these would be inputs or link to an edit form */}
           <div className="flex justify-between items-center">
             <Label>Name</Label>
-            <span className="text-muted-foreground">Player One (Mock)</span>
+            <span className="text-muted-foreground">{currentUser?.fullName || "Loading..."}</span>
           </div>
            <div className="flex justify-between items-center">
             <Label>Username</Label>
-            <span className="text-muted-foreground">@playerone (Mock)</span>
+            <span className="text-muted-foreground">@{currentUser?.username || "loading..."}</span>
           </div>
-          <Link href="/profile/playerone" passHref>
-            <Button variant="outline" className="w-full">
-              <Edit3 className="mr-2 h-4 w-4" /> View/Edit Full Profile
+          {currentUser?.username && (
+            <Link href={`/profile/${currentUser.username}`} passHref>
+              <Button variant="outline" className="w-full">
+                <Edit3 className="mr-2 h-4 w-4" /> View/Edit Full Profile
+              </Button>
+            </Link>
+          )}
+          {!currentUser?.username && (
+             <Button variant="outline" className="w-full" disabled>
+                <Edit3 className="mr-2 h-4 w-4" /> View/Edit Full Profile (Loading...)
             </Button>
-          </Link>
+          )}
         </CardContent>
       </Card>
 

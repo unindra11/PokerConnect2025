@@ -1,9 +1,12 @@
 
+"use client"; // Make this a client component to access localStorage
+
+import { useState, useEffect } from "react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { UserCog, ShieldCheck, BarChart3, Edit3, UserPlus } from "lucide-react"; // Added UserPlus
+import { UserCog, ShieldCheck, BarChart3, Edit3, UserPlus } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 
@@ -27,9 +30,15 @@ const userProfilePosts = [
   },
 ];
 
+interface LoggedInUser {
+  username: string;
+  // Add other fields if needed, but username is key for this logic
+}
 
 export default function UserProfilePage({ params }: { params: { username: string } }) {
-  // In a real app, you'd fetch user data based on params.username
+  const [isCurrentUserProfile, setIsCurrentUserProfile] = useState(false);
+  
+  // Mock user data based on params.username - in a real app, you'd fetch this
   const mockUser = {
     name: params.username.charAt(0).toUpperCase() + params.username.slice(1), // Capitalize username
     username: params.username,
@@ -43,9 +52,25 @@ export default function UserProfilePage({ params }: { params: { username: string
     coverImageAiHint: "poker table background",
   };
 
-  // Determine if this is the "logged-in" user's profile for edit button
-  // This is a mock, replace with actual auth logic
-  const isCurrentUserProfile = params.username === "playerone"; // Assuming "playerone" is the logged in user's username
+  useEffect(() => {
+    try {
+      const loggedInUserString = localStorage.getItem("loggedInUser");
+      if (loggedInUserString) {
+        const loggedInUser: LoggedInUser = JSON.parse(loggedInUserString);
+        if (loggedInUser && loggedInUser.username === params.username) {
+          setIsCurrentUserProfile(true);
+        } else {
+          setIsCurrentUserProfile(false);
+        }
+      } else {
+        setIsCurrentUserProfile(false);
+      }
+    } catch (error) {
+      console.error("Error reading loggedInUser from localStorage:", error);
+      setIsCurrentUserProfile(false);
+    }
+  }, [params.username]);
+
 
   return (
     <div className="container mx-auto max-w-4xl">
@@ -54,8 +79,8 @@ export default function UserProfilePage({ params }: { params: { username: string
           <Image 
             src={mockUser.coverImage} 
             alt={`${mockUser.name}'s cover photo`} 
-            layout="fill" 
-            objectFit="cover"
+            fill // Changed from layout="fill"
+            style={{objectFit: "cover"}} // Changed from objectFit="cover"
             data-ai-hint={mockUser.coverImageAiHint}
             priority
           />
