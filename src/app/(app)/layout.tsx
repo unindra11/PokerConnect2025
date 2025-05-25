@@ -51,6 +51,8 @@ export default function AppLayout({ children }: AppLayoutProps) {
     try {
       localStorage.removeItem("loggedInUser");
       localStorage.removeItem("pokerConnectUser"); // Also clear signup details if desired
+      localStorage.removeItem("pokerConnectMapUsers"); // Clear map users
+      localStorage.removeItem("pokerConnectUserPosts"); // Clear user posts
     } catch (error) {
       console.error("Error clearing localStorage on logout:", error);
     }
@@ -82,7 +84,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
           </div>
           <div className="mt-4 flex flex-col gap-1">
              <SidebarMenuButton asChild tooltip="Settings" size="sm">
-                <Link href="#">
+                <Link href="/settings">
                     <Settings size={18} />
                     <span className="group-data-[collapsible=icon]:hidden delay-300">Settings</span>
                 </Link>
