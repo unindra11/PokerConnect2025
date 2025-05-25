@@ -7,7 +7,7 @@ import Link from "next/link";
 import { PlusCircle } from "lucide-react";
 import { PostCard } from "@/components/post-card";
 import type { Post } from "@/types/post";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"; // Updated imports
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 
 const USER_POSTS_STORAGE_KEY = "pokerConnectUserPosts";
@@ -23,10 +23,9 @@ export default function CommunityWallPage() {
       const storedPostsString = localStorage.getItem(USER_POSTS_STORAGE_KEY);
       if (storedPostsString) {
         const allPosts: Post[] = JSON.parse(storedPostsString);
-        // Display all posts, newest first
         setCommunityPosts(allPosts.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()));
       } else {
-        setCommunityPosts([]); // No posts stored yet
+        setCommunityPosts([]); 
       }
     } catch (error) {
       console.error("Error loading posts from localStorage for Community Wall:", error);
@@ -40,6 +39,29 @@ export default function CommunityWallPage() {
       setIsLoading(false);
     }
   }, [toast]);
+
+  const handleLikePost = (postId: string) => {
+    setCommunityPosts(prevPosts =>
+      prevPosts.map(p =>
+        p.id === postId ? { ...p, likes: p.likes + 1 } : p
+      )
+    );
+
+    try {
+      const allStoredPostsString = localStorage.getItem(USER_POSTS_STORAGE_KEY);
+      if (allStoredPostsString) {
+        let allStoredPosts: Post[] = JSON.parse(allStoredPostsString);
+        allStoredPosts = allStoredPosts.map(p =>
+          p.id === postId ? { ...p, likes: p.likes + 1 } : p
+        );
+        localStorage.setItem(USER_POSTS_STORAGE_KEY, JSON.stringify(allStoredPosts));
+      }
+    } catch (error) {
+      console.error("Error updating likes in localStorage:", error);
+      // Optionally revert state update or show error toast
+    }
+  };
+
 
   if (isLoading) {
     return (
@@ -82,10 +104,7 @@ export default function CommunityWallPage() {
           </Card>
         )}
         {communityPosts.map((post) => (
-          // For community posts, we generally don't show management controls
-          // unless it's the user's own post and we have that logic.
-          // For this prototype, management controls are primarily on "My Posts" page.
-          <PostCard key={post.id} post={post} />
+          <PostCard key={post.id} post={post} onLikePost={handleLikePost} />
         ))}
       </div>
     </div>

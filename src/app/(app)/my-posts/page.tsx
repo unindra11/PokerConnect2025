@@ -3,19 +3,19 @@
 
 import { useState, useEffect } from "react"; 
 import { Button } from "@/components/ui/button";
-import { Card, CardDescription, CardTitle, CardContent } from "@/components/ui/card"; // Added CardContent
+import { Card, CardDescription, CardTitle, CardContent, CardHeader } from "@/components/ui/card";
 import Link from "next/link";
 import { PlusCircle } from "lucide-react";
 import { PostCard } from "@/components/post-card";
 import type { Post } from "@/types/post";
-import { useToast } from "@/hooks/use-toast"; // Import useToast
+import { useToast } from "@/hooks/use-toast";
 
 const USER_POSTS_STORAGE_KEY = "pokerConnectUserPosts";
 
 export default function MyPostsPage() {
   const [userPosts, setUserPosts] = useState<Post[]>([]);
-  const [isLoading, setIsLoading] = useState(true); // For loading state
-  const { toast } = useToast(); // Initialize toast
+  const [isLoading, setIsLoading] = useState(true);
+  const { toast } = useToast();
 
   useEffect(() => {
     setIsLoading(true);
@@ -23,10 +23,8 @@ export default function MyPostsPage() {
       const storedPostsString = localStorage.getItem(USER_POSTS_STORAGE_KEY);
       if (storedPostsString) {
         const storedPosts: Post[] = JSON.parse(storedPostsString);
-        // Filter posts to show only those by the "logged-in" user (mocked for now)
-        // In a real app, you'd compare against the actual logged-in user's ID/username
         const loggedInUserString = localStorage.getItem("loggedInUser");
-        let currentUsername = "playerone"; // Default mock username
+        let currentUsername = "playerone"; 
         if (loggedInUserString) {
             try {
                 const loggedInUser = JSON.parse(loggedInUserString);
@@ -34,12 +32,11 @@ export default function MyPostsPage() {
             } catch (e) { console.error("Error parsing loggedInUser for MyPosts", e); }
         }
         
-        // Assuming post.user.handle is like "@username"
         const filteredPosts = storedPosts.filter(post => post.user.handle === `@${currentUsername}`);
-        setUserPosts(filteredPosts);
+        setUserPosts(filteredPosts.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()));
 
       } else {
-        setUserPosts([]); // No posts stored yet
+        setUserPosts([]);
       }
     } catch (error) {
       console.error("Error loading posts from localStorage:", error);
@@ -52,17 +49,12 @@ export default function MyPostsPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [toast]); // Add toast to dependency array if used in effect (though not directly here, good practice)
+  }, [toast]);
 
   const handleDeletePost = (postId: string) => {
     try {
       const updatedPosts = userPosts.filter(post => post.id !== postId);
       setUserPosts(updatedPosts);
-      
-      // Update localStorage by re-fetching all posts and removing the specific one
-      // This is safer than just saving 'updatedPosts' if other users' posts are stored globally.
-      // However, for 'pokerConnectUserPosts', it's expected to be only the current user's posts if filtered on creation.
-      // For simplicity, we'll update based on the current `userPosts` state, assuming it's correctly loaded/filtered.
       
       const allStoredPostsString = localStorage.getItem(USER_POSTS_STORAGE_KEY);
       if (allStoredPostsString) {
@@ -70,8 +62,11 @@ export default function MyPostsPage() {
           allStoredPosts = allStoredPosts.filter(p => p.id !== postId);
           localStorage.setItem(USER_POSTS_STORAGE_KEY, JSON.stringify(allStoredPosts));
       }
-
-      // Toast notification is handled by PostCard, but we could add another one here if needed.
+       toast({
+        title: "Post Deleted",
+        description: `The post has been removed.`,
+        variant: "destructive",
+      });
     } catch (error) {
       console.error("Error deleting post from localStorage:", error);
       toast({
@@ -79,6 +74,28 @@ export default function MyPostsPage() {
         description: "Could not remove the post from local storage.",
         variant: "destructive",
       });
+    }
+  };
+
+  const handleLikePost = (postId: string) => {
+    setUserPosts(prevPosts =>
+      prevPosts.map(p =>
+        p.id === postId ? { ...p, likes: p.likes + 1 } : p
+      )
+    );
+
+    try {
+      const allStoredPostsString = localStorage.getItem(USER_POSTS_STORAGE_KEY);
+      if (allStoredPostsString) {
+        let allStoredPosts: Post[] = JSON.parse(allStoredPostsString);
+        allStoredPosts = allStoredPosts.map(p =>
+          p.id === postId ? { ...p, likes: p.likes + 1 } : p
+        );
+        localStorage.setItem(USER_POSTS_STORAGE_KEY, JSON.stringify(allStoredPosts));
+      }
+    } catch (error) {
+      console.error("Error updating likes in localStorage:", error);
+      // Optionally revert state update or show error toast
     }
   };
 
@@ -104,11 +121,11 @@ export default function MyPostsPage() {
       <div className="space-y-6">
         {userPosts.length === 0 && (
           <Card className="text-center p-8 shadow-lg rounded-xl">
-            <CardHeader> {/* Wrap title and description in CardHeader */}
+            <CardHeader>
               <CardTitle className="text-xl mb-2">No Posts Yet!</CardTitle>
               <CardDescription className="mb-4">Start sharing your poker journey with the community.</CardDescription>
             </CardHeader>
-            <CardContent> {/* Wrap button in CardContent for consistency or CardFooter */}
+            <CardContent>
               <Link href="/create-post" passHref>
                 <Button>Create Your First Post</Button>
               </Link>
@@ -121,11 +138,10 @@ export default function MyPostsPage() {
             post={post} 
             showManagementControls={true} 
             onDeletePost={handleDeletePost}
+            onLikePost={handleLikePost}
           />
         ))}
       </div>
     </div>
   );
 }
-
-    

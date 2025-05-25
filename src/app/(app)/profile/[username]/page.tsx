@@ -95,12 +95,31 @@ export default function UserProfilePage({ params }: { params: { username: string
           setIsCurrentUserProfile(false);
            const pokerConnectUserString = localStorage.getItem("pokerConnectUser"); 
            if (pokerConnectUserString) {
-             const pokerConnectUser: LoggedInUser = JSON.parse(pokerConnectUserString);
-             if (pokerConnectUser.username === resolvedParams.username) {
-                userForProfile = pokerConnectUser;
-                if(pokerConnectUser.avatar) avatarForProfile = pokerConnectUser.avatar;
-                if(pokerConnectUser.coverImage) coverForProfile = pokerConnectUser.coverImage;
-             } else {
+             // This logic block might be for viewing other stored users;
+             // for now, it's simplified as we assume only one 'pokerConnectUser' entry
+             // or we are creating a generic profile for any non-logged-in user.
+             // Let's assume for simplicity, if not the loggedInUser, we construct a mock.
+             const allUsersString = localStorage.getItem("pokerConnectMapUsers"); // A potential source for other users
+             let foundOtherUser = false;
+             if (allUsersString) {
+                const allUsers: {username: string, name: string, avatar?: string, bio?:string, coverImage?:string, friendsCount?: number}[] = JSON.parse(allUsersString);
+                const otherUser = allUsers.find(u => u.username === resolvedParams.username);
+                if (otherUser) {
+                    userForProfile = {
+                        username: otherUser.username,
+                        fullName: otherUser.name,
+                        bio: otherUser.bio || "A passionate poker player.",
+                        avatar: otherUser.avatar,
+                        coverImage: otherUser.coverImage,
+                        friendsCount: otherUser.friendsCount || Math.floor(Math.random() * 100)
+                    };
+                    if (userForProfile.avatar) avatarForProfile = userForProfile.avatar;
+                    if (userForProfile.coverImage) coverForProfile = userForProfile.coverImage;
+                    foundOtherUser = true;
+                }
+             }
+
+             if (!foundOtherUser) {
                  userForProfile = { 
                     username: resolvedParams.username, 
                     fullName: resolvedParams.username.charAt(0).toUpperCase() + resolvedParams.username.slice(1),
@@ -108,7 +127,7 @@ export default function UserProfilePage({ params }: { params: { username: string
                     friendsCount: Math.floor(Math.random() * 200) 
                 };
              }
-           } else {
+           } else { // No pokerConnectUser (the one created at signup)
              userForProfile = { 
                 username: resolvedParams.username, 
                 fullName: resolvedParams.username.charAt(0).toUpperCase() + resolvedParams.username.slice(1),
@@ -123,10 +142,10 @@ export default function UserProfilePage({ params }: { params: { username: string
          if (pokerConnectUserString) {
            const pokerConnectUser: LoggedInUser = JSON.parse(pokerConnectUserString);
            if (pokerConnectUser.username === resolvedParams.username) {
-              userForProfile = pokerConnectUser;
+              userForProfile = pokerConnectUser; // Should be the signed up user
               if(pokerConnectUser.avatar) avatarForProfile = pokerConnectUser.avatar;
               if(pokerConnectUser.coverImage) coverForProfile = pokerConnectUser.coverImage;
-           } else {
+           } else { // Viewing someone else who isn't the main "pokerConnectUser"
                userForProfile = { 
                   username: resolvedParams.username,
                   fullName: resolvedParams.username.charAt(0).toUpperCase() + resolvedParams.username.slice(1),
@@ -134,7 +153,7 @@ export default function UserProfilePage({ params }: { params: { username: string
                   friendsCount: Math.floor(Math.random() * 200)
               };
            }
-         } else {
+         } else { // No loggedInUser and no pokerConnectUser
             userForProfile = { 
                 username: resolvedParams.username,
                 fullName: resolvedParams.username.charAt(0).toUpperCase() + resolvedParams.username.slice(1),
@@ -144,7 +163,6 @@ export default function UserProfilePage({ params }: { params: { username: string
          }
       }
 
-      // Check friend request status if a logged-in user and profile user are defined
       if (loggedInUserForState && userForProfile && loggedInUserForState.username !== userForProfile.username) {
         const notificationsKey = `pokerConnectNotifications_${loggedInUserForState.username}`;
         const storedNotificationsString = localStorage.getItem(notificationsKey);
@@ -214,7 +232,8 @@ export default function UserProfilePage({ params }: { params: { username: string
       }
       toast({
         title: "Post Deleted",
-        description: "The post has been removed from local storage.",
+        description: "The post has been removed.",
+        variant: "destructive"
       });
     } catch (error) {
       console.error("Error deleting post from localStorage:", error);
@@ -225,6 +244,28 @@ export default function UserProfilePage({ params }: { params: { username: string
       });
     }
   };
+  
+  const handleLikePost = (postId: string) => {
+    setProfilePosts(prevPosts =>
+      prevPosts.map(p =>
+        p.id === postId ? { ...p, likes: p.likes + 1 } : p
+      )
+    );
+
+    try {
+      const allStoredPostsString = localStorage.getItem(USER_POSTS_STORAGE_KEY);
+      if (allStoredPostsString) {
+        let allStoredPosts: Post[] = JSON.parse(allStoredPostsString);
+        allStoredPosts = allStoredPosts.map(p =>
+          p.id === postId ? { ...p, likes: p.likes + 1 } : p
+        );
+        localStorage.setItem(USER_POSTS_STORAGE_KEY, JSON.stringify(allStoredPosts));
+      }
+    } catch (error) {
+      console.error("Error updating likes in localStorage:", error);
+    }
+  };
+
 
   const handleProfileAvatarChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -260,6 +301,8 @@ export default function UserProfilePage({ params }: { params: { username: string
             loggedInUser.avatar = newAvatarDataUrl;
             localStorage.setItem("loggedInUser", JSON.stringify(loggedInUser));
             
+            // Additionally update the general pokerConnectUser if it's the same user
+            // This helps if profile page is for a user not currently "loggedInUser" but is the main "pokerConnectUser"
             const pokerConnectUserString = localStorage.getItem("pokerConnectUser");
             if (pokerConnectUserString) {
                 let pokerConnectUser: LoggedInUser = JSON.parse(pokerConnectUserString);
@@ -476,6 +519,7 @@ export default function UserProfilePage({ params }: { params: { username: string
                   post={post} 
                   showManagementControls={isCurrentUserProfile}
                   onDeletePost={isCurrentUserProfile ? handleDeletePost : undefined}
+                  onLikePost={handleLikePost}
                 />
               ))}
             </TabsContent>
@@ -513,4 +557,3 @@ export default function UserProfilePage({ params }: { params: { username: string
     </div>
   );
 }
-

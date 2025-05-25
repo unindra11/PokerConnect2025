@@ -21,10 +21,11 @@ import { useRouter } from "next/navigation";
 interface PostCardProps {
   post: Post;
   showManagementControls?: boolean;
-  onDeletePost?: (postId: string) => void; // New prop for delete callback
+  onDeletePost?: (postId: string) => void;
+  onLikePost?: (postId: string) => void; // New prop for liking
 }
 
-export function PostCard({ post, showManagementControls = false, onDeletePost }: PostCardProps) {
+export function PostCard({ post, showManagementControls = false, onDeletePost, onLikePost }: PostCardProps) {
   const { toast } = useToast();
   const router = useRouter();
 
@@ -36,9 +37,12 @@ export function PostCard({ post, showManagementControls = false, onDeletePost }:
   };
 
   const handleLike = () => {
+    if (onLikePost) {
+      onLikePost(post.id);
+    }
     toast({
       title: "Post Liked!",
-      description: "You liked this post (simulated).",
+      description: `You liked "${post.content.substring(0,20)}...".`,
     });
   };
 
@@ -55,13 +59,18 @@ export function PostCard({ post, showManagementControls = false, onDeletePost }:
 
   const handleDelete = () => {
     if (onDeletePost) {
-      onDeletePost(post.id); // Call the passed-in handler
+      onDeletePost(post.id); 
     }
-    toast({
-      title: "Post Deleted",
-      description: `Post "${post.content.substring(0,20)}..." has been removed.`, // Updated toast
-      variant: "destructive",
-    });
+    // Toast is handled by parent in MyPostsPage for deletion,
+    // but can be kept here as a fallback or for other contexts if needed.
+    // For consistency, let's assume parent handles deletion toast if onDeletePost is present.
+    if (!onDeletePost) {
+      toast({
+        title: "Post Deleted",
+        description: `Post "${post.content.substring(0,20)}..." has been removed.`,
+        variant: "destructive",
+      });
+    }
   };
 
 
