@@ -22,14 +22,18 @@ export default function LoginPage() {
     e.preventDefault();
     // setError(""); // Future: reset error on new submit
 
+    console.log("Login attempt submitted.");
+    console.log("Entered Email/Username:", emailOrUsername);
+    console.log("Entered Password:", password);
+
     if (emailOrUsername === "unindra111@gmail.com" && password === "qwerty") {
-      console.log("Login successful!");
+      console.log("Login successful! Redirecting to /home...");
       router.push("/home");
     } else {
-      console.log("Login failed: Invalid credentials");
-      // setError("Invalid email or password."); // Future: show error to user
-      // For now, just log and don't redirect if credentials don't match
-      alert("Invalid email or password. Please use unindra111@gmail.com and qwerty");
+      console.log("Login failed: Invalid credentials entered.");
+      console.log("Expected email: unindra111@gmail.com, Actual:", emailOrUsername);
+      console.log("Expected password: qwerty, Actual:", password);
+      alert("Invalid email or password. Please use unindra111@gmail.com and qwerty. Check the browser console for more details.");
     }
   };
 
