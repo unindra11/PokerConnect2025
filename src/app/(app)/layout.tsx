@@ -17,10 +17,13 @@ import {
 import { AppNavigation } from "@/components/navigation";
 import { Logo } from "@/components/logo";
 import { Button } from "@/components/ui/button";
-import { Settings, LogOut } from "lucide-react";
+import { Settings, LogOut, UploadCloud } from "lucide-react"; // Added UploadCloud for clarity
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/hooks/use-toast"; 
+import { storage } from "@/lib/firebase"; // Import Firebase storage
+import { ref, uploadBytesResumable, getDownloadURL } from "firebase/storage";
+import type { MockUserPin } from "@/app/(app)/map/page"; // For pokerConnectMapUsers type
 
 interface AppLayoutProps {
   children: ReactNode;
@@ -31,8 +34,9 @@ const MAX_AVATAR_SIZE_BYTES = MAX_AVATAR_SIZE_MB * 1024 * 1024;
 
 export default function AppLayout({ children }: AppLayoutProps) {
   const [userName, setUserName] = useState("Player One");
-  const [userEmail, setUserEmail] = useState("player@example.com"); // Default email
-  const [avatarUrl, setAvatarUrl] = useState("https://placehold.co/100x100.png"); 
+  const [userEmail, setUserEmail] = useState("player@example.com"); 
+  const [avatarUrl, setAvatarUrl] = useState("https://placehold.co/100x100.png?text=P"); 
+  const [currentUsername, setCurrentUsername] = useState<string | null>(null);
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
@@ -44,96 +48,122 @@ export default function AppLayout({ children }: AppLayoutProps) {
         const loggedInUser = JSON.parse(loggedInUserString);
         setUserName(loggedInUser.fullName || loggedInUser.username || "User");
         setUserEmail(loggedInUser.email || "No email provided");
+        setCurrentUsername(loggedInUser.username || null);
         if (loggedInUser.avatar) {
           setAvatarUrl(loggedInUser.avatar);
         } else {
           setAvatarUrl(`https://placehold.co/100x100.png?text=${(loggedInUser.fullName || loggedInUser.username || "P").substring(0,1)}`);
         }
       } else {
-        // If no loggedInUser, set to defaults or push to login
         setUserName("Player One");
         setUserEmail("player@example.com");
-        setAvatarUrl("https://placehold.co/100x100.png");
+        setCurrentUsername("playerone"); // Fallback username
+        setAvatarUrl("https://placehold.co/100x100.png?text=P");
       }
     } catch (error) {
       console.error("Error reading loggedInUser from localStorage:", error);
-      // Fallback to defaults
       setUserName("Player One");
       setUserEmail("player@example.com");
-      setAvatarUrl("https://placehold.co/100x100.png");
+      setCurrentUsername("playerone");
+      setAvatarUrl("https://placehold.co/100x100.png?text=P");
     }
-  }, []); // Re-run if router path changes, to potentially update after login/settings
+  }, []); 
 
 
-  const handleAvatarChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleAvatarChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    if (file) {
-      if (file.size > MAX_AVATAR_SIZE_BYTES) {
-        toast({
-          title: "File Too Large",
-          description: `Please select an image smaller than ${MAX_AVATAR_SIZE_MB}MB.`,
-          variant: "destructive",
-        });
-        if (fileInputRef.current) {
-          fileInputRef.current.value = "";
-        }
+    if (!file) return;
+    if (!currentUsername) {
+        toast({ title: "Error", description: "Username not found. Cannot upload avatar.", variant: "destructive"});
         return;
-      }
-
-      if (!file.type.startsWith("image/")) {
-        toast({
-          title: "Unsupported File Type",
-          description: "Please select an image file (e.g., PNG, JPG, GIF).",
-          variant: "destructive",
-        });
-        if (fileInputRef.current) {
-          fileInputRef.current.value = "";
-        }
-        return;
-      }
-
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        const newAvatarDataUrl = reader.result as string;
-        setAvatarUrl(newAvatarDataUrl);
-
-        try {
-          const loggedInUserString = localStorage.getItem("loggedInUser");
-          if (loggedInUserString) {
-            const loggedInUser = JSON.parse(loggedInUserString);
-            loggedInUser.avatar = newAvatarDataUrl;
-            localStorage.setItem("loggedInUser", JSON.stringify(loggedInUser));
-            toast({
-              title: "Avatar Updated!",
-              description: "Your new profile picture has been saved.",
-            });
-          }
-        } catch (error) {
-          console.error("Error saving avatar to localStorage:", error);
-          toast({
-            title: "Storage Error",
-            description: "Could not save your new avatar.",
-            variant: "destructive",
-          });
-        }
-      };
-      reader.onerror = () => {
-        toast({ title: "Error", description: "Could not read the selected file.", variant: "destructive" });
-      };
-      reader.readAsDataURL(file);
     }
-    if (fileInputRef.current) {
-        fileInputRef.current.value = "";
+
+    if (file.size > MAX_AVATAR_SIZE_BYTES) {
+      toast({
+        title: "File Too Large",
+        description: `Please select an image smaller than ${MAX_AVATAR_SIZE_MB}MB.`,
+        variant: "destructive",
+      });
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
+    }
+
+    if (!file.type.startsWith("image/")) {
+      toast({
+        title: "Unsupported File Type",
+        description: "Please select an image file (e.g., PNG, JPG, GIF).",
+        variant: "destructive",
+      });
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
+    }
+
+    // Show local preview immediately
+    const reader = new FileReader();
+    reader.onloadend = () => {
+        setAvatarUrl(reader.result as string); // Temporary local preview
+    };
+    reader.readAsDataURL(file);
+    
+    // Upload to Firebase Storage
+    const storageRef = ref(storage, `avatars/${currentUsername}/avatar_${Date.now()}_${file.name}`);
+    const uploadTask = uploadBytesResumable(storageRef, file);
+
+    try {
+      toast({ title: "Uploading Avatar...", description: "Please wait." });
+      await uploadTask;
+      const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
+      setAvatarUrl(downloadURL); // Update with Firebase URL
+
+      // Update localStorage for loggedInUser
+      const loggedInUserString = localStorage.getItem("loggedInUser");
+      if (loggedInUserString) {
+        let loggedInUser = JSON.parse(loggedInUserString);
+        loggedInUser.avatar = downloadURL;
+        localStorage.setItem("loggedInUser", JSON.stringify(loggedInUser));
+
+        // Also update pokerConnectUser if it's the same user
+        const pokerConnectUserString = localStorage.getItem("pokerConnectUser");
+        if (pokerConnectUserString) {
+            let pokerConnectUser = JSON.parse(pokerConnectUserString);
+            if (pokerConnectUser.username === loggedInUser.username) {
+                pokerConnectUser.avatar = downloadURL;
+                localStorage.setItem("pokerConnectUser", JSON.stringify(pokerConnectUser));
+            }
+        }
+        // Also update pokerConnectMapUsers
+        const mapUsersString = localStorage.getItem("pokerConnectMapUsers");
+        if (mapUsersString) {
+            let mapUsers: MockUserPin[] = JSON.parse(mapUsersString);
+            mapUsers = mapUsers.map(mu => mu.username === loggedInUser.username ? {...mu, avatar: downloadURL} : mu);
+            localStorage.setItem("pokerConnectMapUsers", JSON.stringify(mapUsers));
+        }
+      }
+      toast({
+        title: "Avatar Updated!",
+        description: "Your new profile picture has been saved to Firebase Storage.",
+      });
+    } catch (error: any) {
+      console.error("Error saving avatar to Firebase Storage or localStorage:", error);
+      toast({
+        title: "Upload Failed",
+        description: `Could not upload new avatar: ${error.message}. Reverting to previous.`,
+        variant: "destructive",
+      });
+      // Revert to old avatar from localStorage if upload fails
+       const loggedInUserString = localStorage.getItem("loggedInUser");
+        if (loggedInUserString) {
+            const loggedInUser = JSON.parse(loggedInUserString);
+            setAvatarUrl(loggedInUser.avatar || `https://placehold.co/100x100.png?text=${(loggedInUser.fullName || loggedInUser.username || "P").substring(0,1)}`);
+        }
+    } finally {
+        if (fileInputRef.current) fileInputRef.current.value = "";
     }
   };
 
   const handleLogout = () => {
     try {
       localStorage.removeItem("loggedInUser");
-      // Optional: Clear other app-specific data if desired on logout
-      // localStorage.removeItem("pokerConnectUser"); 
-      // localStorage.removeItem("pokerConnectMapUsers");
-      // localStorage.removeItem("pokerConnectUserPosts");
     } catch (error) {
       console.error("Error clearing localStorage on logout:", error);
     }
@@ -154,11 +184,14 @@ export default function AppLayout({ children }: AppLayoutProps) {
         </SidebarContent>
         <SidebarFooter className="p-4 border-t">
           <div className="flex items-center gap-3 group-data-[collapsible=icon]:justify-center">
-            <label htmlFor="avatar-upload-sidebar" className="cursor-pointer rounded-full" title="Change avatar">
+            <label htmlFor="avatar-upload-sidebar" className="cursor-pointer rounded-full group relative" title="Change avatar">
               <Avatar className="h-9 w-9">
                 <AvatarImage src={avatarUrl} alt="User Avatar" data-ai-hint="user avatar" />
                 <AvatarFallback>{userName.substring(0, 1)?.toUpperCase() || 'P'}</AvatarFallback>
               </Avatar>
+              <div className="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity rounded-full">
+                <UploadCloud className="h-5 w-5 text-white" />
+              </div>
             </label>
             <input
               id="avatar-upload-sidebar"

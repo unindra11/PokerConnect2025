@@ -6,7 +6,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Edit3, UserPlus, Loader2, Users, Camera, UserCheck } from "lucide-react";
+import { Edit3, UserPlus, Loader2, Users, Camera, UserCheck, UploadCloud } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { PostCard } from "@/components/post-card";
@@ -14,6 +14,8 @@ import type { Post, User as PostUser } from "@/types/post";
 import { useToast } from "@/hooks/use-toast";
 import { useRouter, useParams } from "next/navigation"; 
 import type { MockUserPin } from "@/app/(app)/map/page";
+import { storage } from "@/lib/firebase"; // Import Firebase storage
+import { ref, uploadBytesResumable, getDownloadURL } from "firebase/storage";
 
 
 interface LoggedInUser { 
@@ -64,8 +66,8 @@ export default function UserProfilePage({ params }: { params: { username: string
   const [profilePosts, setProfilePosts] = useState<Post[]>([]);
   const [isLoadingPosts, setIsLoadingPosts] = useState(true);
   const [profileUser, setProfileUser] = useState<LoggedInUser | null>(null);
-  const [profileAvatarUrl, setProfileAvatarUrl] = useState<string | undefined>(undefined);
-  const [profileCoverImageUrl, setProfileCoverImageUrl] = useState<string | undefined>("https://placehold.co/1200x300.png?cover=1"); 
+  const [profileAvatarUrl, setProfileAvatarUrl] = useState<string>("https://placehold.co/150x150.png?text=P");
+  const [profileCoverImageUrl, setProfileCoverImageUrl] = useState<string>("https://placehold.co/1200x300.png?cover=1"); 
   const { toast } = useToast();
   const profileAvatarInputRef = useRef<HTMLInputElement>(null);
   const [friendRequestStatus, setFriendRequestStatus] = useState<'idle' | 'sent' | 'friends'>('idle');
@@ -73,8 +75,8 @@ export default function UserProfilePage({ params }: { params: { username: string
   
   useEffect(() => {
     let userForProfile: LoggedInUser | null = null;
-    let avatarForProfile: string | undefined = `https://placehold.co/150x150.png?u=${resolvedParams.username}`; 
-    let coverForProfile: string | undefined = "https://placehold.co/1200x300.png?cover=1";
+    let avatarForProfile: string = `https://placehold.co/150x150.png?u=${resolvedParams.username}`; 
+    let coverForProfile: string = "https://placehold.co/1200x300.png?cover=1";
     let loggedInUserForState: LoggedInUser | null = null;
 
     try {
@@ -175,13 +177,10 @@ export default function UserProfilePage({ params }: { params: { username: string
       }
 
       if (userForProfile) {
-          console.log(`[Profile Page for ${resolvedParams.username}] Determined userForProfile:`, userForProfile);
           avatarForProfile = userForProfile.avatar || `https://placehold.co/150x150.png?u=${userForProfile.username}&ava=1`;
           coverForProfile = userForProfile.coverImage || `https://placehold.co/1200x300.png?u=${userForProfile.username}&cover=1`;
-          console.log(`[Profile Page for ${resolvedParams.username}] Using avatar: ${avatarForProfile}`);
-          console.log(`[Profile Page for ${resolvedParams.username}] Using cover: ${coverForProfile}`);
       }
-
+      
       if (loggedInUserForState && userForProfile && loggedInUserForState.username !== userForProfile.username) {
         const notificationsKey = `pokerConnectNotifications_${loggedInUserForState.username}`;
         const storedNotificationsString = localStorage.getItem(notificationsKey);
@@ -211,12 +210,13 @@ export default function UserProfilePage({ params }: { params: { username: string
     setProfileUser(userForProfile);
     setProfileAvatarUrl(avatarForProfile);
     setProfileCoverImageUrl(coverForProfile);
+    console.log(`[Profile Page for ${resolvedParams.username}] User data loaded. Profile User:`, userForProfile, "Avatar URL:", avatarForProfile, "Cover URL:", coverForProfile);
   }, [resolvedParams.username]); 
 
 
   useEffect(() => {
     setIsLoadingPosts(true);
-    if (!resolvedParams.username) return; // Don't fetch if username isn't resolved
+    if (!resolvedParams.username) return; 
     try {
       const storedPostsString = localStorage.getItem(USER_POSTS_STORAGE_KEY);
       if (storedPostsString) {
@@ -351,74 +351,90 @@ export default function UserProfilePage({ params }: { params: { username: string
     }
   };
 
-
-  const handleProfileAvatarChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+const handleProfileAvatarChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    if (file) {
-      if (file.size > MAX_AVATAR_SIZE_BYTES) {
+    if (!file || !profileUser || !isCurrentUserProfile) return;
+
+    if (file.size > MAX_AVATAR_SIZE_BYTES) {
         toast({
-          title: "File Too Large",
-          description: `Please select an image smaller than ${MAX_AVATAR_SIZE_MB}MB.`,
-          variant: "destructive",
+            title: "File Too Large",
+            description: `Please select an image smaller than ${MAX_AVATAR_SIZE_MB}MB.`,
+            variant: "destructive",
         });
         if (profileAvatarInputRef.current) profileAvatarInputRef.current.value = "";
         return;
-      }
-      if (!file.type.startsWith("image/")) {
-        toast({
-          title: "Unsupported File Type",
-          description: "Please select an image file (e.g., PNG, JPG, GIF).",
-          variant: "destructive",
-        });
-        if (profileAvatarInputRef.current) profileAvatarInputRef.current.value = "";
-        return;
-      }
-
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        const newAvatarDataUrl = reader.result as string;
-        setProfileAvatarUrl(newAvatarDataUrl); 
-
-        try {
-          const loggedInUserString = localStorage.getItem("loggedInUser");
-          if (loggedInUserString && profileUser && profileUser.username === JSON.parse(loggedInUserString).username) {
-            const loggedInUser: LoggedInUser = JSON.parse(loggedInUserString);
-            loggedInUser.avatar = newAvatarDataUrl;
-            localStorage.setItem("loggedInUser", JSON.stringify(loggedInUser));
-            
-            const pokerConnectUserString = localStorage.getItem("pokerConnectUser");
-            if (pokerConnectUserString) {
-                let pokerConnectUser: LoggedInUser = JSON.parse(pokerConnectUserString);
-                if (pokerConnectUser.username === loggedInUser.username) {
-                    pokerConnectUser.avatar = newAvatarDataUrl;
-                    localStorage.setItem("pokerConnectUser", JSON.stringify(pokerConnectUser));
-                }
-            }
-            const mapUsersString = localStorage.getItem("pokerConnectMapUsers");
-            if (mapUsersString) {
-              let mapUsers: MockUserPin[] = JSON.parse(mapUsersString);
-              mapUsers = mapUsers.map(mu => mu.username === loggedInUser.username ? {...mu, avatar: newAvatarDataUrl} : mu);
-              localStorage.setItem("pokerConnectMapUsers", JSON.stringify(mapUsers));
-            }
-
-
-            toast({
-              title: "Profile Picture Updated!",
-              description: "Your new profile picture has been saved.",
-            });
-          }
-        } catch (error) {
-          console.error("Error saving avatar to localStorage from profile:", error);
-          toast({ title: "Storage Error", description: "Could not save new avatar.", variant: "destructive" });
-        }
-      };
-      reader.onerror = () => {
-        toast({ title: "Error", description: "Could not read selected file.", variant: "destructive" });
-      };
-      reader.readAsDataURL(file);
     }
-    if (profileAvatarInputRef.current) profileAvatarInputRef.current.value = "";
-  };
+    if (!file.type.startsWith("image/")) {
+        toast({
+            title: "Unsupported File Type",
+            description: "Please select an image file (e.g., PNG, JPG, GIF).",
+            variant: "destructive",
+        });
+        if (profileAvatarInputRef.current) profileAvatarInputRef.current.value = "";
+        return;
+    }
+
+    // Show local preview immediately
+    const reader = new FileReader();
+    reader.onloadend = () => {
+        setProfileAvatarUrl(reader.result as string); // Temporary local preview
+    };
+    reader.readAsDataURL(file);
+
+    const storageRef = ref(storage, `avatars/${profileUser.username}/avatar_${Date.now()}_${file.name}`);
+    const uploadTask = uploadBytesResumable(storageRef, file);
+
+    try {
+        toast({ title: "Uploading Avatar...", description: "Please wait." });
+        await uploadTask;
+        const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
+        setProfileAvatarUrl(downloadURL);
+
+        // Update localStorage for loggedInUser, pokerConnectUser, and pokerConnectMapUsers
+        const loggedInUserString = localStorage.getItem("loggedInUser");
+        if (loggedInUserString) {
+            let loggedInUser: LoggedInUser = JSON.parse(loggedInUserString);
+            if (loggedInUser.username === profileUser.username) {
+                loggedInUser.avatar = downloadURL;
+                localStorage.setItem("loggedInUser", JSON.stringify(loggedInUser));
+            }
+        }
+        const pokerConnectUserString = localStorage.getItem("pokerConnectUser");
+        if (pokerConnectUserString) {
+            let pokerConnectUser: LoggedInUser = JSON.parse(pokerConnectUserString);
+            if (pokerConnectUser.username === profileUser.username) {
+                pokerConnectUser.avatar = downloadURL;
+                localStorage.setItem("pokerConnectUser", JSON.stringify(pokerConnectUser));
+            }
+        }
+        const mapUsersString = localStorage.getItem("pokerConnectMapUsers");
+        if (mapUsersString) {
+            let mapUsers: MockUserPin[] = JSON.parse(mapUsersString);
+            mapUsers = mapUsers.map(mu => mu.username === profileUser.username ? {...mu, avatar: downloadURL} : mu);
+            localStorage.setItem("pokerConnectMapUsers", JSON.stringify(mapUsers));
+        }
+
+        toast({
+            title: "Profile Picture Updated!",
+            description: "Your new profile picture has been saved to Firebase Storage.",
+        });
+
+    } catch (error: any) {
+        console.error("Error saving avatar to Firebase Storage or localStorage from profile:", error);
+        toast({ title: "Upload Failed", description: `Could not save new avatar: ${error.message}. Reverting.`, variant: "destructive" });
+        // Revert to previous avatar
+        const loggedInUserString = localStorage.getItem("loggedInUser");
+         if (loggedInUserString) {
+            const loggedInUser = JSON.parse(loggedInUserString);
+            if (loggedInUser.username === profileUser.username) {
+                setProfileAvatarUrl(loggedInUser.avatar || `https://placehold.co/150x150.png?u=${profileUser.username}&ava=1`);
+            }
+        }
+    } finally {
+        if (profileAvatarInputRef.current) profileAvatarInputRef.current.value = "";
+    }
+};
+
 
   const handleSendFriendRequest = () => {
     if (!profileUser || !currentLoggedInUser) {
@@ -542,7 +558,7 @@ export default function UserProfilePage({ params }: { params: { username: string
                   </Avatar>
                   {isCurrentUserProfile && (
                     <div className="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity rounded-full z-20 -mb-12 sm:-mb-0">
-                      <Camera className="h-8 w-8 text-white" />
+                      <UploadCloud className="h-8 w-8 text-white" />
                     </div>
                   )}
                 </label>
