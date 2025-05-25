@@ -23,7 +23,7 @@ import { useRouter } from "next/navigation";
 import { useToast } from "@/hooks/use-toast"; 
 import { storage, auth, firestore } from "@/lib/firebase";
 import { ref, uploadBytesResumable, getDownloadURL } from "firebase/storage";
-import { onAuthStateChanged, signOut as firebaseSignOut } from "firebase/auth";
+import { onAuthStateChanged, signOut as firebaseSignOut, type User as FirebaseUser } from "firebase/auth";
 import { doc, getDoc, updateDoc } from "firebase/firestore";
 import type { MockUserPin } from "@/app/(app)/map/page";
 
@@ -43,8 +43,8 @@ interface LoggedInUser {
 const MAX_AVATAR_SIZE_MB = 2;
 const MAX_AVATAR_SIZE_BYTES = MAX_AVATAR_SIZE_MB * 1024 * 1024;
 
-export default function AppLayout({ children }: AppLayoutProps) {
-  const [currentUserAuth, setCurrentUserAuth] = useState<firebase.default.User | null>(null);
+export default function AppLayout({ children }: { children: ReactNode }) {
+  const [currentUserAuth, setCurrentUserAuth] = useState<FirebaseUser | null>(null);
   const [loggedInUserDetails, setLoggedInUserDetails] = useState<LoggedInUser | null>(null);
   const [isLoadingAuth, setIsLoadingAuth] = useState(true);
 
@@ -56,71 +56,78 @@ export default function AppLayout({ children }: AppLayoutProps) {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       setIsLoadingAuth(true);
       if (user) {
-        console.log("Firebase Auth state changed: User is logged in", user.uid);
+        console.log("Firebase Auth state changed: User is logged in with UID:", user.uid);
         setCurrentUserAuth(user);
-        // Attempt to load from localStorage first (might be stale but faster)
+        
         const storedUserString = localStorage.getItem("loggedInUser");
         if (storedUserString) {
             const storedUser: LoggedInUser = JSON.parse(storedUserString);
-            // Verify if the stored user matches the auth user
             if (storedUser.uid === user.uid) {
                 setLoggedInUserDetails(storedUser);
                 setIsLoadingAuth(false);
-                console.log("Loaded user details from localStorage:", storedUser);
-                // Optionally, re-fetch from Firestore to ensure freshness if needed, or on a timer
-                // For now, we'll assume localStorage is up-to-date after login
-                return; // Exit if successfully loaded from localStorage
+                console.log("AppLayout: Loaded user details from localStorage:", storedUser);
+                return; 
             } else {
-                 // Stored user mismatch, clear it and fetch fresh
                 localStorage.removeItem("loggedInUser");
             }
         }
         
-        // If not in localStorage or mismatch, fetch from Firestore
         const userDocRef = doc(firestore, "users", user.uid);
-        const userDocSnap = await getDoc(userDocRef);
-        if (userDocSnap.exists()) {
-          const profileData = userDocSnap.data();
-          const details: LoggedInUser = {
-            uid: user.uid,
-            email: user.email,
-            displayName: profileData.fullName || profileData.username || user.email,
-            username: profileData.username,
-            fullName: profileData.fullName,
-            bio: profileData.bio,
-            avatar: profileData.avatar,
-            coverImage: profileData.coverImage,
-            location: profileData.location,
-            locationCoords: profileData.locationCoords,
-          };
-          setLoggedInUserDetails(details);
-          localStorage.setItem("loggedInUser", JSON.stringify(details));
-          console.log("Fetched and saved user details from Firestore:", details);
-        } else {
-          console.warn("No profile document in Firestore for UID:", user.uid);
-          // Fallback: create a basic LoggedInUser object
-           const basicDetails: LoggedInUser = {
+        try {
+          const userDocSnap = await getDoc(userDocRef);
+          if (userDocSnap.exists()) {
+            const profileData = userDocSnap.data();
+            const details: LoggedInUser = {
+              uid: user.uid,
+              email: user.email,
+              displayName: profileData.fullName || profileData.username || user.email,
+              username: profileData.username,
+              fullName: profileData.fullName,
+              bio: profileData.bio,
+              avatar: profileData.avatar,
+              coverImage: profileData.coverImage,
+              location: profileData.location,
+              locationCoords: profileData.locationCoords,
+            };
+            setLoggedInUserDetails(details);
+            localStorage.setItem("loggedInUser", JSON.stringify(details));
+            console.log("AppLayout: Fetched and saved user details from Firestore (UID:", user.uid,") :", details);
+          } else {
+            console.warn("AppLayout: No profile document in Firestore for UID:", user.uid, ". User might need to complete profile or this is a new signup without Firestore doc yet.");
+            // Fallback for users who exist in Auth but not Firestore (e.g., signup interrupted)
+             const basicDetails: LoggedInUser = {
+              uid: user.uid,
+              email: user.email,
+              displayName: user.email || "User",
+              username: user.email?.split('@')[0] || "user",
+              fullName: user.email || "User",
+              avatar: `https://placehold.co/100x100.png?text=${(user.email || "U").substring(0,1).toUpperCase()}`,
+            };
+            setLoggedInUserDetails(basicDetails);
+            localStorage.setItem("loggedInUser", JSON.stringify(basicDetails));
+          }
+        } catch (error) {
+          console.error("AppLayout: Error fetching user document from Firestore:", error);
+          toast({ title: "Profile Load Error", description: "Could not load your full profile details.", variant: "destructive"});
+          // Basic fallback if Firestore fetch fails
+          const basicDetails: LoggedInUser = {
             uid: user.uid,
             email: user.email,
             displayName: user.email || "User",
-            username: user.email?.split('@')[0] || "user",
-            fullName: user.email || "User",
-            avatar: `https://placehold.co/100x100.png?text=${(user.email || "U").substring(0,1)}`,
           };
           setLoggedInUserDetails(basicDetails);
-          localStorage.setItem("loggedInUser", JSON.stringify(basicDetails));
         }
       } else {
-        console.log("Firebase Auth state changed: User is logged out.");
+        console.log("AppLayout: Firebase Auth state changed: User is logged out.");
         setCurrentUserAuth(null);
         setLoggedInUserDetails(null);
         localStorage.removeItem("loggedInUser");
-        router.push("/login"); // Redirect to login if not authenticated
+        router.push("/login"); 
       }
       setIsLoadingAuth(false);
     });
     return () => unsubscribe();
-  }, [router]);
+  }, [router, toast]);
 
 
   const handleAvatarChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -141,9 +148,8 @@ export default function AppLayout({ children }: AppLayoutProps) {
       return;
     }
 
-    // Show local preview
+    const originalAvatar = loggedInUserDetails.avatar || `https://placehold.co/100x100.png?text=${(loggedInUserDetails.displayName || "P").substring(0,1)}`;
     const reader = new FileReader();
-    let localPreviewUrl = loggedInUserDetails.avatar || `https://placehold.co/100x100.png?text=${(loggedInUserDetails.displayName || "P").substring(0,1)}`;
     reader.onloadend = () => {
         setLoggedInUserDetails(prev => prev ? {...prev, avatar: reader.result as string} : null);
     };
@@ -158,17 +164,14 @@ export default function AppLayout({ children }: AppLayoutProps) {
       await uploadTask;
       const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
 
-      // Update Firestore
       const userDocRef = doc(firestore, "users", loggedInUserDetails.uid);
       await updateDoc(userDocRef, { avatar: downloadURL });
 
-      // Update local state and localStorage
       setLoggedInUserDetails(prev => {
         if (!prev) return null;
         const updatedDetails = { ...prev, avatar: downloadURL };
         localStorage.setItem("loggedInUser", JSON.stringify(updatedDetails));
         
-        // Update pokerConnectMapUsers if entry exists
         const mapUsersString = localStorage.getItem("pokerConnectMapUsers");
         if (mapUsersString) {
             let mapUsers: MockUserPin[] = JSON.parse(mapUsersString);
@@ -182,8 +185,7 @@ export default function AppLayout({ children }: AppLayoutProps) {
     } catch (error: any) {
       console.error("Error uploading/saving avatar:", error);
       toast({ title: "Upload Failed", description: `Could not save avatar: ${error.message}. Reverting.`, variant: "destructive" });
-      // Revert local preview if needed
-      setLoggedInUserDetails(prev => prev ? {...prev, avatar: localPreviewUrl} : null);
+      setLoggedInUserDetails(prev => prev ? {...prev, avatar: originalAvatar} : null);
     } finally {
         if (fileInputRef.current) fileInputRef.current.value = "";
     }
@@ -193,10 +195,10 @@ export default function AppLayout({ children }: AppLayoutProps) {
     try {
       await firebaseSignOut(auth);
       localStorage.removeItem("loggedInUser");
+      console.log("AppLayout: User signed out successfully.");
       // onAuthStateChanged will handle redirect to /login
-      console.log("User signed out successfully.");
     } catch (error) {
-      console.error("Error signing out:", error);
+      console.error("AppLayout: Error signing out:", error);
       toast({ title: "Logout Error", description: "Could not log out. Please try again.", variant: "destructive" });
     }
   };
@@ -210,19 +212,42 @@ export default function AppLayout({ children }: AppLayoutProps) {
     );
   }
   
-  if (!loggedInUserDetails) {
-    // This case should ideally be handled by the redirect in onAuthStateChanged,
-    // but it's a fallback if user somehow lands here without details.
+  if (!loggedInUserDetails && !currentUserAuth) { 
+    // This means onAuthStateChanged has determined no user, and redirect should have happened
+    // Or it's the initial load before onAuthStateChanged first fires.
     return (
       <div className="flex items-center justify-center min-h-screen">
-        <p className="text-lg">Redirecting to login...</p>
+        <Loader2 className="h-12 w-12 animate-spin text-primary" />
+        <p className="ml-4 text-lg">Initializing...</p>
       </div>
     );
   }
 
-  const userNameToDisplay = loggedInUserDetails.displayName || loggedInUserDetails.email || "User";
-  const userEmailToDisplay = loggedInUserDetails.email || "No email";
-  const avatarUrlToDisplay = loggedInUserDetails.avatar || `https://placehold.co/100x100.png?text=${(userNameToDisplay).substring(0,1).toUpperCase()}`;
+  if (!loggedInUserDetails && currentUserAuth) {
+    // User is authenticated, but profile details haven't loaded from Firestore yet.
+    // This can happen briefly during the async fetch in onAuthStateChanged.
+     return (
+      <div className="flex items-center justify-center min-h-screen">
+        <Loader2 className="h-12 w-12 animate-spin text-primary" />
+        <p className="ml-4 text-lg">Loading profile...</p>
+      </div>
+    );
+  }
+  
+  // This state should ideally not be reached if onAuthStateChanged redirects correctly
+  // but acts as a fallback render during transitions or if logic misses a case.
+  if (!loggedInUserDetails && !isLoadingAuth) {
+    return (
+         <div className="flex items-center justify-center min-h-screen">
+            <p className="text-lg">Session expired or not logged in. Redirecting...</p>
+        </div>
+    )
+  }
+
+
+  const userNameToDisplay = loggedInUserDetails!.displayName || loggedInUserDetails!.email || "User";
+  const userEmailToDisplay = loggedInUserDetails!.email || "No email";
+  const avatarUrlToDisplay = loggedInUserDetails!.avatar || `https://placehold.co/100x100.png?text=${(userNameToDisplay).substring(0,1)?.toUpperCase() || 'P'}`;
 
 
   return (
