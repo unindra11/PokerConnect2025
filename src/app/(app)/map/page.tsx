@@ -27,7 +27,6 @@ interface MockUserPin {
   aiHint?: string;
 }
 
-// Replace these with actual user location data
 const mockUsersOnMap: MockUserPin[] = [
   {
     id: "mapuser1",
@@ -55,7 +54,19 @@ const mockUsersOnMap: MockUserPin[] = [
   },
 ];
 
+// IMPORTANT: Ensure this environment variable is set in your .env.local or .env file
+// Example: NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=YOUR_ACTUAL_API_KEY
 const googleMapsApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
+
+// COMMON ERROR: RefererNotAllowedMapError
+// If you see this error in the console, it means your Google Maps API key
+// is not authorized for the current URL (HTTP referrer).
+// To fix this:
+// 1. Go to Google Cloud Console > APIs & Services > Credentials.
+// 2. Select your API key.
+// 3. Under "Application restrictions", choose "HTTP referrers (web sites)".
+// 4. Add the current development URL (e.g., https://your-dev-domain.com/*) to the list.
+// 5. Save changes. It might take a few minutes to propagate.
 
 export default function MapPage() {
   const [selectedUser, setSelectedUser] = useState<MockUserPin | null>(null);
@@ -69,7 +80,7 @@ export default function MapPage() {
             <CardTitle>Google Maps API Key Missing</CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-red-500">
+            <p className="text-destructive">
               The Google Maps API key is not configured. Please set the{" "}
               <code>NEXT_PUBLIC_GOOGLE_MAPS_API_KEY</code> environment variable.
             </p>
@@ -102,7 +113,7 @@ export default function MapPage() {
                   position={user.position}
                   onClick={() => setSelectedUser(user)}
                   // You can customize the marker icon here using the 'icon' prop
-                  // Example: icon={{ url: user.avatar, scaledSize: new window.google.maps.Size(30, 30) }}
+                  // Example: icon={{ url: user.avatar, scaledSize: typeof window !== 'undefined' ? new window.google.maps.Size(30, 30) : undefined }}
                 />
               ))}
 
