@@ -11,7 +11,7 @@ import {
   Bell,
   Lightbulb,
   LayoutGrid,
-  // MessageSquarePlus, // Removed
+  MessageCircleMore, // Added Chat icon
 } from "lucide-react";
 import {
   SidebarMenu,
@@ -25,10 +25,10 @@ const menuItems = [
   { href: "/map", label: "Player Map", icon: MapPinned },
   { href: "/my-posts", label: "My Posts", icon: UserSquare },
   { href: "/friends", label: "Friends", icon: Users },
+  { href: "/chat", label: "Chat", icon: MessageCircleMore }, // Added Chat item
   { href: "/notifications", label: "Notifications", icon: Bell },
   { href: "/poker-tips", label: "Poker Tips", icon: Lightbulb },
   { href: "/community-wall", label: "Community Wall", icon: LayoutGrid },
-  // { href: "/create-post", label: "Create Post", icon: MessageSquarePlus }, // Removed
 ];
 
 export function AppNavigation() {
