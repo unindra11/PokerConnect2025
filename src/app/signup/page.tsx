@@ -12,7 +12,10 @@ import { UserPlus } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/hooks/use-toast";
 import { LoadScript, Autocomplete } from "@react-google-maps/api";
-import type { MockUserPin } from "@/app/(app)/map/page"; // Ensure this type is correctly imported
+import type { MockUserPin } from "@/app/(app)/map/page";
+import { auth, firestore } from "@/lib/firebase";
+import { createUserWithEmailAndPassword } from "firebase/auth";
+import { doc, setDoc } from "firebase/firestore";
 
 const googleMapsApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
 const libraries: ("places")[] = ['places'];
@@ -53,14 +56,13 @@ export default function SignupPage() {
           console.warn("Autocomplete place selected, but no geometry/location data found.");
         }
       } else if (locationInputRef.current) {
-        // User might have typed something without selecting a suggestion
         setLocation(locationInputRef.current.value);
-        setSelectedLocationCoords(null); // No specific coords if not selected from list
+        setSelectedLocationCoords(null); 
       }
     }
   };
 
-  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
 
     if (password !== confirmPassword) {
@@ -81,67 +83,72 @@ export default function SignupPage() {
       return;
     }
 
-    const newUser = {
-      fullName,
-      email,
-      username,
-      password, 
-      location,
-      bio: "", 
-      avatar: "", 
-      coverImage: "", 
-    };
-
     try {
-      localStorage.setItem("pokerConnectUser", JSON.stringify(newUser));
-      
+      // Create user with Firebase Auth
+      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+      const user = userCredential.user;
+
+      // Store additional user info in Firestore
+      const userProfile = {
+        uid: user.uid,
+        fullName,
+        email, // Firebase Auth already stores email, but good to have in profile doc
+        username,
+        location, // Text location
+        locationCoords: selectedLocationCoords, // Geocoded location if available
+        bio: "", 
+        avatar: "", // Placeholder, to be updated via Firebase Storage URL later
+        coverImage: "", // Placeholder
+        createdAt: new Date().toISOString(),
+      };
+      await setDoc(doc(firestore, "users", user.uid), userProfile);
+
+      // Add to pokerConnectMapUsers in localStorage if coordinates exist
       if (selectedLocationCoords) {
-        const initials = newUser.fullName.split(' ').map(n => n[0]).join('').substring(0,2).toUpperCase() || 'P';
+        const initials = fullName.split(' ').map(n => n[0]).join('').substring(0,2).toUpperCase() || 'P';
         const mapUser: MockUserPin = { 
-          id: newUser.username, 
-          username: newUser.username,
-          name: newUser.fullName,
-          avatar: newUser.avatar || `https://placehold.co/40x40.png?text=${initials}&c=${Math.random().toString(36).substring(7)}`,
+          id: user.uid, // Use Firebase UID for map user ID
+          username: username,
+          name: fullName,
+          avatar: userProfile.avatar || `https://placehold.co/40x40.png?text=${initials}&c=${Math.random().toString(36).substring(7)}`,
           position: selectedLocationCoords,
           aiHint: "profile picture",
-          bio: newUser.bio || "", // Ensure bio is included
-          coverImage: newUser.coverImage || `https://placehold.co/1200x300.png?text=Cover&u=${newUser.username}`, // Ensure coverImage is included
+          bio: userProfile.bio,
+          coverImage: userProfile.coverImage,
         };
 
         const existingMapUsersString = localStorage.getItem("pokerConnectMapUsers");
         let mapUsers: MockUserPin[] = [];
         if (existingMapUsersString) {
-          try {
-            mapUsers = JSON.parse(existingMapUsersString);
-            if (!Array.isArray(mapUsers)) mapUsers = []; 
-          } catch (parseError) {
-            console.error("Error parsing existing map users from localStorage:", parseError);
-            mapUsers = []; 
-          }
+          try { mapUsers = JSON.parse(existingMapUsersString); if (!Array.isArray(mapUsers)) mapUsers = []; } 
+          catch (parseError) { console.error("Error parsing map users:", parseError); mapUsers = []; }
         }
-        // Prevent duplicate users by username
-        mapUsers = mapUsers.filter(user => user.id !== mapUser.id);
+        mapUsers = mapUsers.filter(u => u.id !== mapUser.id);
         mapUsers.push(mapUser);
         localStorage.setItem("pokerConnectMapUsers", JSON.stringify(mapUsers));
-        console.log("User added to map users in localStorage:", mapUser);
         toast({
           title: "Signup Successful!",
-          description: `Welcome, ${newUser.fullName}! Your location will be on the map. Please log in.`,
+          description: `Welcome, ${fullName}! Your location will be on the map. Please log in.`,
         });
       } else {
          toast({
           title: "Signup Successful (Location Note)",
-          description: `Welcome, ${newUser.fullName}! Location coordinates not found, so you might not appear on the map. Please log in.`,
+          description: `Welcome, ${fullName}! Location coordinates not found, you might not appear on map. Please log in.`,
           duration: 7000, 
         });
-         console.log("Signup successful, but no coordinates for map for user:", newUser.username);
       }
       router.push("/login");
-    } catch (storageError) {
-      console.error("Error saving to localStorage:", storageError);
+    } catch (error: any) {
+      console.error("Error signing up:", error);
+      let errorMessage = "Could not sign up. Please try again.";
+      if (error.code === "auth/email-already-in-use") {
+        errorMessage = "This email is already in use. Please use a different email or log in.";
+      } else if (error.code === "auth/weak-password") {
+        errorMessage = "Password is too weak. Please choose a stronger password.";
+      }
       toast({
         title: "Signup Error",
-        description: "Could not save your details. Please try again.",
+        description: errorMessage,
         variant: "destructive",
       });
     }
@@ -229,7 +236,7 @@ export default function SignupPage() {
                 <LoadScript
                   googleMapsApiKey={googleMapsApiKey}
                   libraries={libraries}
-                  loadingElement={<Input placeholder="Loading location suggestions..." disabled className="mt-1" />}
+                  loadingElement={<Input placeholder="Loading location..." disabled className="mt-1" />}
                   onError={(error) => {
                     console.error("Error loading Google Maps for Autocomplete", error);
                     toast({
@@ -243,7 +250,7 @@ export default function SignupPage() {
                     onLoad={onLoad}
                     onPlaceChanged={onPlaceChanged}
                     restrictions={{ country: "in" }} 
-                    fields={["formatted_address", "geometry.location", "name"]} // ensure geometry.location is requested
+                    fields={["formatted_address", "geometry.location", "name"]}
                   >
                     <Input
                       id="location"
@@ -253,7 +260,7 @@ export default function SignupPage() {
                       value={location} 
                       onChange={(e) => {
                         setLocation(e.target.value);
-                        setSelectedLocationCoords(null); // Clear coords if user types manually
+                        setSelectedLocationCoords(null); 
                       }} 
                       ref={locationInputRef} 
                       required

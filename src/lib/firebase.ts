@@ -1,8 +1,9 @@
+
 // src/lib/firebase.ts
 import { initializeApp, getApp, getApps, type FirebaseOptions } from "firebase/app";
 import { getStorage } from "firebase/storage";
-// import { getAuth } from "firebase/auth";
-// import { getFirestore } from "firebase/firestore";
+import { getAuth } from "firebase/auth";
+import { getFirestore } from "firebase/firestore";
 
 const firebaseConfig: FirebaseOptions = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -19,8 +20,6 @@ let app;
 if (!getApps().length) {
   if (!firebaseConfig.apiKey) {
     console.warn("Firebase API Key is missing. Firebase features might not work.");
-    // You might want to throw an error or handle this case more gracefully
-    // depending on whether Firebase is critical for your app's core functionality.
   }
   app = initializeApp(firebaseConfig);
 } else {
@@ -28,7 +27,7 @@ if (!getApps().length) {
 }
 
 const storage = getStorage(app);
-// export const auth = getAuth(app); // Uncomment if you use Firebase Auth
-// export const firestore = getFirestore(app); // Uncomment if you use Firestore
+const auth = getAuth(app);
+const firestore = getFirestore(app);
 
-export { app, storage };
+export { app, storage, auth, firestore };
