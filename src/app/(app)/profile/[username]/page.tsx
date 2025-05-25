@@ -265,7 +265,7 @@ export default function UserProfilePage({ params }: { params: { username: string
     }
   };
   
-  const handleLikePost = (postId: string) => {
+ const handleLikePost = (postId: string) => {
     let postContentForToast = "";
     setProfilePosts(prevPosts =>
       prevPosts.map(p => {
@@ -287,10 +287,12 @@ export default function UserProfilePage({ params }: { params: { username: string
         let allStoredPosts: Post[] = JSON.parse(allStoredPostsString);
         allStoredPosts = allStoredPosts.map(p => {
           if (p.id === postId) {
-             const alreadyLiked = !!p.likedByCurrentUser;
+             // We need to find the current liked status from *allStoredPosts* for consistency
+             const storedPost = allStoredPosts.find(sp => sp.id === postId);
+             const alreadyLiked = !!storedPost?.likedByCurrentUser; // Use stored post's status
              return { 
-              ...p, 
-              likes: p.likes + (alreadyLiked ? -1 : 1), 
+              ...p, // Keep the structure of p from state
+              likes: (storedPost?.likes || 0) + (alreadyLiked ? -1 : 1), 
               likedByCurrentUser: !alreadyLiked 
             };
           }
@@ -298,7 +300,7 @@ export default function UserProfilePage({ params }: { params: { username: string
         });
         localStorage.setItem(USER_POSTS_STORAGE_KEY, JSON.stringify(allStoredPosts));
         toast({
-          title: profilePosts.find(p=>p.id === postId)?.likedByCurrentUser ? "Post Liked!" : "Like Removed",
+          title: allStoredPosts.find(p=>p.id === postId)?.likedByCurrentUser ? "Post Liked!" : "Like Removed",
           description: `You reacted to "${postContentForToast}".`,
         });
       }
@@ -419,7 +421,10 @@ export default function UserProfilePage({ params }: { params: { username: string
   };
 
   const handleSendFriendRequest = () => {
-    if (!profileUser || !currentLoggedInUser) return;
+    if (!profileUser || !currentLoggedInUser) {
+        toast({ title: "Error", description: "User data not loaded.", variant: "destructive" });
+        return;
+    }
 
     if (currentLoggedInUser.username === profileUser.username) {
       toast({ title: "Info", description: "You cannot send a friend request to yourself." });
@@ -427,7 +432,8 @@ export default function UserProfilePage({ params }: { params: { username: string
     }
     
     try {
-      const newNotification: StoredNotification = {
+      // 1. Create "request sent" notification for the sender (currentLoggedInUser)
+      const sentNotification: StoredNotification = {
         id: `notif_sent_to_${profileUser.username}_${Date.now()}`,
         type: "friend_request_sent_confirmation",
         user: { 
@@ -440,21 +446,44 @@ export default function UserProfilePage({ params }: { params: { username: string
         timestamp: new Date().toLocaleString(),
       };
 
-      const notificationsKey = `pokerConnectNotifications_${currentLoggedInUser.username}`;
-      let existingNotifications: StoredNotification[] = [];
-      const storedNotificationsString = localStorage.getItem(notificationsKey);
-      if (storedNotificationsString) {
+      const senderNotificationsKey = `pokerConnectNotifications_${currentLoggedInUser.username}`;
+      let senderExistingNotifications: StoredNotification[] = [];
+      const senderStoredNotificationsString = localStorage.getItem(senderNotificationsKey);
+      if (senderStoredNotificationsString) {
         try {
-          existingNotifications = JSON.parse(storedNotificationsString);
-          if (!Array.isArray(existingNotifications)) existingNotifications = [];
-        } catch (e) {
-          console.error("Error parsing existing notifications:", e);
-          existingNotifications = [];
-        }
+          senderExistingNotifications = JSON.parse(senderStoredNotificationsString);
+          if (!Array.isArray(senderExistingNotifications)) senderExistingNotifications = [];
+        } catch (e) { senderExistingNotifications = []; }
       }
-      
-      existingNotifications.unshift(newNotification); 
-      localStorage.setItem(notificationsKey, JSON.stringify(existingNotifications));
+      senderExistingNotifications.unshift(sentNotification); 
+      localStorage.setItem(senderNotificationsKey, JSON.stringify(senderExistingNotifications));
+
+      // 2. Create "incoming request" notification for the recipient (profileUser)
+      const incomingRequestNotification: StoredNotification = {
+        id: `notif_received_from_${currentLoggedInUser.username}_${Date.now()}`,
+        type: "friend_request", // This is the type for an incoming request
+        user: { // Details of the sender
+            name: currentLoggedInUser.fullName || currentLoggedInUser.username,
+            avatar: currentLoggedInUser.avatar || `https://placehold.co/100x100.png?u=${currentLoggedInUser.username}`,
+            handle: `@${currentLoggedInUser.username}`,
+            username: currentLoggedInUser.username
+        },
+        message: "sent you a friend request.",
+        timestamp: new Date().toLocaleString(),
+      };
+
+      const recipientNotificationsKey = `pokerConnectNotifications_${profileUser.username}`;
+      let recipientExistingNotifications: StoredNotification[] = [];
+      const recipientStoredNotificationsString = localStorage.getItem(recipientNotificationsKey);
+      if (recipientStoredNotificationsString) {
+        try {
+          recipientExistingNotifications = JSON.parse(recipientStoredNotificationsString);
+          if (!Array.isArray(recipientExistingNotifications)) recipientExistingNotifications = [];
+        } catch (e) { recipientExistingNotifications = []; }
+      }
+      recipientExistingNotifications.unshift(incomingRequestNotification);
+      localStorage.setItem(recipientNotificationsKey, JSON.stringify(recipientExistingNotifications));
+
 
       toast({
         title: "Friend Request Sent!",
@@ -647,3 +676,5 @@ export default function UserProfilePage({ params }: { params: { username: string
     </div>
   );
 }
+
+    
