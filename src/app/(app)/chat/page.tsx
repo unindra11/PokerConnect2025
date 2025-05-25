@@ -2,7 +2,7 @@
 "use client"; // For potential future interactivity and useToast
 
 import { useState } from "react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { MessageSquareText, Trash2, Eraser, MoreVertical } from "lucide-react";
