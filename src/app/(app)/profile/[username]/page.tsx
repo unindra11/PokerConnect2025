@@ -20,8 +20,19 @@ interface LoggedInUser {
   email?: string;
   avatar?: string; 
   bio?: string;
-  coverImage?: string; // Added coverImage
+  coverImage?: string; 
+  friendsCount?: number; // Added for consistency
 }
+
+// Define a simple structure for notifications stored in localStorage
+interface StoredNotification {
+  id: string;
+  type: string; // e.g., 'friend_request_sent_confirmation', 'post_like', etc.
+  user: { name: string; avatar: string; handle: string; username?: string; }; // 'user' here is context-dependent based on type
+  message: string;
+  timestamp: string;
+}
+
 
 const USER_POSTS_STORAGE_KEY = "pokerConnectUserPosts";
 const MAX_AVATAR_SIZE_MB = 2;
@@ -80,27 +91,64 @@ export default function UserProfilePage({ params }: { params: { username: string
           // For other users, we don't load their specific data from local storage (yet)
           // So, we create a generic profile.
           // In a real app, this would fetch data from a backend.
-          userForProfile = { 
-            username: resolvedParams.username, 
-            fullName: resolvedParams.username.charAt(0).toUpperCase() + resolvedParams.username.slice(1),
-            bio: "A passionate poker player enjoying the game."
-          };
+           const pokerConnectUserString = localStorage.getItem("pokerConnectUser"); // Check if this is the signed up user
+           if (pokerConnectUserString) {
+             const pokerConnectUser: LoggedInUser = JSON.parse(pokerConnectUserString);
+             if (pokerConnectUser.username === resolvedParams.username) {
+                userForProfile = pokerConnectUser;
+                if(pokerConnectUser.avatar) avatarForProfile = pokerConnectUser.avatar;
+                if(pokerConnectUser.coverImage) coverForProfile = pokerConnectUser.coverImage;
+             } else {
+                 userForProfile = { 
+                    username: resolvedParams.username, 
+                    fullName: resolvedParams.username.charAt(0).toUpperCase() + resolvedParams.username.slice(1),
+                    bio: "A passionate poker player enjoying the game.",
+                    friendsCount: Math.floor(Math.random() * 200) // Mock friends count for other users
+                };
+             }
+           } else {
+             userForProfile = { 
+                username: resolvedParams.username, 
+                fullName: resolvedParams.username.charAt(0).toUpperCase() + resolvedParams.username.slice(1),
+                bio: "A passionate poker player enjoying the game.",
+                friendsCount: Math.floor(Math.random() * 200) 
+            };
+           }
         }
-      } else {
+      } else { // No loggedInUser at all
         setIsCurrentUserProfile(false);
-        userForProfile = { 
-          username: resolvedParams.username,
-          fullName: resolvedParams.username.charAt(0).toUpperCase() + resolvedParams.username.slice(1),
-          bio: "A passionate poker player enjoying the game."
-        };
+         const pokerConnectUserString = localStorage.getItem("pokerConnectUser"); // Check if this is the signed up user
+         if (pokerConnectUserString) {
+           const pokerConnectUser: LoggedInUser = JSON.parse(pokerConnectUserString);
+           if (pokerConnectUser.username === resolvedParams.username) {
+              userForProfile = pokerConnectUser;
+              if(pokerConnectUser.avatar) avatarForProfile = pokerConnectUser.avatar;
+              if(pokerConnectUser.coverImage) coverForProfile = pokerConnectUser.coverImage;
+           } else {
+               userForProfile = { 
+                  username: resolvedParams.username,
+                  fullName: resolvedParams.username.charAt(0).toUpperCase() + resolvedParams.username.slice(1),
+                  bio: "A passionate poker player enjoying the game.",
+                  friendsCount: Math.floor(Math.random() * 200)
+              };
+           }
+         } else {
+            userForProfile = { 
+                username: resolvedParams.username,
+                fullName: resolvedParams.username.charAt(0).toUpperCase() + resolvedParams.username.slice(1),
+                bio: "A passionate poker player enjoying the game.",
+                friendsCount: Math.floor(Math.random() * 200)
+            };
+         }
       }
     } catch (error) {
-      console.error("Error reading loggedInUser from localStorage for profile page:", error);
+      console.error("Error reading user data from localStorage for profile page:", error);
       setIsCurrentUserProfile(false);
       userForProfile = { 
         username: resolvedParams.username,
         fullName: resolvedParams.username.charAt(0).toUpperCase() + resolvedParams.username.slice(1),
-        bio: "A passionate poker player enjoying the game."
+        bio: "A passionate poker player enjoying the game.",
+        friendsCount: Math.floor(Math.random() * 100)
       };
     }
     setProfileUser(userForProfile);
@@ -190,9 +238,19 @@ export default function UserProfilePage({ params }: { params: { username: string
         try {
           const loggedInUserString = localStorage.getItem("loggedInUser");
           if (loggedInUserString) {
-            const loggedInUser = JSON.parse(loggedInUserString);
+            const loggedInUser: LoggedInUser = JSON.parse(loggedInUserString);
             loggedInUser.avatar = newAvatarDataUrl;
             localStorage.setItem("loggedInUser", JSON.stringify(loggedInUser));
+            
+            // Also update pokerConnectUser if it's the same user
+            const pokerConnectUserString = localStorage.getItem("pokerConnectUser");
+            if (pokerConnectUserString) {
+                let pokerConnectUser: LoggedInUser = JSON.parse(pokerConnectUserString);
+                if (pokerConnectUser.username === loggedInUser.username) {
+                    pokerConnectUser.avatar = newAvatarDataUrl;
+                    localStorage.setItem("pokerConnectUser", JSON.stringify(pokerConnectUser));
+                }
+            }
             toast({
               title: "Profile Picture Updated!",
               description: "Your new profile picture has been saved.",
@@ -211,17 +269,87 @@ export default function UserProfilePage({ params }: { params: { username: string
     if (profileAvatarInputRef.current) profileAvatarInputRef.current.value = "";
   };
 
+  const handleSendFriendRequest = () => {
+    if (!profileUser) return;
+
+    try {
+      const loggedInUserString = localStorage.getItem("loggedInUser");
+      if (!loggedInUserString) {
+        toast({ title: "Error", description: "You must be logged in to send friend requests.", variant: "destructive" });
+        return;
+      }
+      const loggedInUser: LoggedInUser = JSON.parse(loggedInUserString);
+
+      if (loggedInUser.username === profileUser.username) {
+        toast({ title: "Info", description: "You cannot send a friend request to yourself." });
+        return;
+      }
+      
+      const newNotification: StoredNotification = {
+        id: `notif_sent_to_${profileUser.username}_${Date.now()}`,
+        type: "friend_request_sent_confirmation",
+        // For this notification, 'user' is the recipient of the friend request
+        user: { 
+          name: profileUser.fullName || profileUser.username, 
+          avatar: profileAvatarUrl || `https://placehold.co/100x100.png?u=${profileUser.username}`, 
+          handle: `@${profileUser.username}`,
+          username: profileUser.username
+        },
+        message: "Friend request sent.", // Will be displayed as "Friend request sent. to [User Name]"
+        timestamp: new Date().toLocaleString(),
+      };
+
+      const notificationsKey = `pokerConnectNotifications_${loggedInUser.username}`;
+      let existingNotifications: StoredNotification[] = [];
+      const storedNotificationsString = localStorage.getItem(notificationsKey);
+      if (storedNotificationsString) {
+        try {
+          existingNotifications = JSON.parse(storedNotificationsString);
+          if (!Array.isArray(existingNotifications)) existingNotifications = [];
+        } catch (e) {
+          console.error("Error parsing existing notifications:", e);
+          existingNotifications = [];
+        }
+      }
+      
+      existingNotifications.unshift(newNotification); // Add to the beginning
+      localStorage.setItem(notificationsKey, JSON.stringify(existingNotifications));
+
+      toast({
+        title: "Friend Request Sent!",
+        description: `Your friend request to ${profileUser.fullName || profileUser.username} has been sent.`,
+      });
+
+      // Optionally, disable the button or change its text after sending
+      // For a prototype, a toast is often sufficient.
+
+    } catch (error) {
+      console.error("Error sending friend request:", error);
+      toast({ title: "Error", description: "Could not send friend request.", variant: "destructive" });
+    }
+  };
+
+
   const mockUser = {
     name: profileUser?.fullName || resolvedParams.username.charAt(0).toUpperCase() + resolvedParams.username.slice(1), 
     username: resolvedParams.username,
     avatar: profileAvatarUrl || `https://placehold.co/150x150.png?u=${resolvedParams.username}`,
     bio: profileUser?.bio || "Passionate poker player, always learning and looking for the next big win. Specializing in Texas Hold'em tournaments.",
-    joinedDate: "Joined January 2023", // This could also be dynamic if stored
-    friendsCount: 78, 
+    joinedDate: "Joined January 2023", 
+    friendsCount: profileUser?.friendsCount || Math.floor(Math.random() * 100), 
     totalPosts: profilePosts.length, 
     coverImage: profileCoverImageUrl || "https://placehold.co/1200x300.png?cover=1",
     coverImageAiHint: "poker table background",
   };
+
+  if (!profileUser) {
+    return (
+        <div className="container mx-auto max-w-4xl text-center py-10">
+            <Loader2 className="h-12 w-12 animate-spin text-primary mx-auto" />
+            <p className="mt-4">Loading profile...</p>
+        </div>
+    );
+  }
 
   return (
     <div className="container mx-auto max-w-4xl">
@@ -234,7 +362,7 @@ export default function UserProfilePage({ params }: { params: { username: string
             style={{objectFit: "cover"}}
             data-ai-hint={mockUser.coverImageAiHint}
             priority
-            key={mockUser.coverImage} // Add key to force re-render if src changes
+            key={mockUser.coverImage} 
           />
           <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/70 to-transparent">
             <div className="flex flex-col sm:flex-row items-center sm:items-end space-x-0 sm:space-x-4">
@@ -279,7 +407,7 @@ export default function UserProfilePage({ params }: { params: { username: string
                 </Button>
               )}
               {!isCurrentUserProfile && (
-                <Button variant="default" size="sm" className="mt-4 sm:mt-0 sm:ml-auto">
+                <Button variant="default" size="sm" className="mt-4 sm:mt-0 sm:ml-auto" onClick={handleSendFriendRequest}>
                   <UserPlus className="mr-2 h-4 w-4" /> Add Friend
                 </Button>
               )}
@@ -375,3 +503,4 @@ export default function UserProfilePage({ params }: { params: { username: string
     </div>
   );
 }
+
