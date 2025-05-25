@@ -12,6 +12,7 @@ import { UserPlus } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/hooks/use-toast";
 import { LoadScript, Autocomplete } from "@react-google-maps/api";
+import type { MockUserPin } from "@/app/(app)/map/page"; // Import the type
 
 const googleMapsApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
 const libraries: ("places")[] = ['places'];
@@ -26,9 +27,10 @@ export default function SignupPage() {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [location, setLocation] = useState("");
+  const [selectedLocationCoords, setSelectedLocationCoords] = useState<{ lat: number; lng: number } | null>(null);
   
   const autocompleteRef = useRef<google.maps.places.Autocomplete | null>(null);
-  const locationInputRef = useRef<HTMLInputElement | null>(null); // Ref for the input field
+  const locationInputRef = useRef<HTMLInputElement | null>(null);
 
   const onLoad = (autocompleteInstance: google.maps.places.Autocomplete) => {
     autocompleteRef.current = autocompleteInstance;
@@ -39,9 +41,18 @@ export default function SignupPage() {
       const place = autocompleteRef.current.getPlace();
       if (place && place.formatted_address) {
         setLocation(place.formatted_address);
+        if (place.geometry?.location) {
+          setSelectedLocationCoords({
+            lat: place.geometry.location.lat(),
+            lng: place.geometry.location.lng(),
+          });
+        } else {
+          setSelectedLocationCoords(null);
+          console.warn("Autocomplete place selected, but no geometry/location data found.");
+        }
       } else if (locationInputRef.current) {
-        // Fallback to current input value if place is not well-formed
         setLocation(locationInputRef.current.value);
+        setSelectedLocationCoords(null); // Reset coords if place is not well-formed
       }
     }
   };
@@ -72,15 +83,49 @@ export default function SignupPage() {
       email,
       username,
       password, 
-      location,
+      location, // This is the string address
     };
 
     try {
+      // Save basic signup details
       localStorage.setItem("pokerConnectUser", JSON.stringify(newUser));
-      toast({
-        title: "Signup Successful!",
-        description: `Welcome, ${newUser.fullName}! Please log in.`,
-      });
+      
+      // Save user for map if coordinates are available
+      if (selectedLocationCoords) {
+        const initials = newUser.fullName.split(' ').map(n => n[0]).join('').substring(0,2).toUpperCase();
+        const mapUser: MockUserPin = { // Ensure this matches the MockUserPin structure
+          id: newUser.username, // Use username as a unique ID for the map user
+          username: newUser.username,
+          name: newUser.fullName,
+          avatar: `https://placehold.co/40x40.png?text=${initials}&c=${Math.random().toString(36).substring(7)}`,
+          position: selectedLocationCoords,
+          aiHint: "profile picture", // Add aiHint
+        };
+
+        const existingMapUsersString = localStorage.getItem("pokerConnectMapUsers");
+        let mapUsers: MockUserPin[] = [];
+        if (existingMapUsersString) {
+          try {
+            mapUsers = JSON.parse(existingMapUsersString);
+            if (!Array.isArray(mapUsers)) mapUsers = []; // Ensure it's an array
+          } catch (parseError) {
+            console.error("Error parsing existing map users from localStorage:", parseError);
+            mapUsers = []; // Reset if parsing fails
+          }
+        }
+        mapUsers.push(mapUser);
+        localStorage.setItem("pokerConnectMapUsers", JSON.stringify(mapUsers));
+        toast({
+          title: "Signup Successful!",
+          description: `Welcome, ${newUser.fullName}! Your location will be on the map. Please log in.`,
+        });
+      } else {
+         toast({
+          title: "Signup Successful (Location Note)",
+          description: `Welcome, ${newUser.fullName}! Location coordinates not found, so you won't appear on the map. Please log in.`,
+          duration: 7000, // Longer duration for this specific toast
+        });
+      }
       router.push("/login");
     } catch (storageError) {
       console.error("Error saving to localStorage:", storageError);
@@ -94,7 +139,6 @@ export default function SignupPage() {
 
   if (!googleMapsApiKey) {
     console.error("SignupPage: NEXT_PUBLIC_GOOGLE_MAPS_API_KEY is not set. Location autocomplete will not work.");
-    // Optionally, render a fallback UI or just let the input be a plain text field
   }
 
   return (
@@ -173,22 +217,25 @@ export default function SignupPage() {
                 />
               </div>
               <div>
-                <Label htmlFor="location">Location</Label>
+                <Label htmlFor="location">Location (Select from suggestions for map)</Label>
                 {googleMapsApiKey ? (
                   <Autocomplete
                     onLoad={onLoad}
                     onPlaceChanged={onPlaceChanged}
-                    restrictions={{ country: "in" }} // Example: Restrict to India
-                    fields={["formatted_address", "geometry", "name"]} // Specify fields to request
+                    restrictions={{ country: "in" }} 
+                    fields={["formatted_address", "geometry", "name"]} 
                   >
                     <Input
                       id="location"
                       type="text"
                       placeholder="e.g., Mumbai, India"
                       className="mt-1"
-                      value={location} // Controlled component
-                      onChange={(e) => setLocation(e.target.value)} // Allow typing
-                      ref={locationInputRef} // Assign ref here
+                      value={location} 
+                      onChange={(e) => {
+                        setLocation(e.target.value);
+                        setSelectedLocationCoords(null); // Reset coords if user types manually after selection
+                      }} 
+                      ref={locationInputRef} 
                       required
                     />
                   </Autocomplete>
@@ -221,3 +268,4 @@ export default function SignupPage() {
     </LoadScript>
   );
 }
+

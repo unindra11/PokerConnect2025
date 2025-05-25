@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { GoogleMap, LoadScript, Marker, InfoWindow } from "@react-google-maps/api";
 import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -17,7 +17,7 @@ const initialCenter = {
   lng: 78.6569,
 };
 
-interface MockUserPin {
+export interface MockUserPin { // Exporting for use in signup page
   id: string;
   username: string;
   name: string;
@@ -52,34 +52,36 @@ const indianCities = [
 const firstNames = ["Aarav", "Vivaan", "Aditya", "Vihaan", "Arjun", "Sai", "Reyansh", "Krishna", "Ishaan", "Ananya", "Diya", "Saanvi", "Aanya", "Myra", "Aarohi", "Pari", "Khushi", "Riya"];
 const lastNames = ["Sharma", "Verma", "Gupta", "Singh", "Kumar", "Patel", "Reddy", "Shah", "Das", "Jain", "Mehta", "Rao", "Iyer", "Menon", "Nair"];
 
+const generateDefaultMockUsers = (): MockUserPin[] => {
+  const users: MockUserPin[] = [];
+  let userCounter = 1;
+  for (let i = 0; i < 100; i++) {
+    const city = indianCities[i % indianCities.length];
+    const randomOffsetLat = (Math.random() - 0.5) * 0.1; 
+    const randomOffsetLng = (Math.random() - 0.5) * 0.1;
+    
+    const firstName = firstNames[Math.floor(Math.random() * firstNames.length)];
+    const lastName = lastNames[Math.floor(Math.random() * lastNames.length)];
+    const name = `${firstName} ${lastName}`;
+    const username = `${firstName.toLowerCase()}${city.name.substring(0,3).toLowerCase()}${userCounter}`;
 
-const mockUsersData: MockUserPin[] = [];
-let userCounter = 1;
-for (let i = 0; i < 100; i++) {
-  const city = indianCities[i % indianCities.length];
-  const randomOffsetLat = (Math.random() - 0.5) * 0.1; // Small offset for variety
-  const randomOffsetLng = (Math.random() - 0.5) * 0.1;
-  
-  const firstName = firstNames[Math.floor(Math.random() * firstNames.length)];
-  const lastName = lastNames[Math.floor(Math.random() * lastNames.length)];
-  const name = `${firstName} ${lastName}`;
-  const username = `${firstName.toLowerCase()}${city.name.substring(0,3).toLowerCase()}${userCounter}`;
+    users.push({
+      id: `mapuser${userCounter}`,
+      username: username,
+      name: name,
+      avatar: `https://placehold.co/40x40.png?text=${firstName.substring(0,1)}${lastName.substring(0,1)}&c=${i}`,
+      position: { 
+        lat: city.lat + randomOffsetLat, 
+        lng: city.lng + randomOffsetLng 
+      },
+      aiHint: "profile picture",
+    });
+    userCounter++;
+  }
+  return users;
+};
 
-  mockUsersData.push({
-    id: `mapuser${userCounter}`,
-    username: username,
-    name: name,
-    avatar: `https://placehold.co/40x40.png?text=${firstName.substring(0,1)}${lastName.substring(0,1)}&c=${i}`,
-    position: { 
-      lat: city.lat + randomOffsetLat, 
-      lng: city.lng + randomOffsetLng 
-    },
-    aiHint: "profile picture",
-  });
-  userCounter++;
-}
-
-
+const defaultMockUsersData: MockUserPin[] = generateDefaultMockUsers();
 const googleMapsApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
 
 // COMMON ERROR: RefererNotAllowedMapError
@@ -94,14 +96,38 @@ const googleMapsApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
 export default function MapPage() {
   const [selectedUser, setSelectedUser] = useState<MockUserPin | null>(null);
   const [mapReady, setMapReady] = useState(false);
+  const [mapMarkersData, setMapMarkersData] = useState<MockUserPin[]>(defaultMockUsersData);
+
+  useEffect(() => {
+    console.log("MapPage Mount: Initializing map data source determination.");
+    try {
+      const storedMapUsersString = localStorage.getItem("pokerConnectMapUsers");
+      if (storedMapUsersString) {
+        const storedMapUsers: MockUserPin[] = JSON.parse(storedMapUsersString);
+        if (Array.isArray(storedMapUsers) && storedMapUsers.length > 0) {
+          console.log("MapPage: Found users in localStorage. Using them for markers.", storedMapUsers);
+          setMapMarkersData(storedMapUsers);
+        } else {
+          console.log("MapPage: localStorage users empty or invalid. Falling back to default mock users.");
+          setMapMarkersData(defaultMockUsersData);
+        }
+      } else {
+        console.log("MapPage: No users in localStorage. Using default mock users.");
+        setMapMarkersData(defaultMockUsersData);
+      }
+    } catch (error) {
+      console.error("MapPage: Error reading map users from localStorage. Falling back to default.", error);
+      setMapMarkersData(defaultMockUsersData);
+    }
+  }, []);
 
   // Enhanced console logging
   useEffect(() => {
     console.log(
-      `%cMapPage Mount/Update: mapReady=${mapReady}, selectedUser=${selectedUser?.id || 'null'}`,
+      `%cMapPage Update: mapReady=${mapReady}, selectedUser=${selectedUser?.id || 'null'}, markerCount=${mapMarkersData.length}`,
       'color: blue; font-weight: bold;'
     );
-  }, [mapReady, selectedUser]);
+  }, [mapReady, selectedUser, mapMarkersData]);
 
 
   if (!googleMapsApiKey) {
@@ -153,13 +179,13 @@ export default function MapPage() {
               <GoogleMap
                 mapContainerStyle={containerStyle}
                 center={initialCenter}
-                zoom={5} // Adjusted zoom level for a broader view of India
-                onLoad={() => console.log("%cGoogleMap: component mounted (onLoad event).", 'color: purple;')}
+                zoom={5} 
+                onLoad={(map) => console.log("%cGoogleMap: component mounted (onLoad event). Map instance:", 'color: purple;', map)}
                 onUnmount={() => console.log("%cGoogleMap: component unmounted (onUnmount event).", 'color: red;')}
-                options={{ zoomControl: true }} // Explicitly enable zoom controls
+                options={{ zoomControl: true, mapId: "POKER_CONNECT_MAP_ID" }} // Added mapId for potential advanced styling later
               >
-                {mockUsersData.map((user) => {
-                  // console.log(`%cGoogleMap Child Loop: Rendering default marker for ${user.id}.`, 'color: teal');
+                {mapMarkersData.map((user) => {
+                  // console.log(`%cGoogleMap Child Loop: Rendering default marker for ${user.id} at ${user.position.lat},${user.position.lng}.`, 'color: teal');
                   return (
                     <Marker
                       key={user.id}
@@ -168,7 +194,6 @@ export default function MapPage() {
                         // console.log(`%cMarker Click: User ${user.id} clicked. Setting selectedUser.`, 'color: brown');
                         setSelectedUser(user);
                       }}
-                      // Using default Google Maps red pin marker for simplicity and reliability
                     />
                   );
                 })}
@@ -199,7 +224,8 @@ export default function MapPage() {
             )}
           </LoadScript>
           <p className="text-sm text-muted-foreground mt-4">
-            This map shows approximate locations of 100 PokerConnect users across India. Click on a marker to see more details.
+            This map shows approximate locations of PokerConnect users across India. Click on a marker to see more details.
+            Number of users shown: {mapMarkersData.length}
           </p>
         </CardContent>
       </Card>
