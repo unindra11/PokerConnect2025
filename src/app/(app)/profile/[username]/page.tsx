@@ -1,16 +1,16 @@
 
 "use client"; 
 
-import { useState, useEffect, use } from "react"; // Import use
+import { useState, useEffect, use } from "react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { UserCog, ShieldCheck, Edit3, UserPlus, Loader2 } from "lucide-react"; // Removed BarChart3
+import { UserCog, ShieldCheck, Edit3, UserPlus, Loader2, Users } from "lucide-react"; 
 import Image from "next/image";
 import Link from "next/link";
 import { PostCard } from "@/components/post-card";
-import type { Post, User as PostUser } from "@/types/post"; // Renamed User to PostUser to avoid conflict
+import type { Post, User as PostUser } from "@/types/post";
 import { useToast } from "@/hooks/use-toast";
 
 interface LoggedInUser {
@@ -20,25 +20,40 @@ interface LoggedInUser {
 
 const USER_POSTS_STORAGE_KEY = "pokerConnectUserPosts";
 
+interface Connection {
+  id: string;
+  name: string;
+  avatar: string;
+  username: string; 
+  aiHint?: string;
+}
+
+const mockProfileConnections: Connection[] = [
+  { id: "conn1", name: "Ace High Alice", avatar: "https://placehold.co/100x100.png?c=a1", username: "alicepoker", aiHint: "profile picture" },
+  { id: "conn2", name: "River Rat Randy", avatar: "https://placehold.co/100x100.png?c=r2", username: "randyriver", aiHint: "profile picture" },
+  { id: "conn3", name: "Bluffmaster Ben", avatar: "https://placehold.co/100x100.png?c=b3", username: "benbluffs", aiHint: "profile picture" },
+  { id: "conn4", name: "Tournament Tina", avatar: "https://placehold.co/100x100.png?c=t4", username: "tinatourney", aiHint: "profile picture" },
+  { id: "conn5", name: "Strategy Sam", avatar: "https://placehold.co/100x100.png?c=s5", username: "samsgto", aiHint: "profile picture" },
+];
+
 
 export default function UserProfilePage({ params }: { params: { username: string } }) {
-  const resolvedParams = use(params); // Unwrap params using use()
+  const resolvedParams = use(params); 
 
   const [isCurrentUserProfile, setIsCurrentUserProfile] = useState(false);
   const [profilePosts, setProfilePosts] = useState<Post[]>([]);
   const [isLoadingPosts, setIsLoadingPosts] = useState(true);
   const { toast } = useToast();
   
-  // Mock user data based on params.username - in a real app, you'd fetch this
   const mockUser = {
-    name: resolvedParams.username.charAt(0).toUpperCase() + resolvedParams.username.slice(1), // Capitalize username
+    name: resolvedParams.username.charAt(0).toUpperCase() + resolvedParams.username.slice(1), 
     username: resolvedParams.username,
     avatar: `https://placehold.co/150x150.png?u=${resolvedParams.username}`,
     bio: "Passionate poker player, always learning and looking for the next big win. Specializing in Texas Hold'em tournaments.",
     joinedDate: "Joined January 2023",
     followers: 256,
     following: 180,
-    totalPosts: profilePosts.length, // This will update when profilePosts updates
+    totalPosts: profilePosts.length, 
     coverImage: "https://placehold.co/1200x300.png?cover=1",
     coverImageAiHint: "poker table background",
   };
@@ -105,7 +120,8 @@ export default function UserProfilePage({ params }: { params: { username: string
         description: "The post has been removed from local storage.",
         variant: "destructive"
       });
-    } catch (error) {
+    } catch (error)
+{
       console.error("Error deleting post from localStorage:", error);
       toast({
         title: "Error Deleting Post",
@@ -175,7 +191,7 @@ export default function UserProfilePage({ params }: { params: { username: string
           </div>
 
           <Tabs defaultValue="posts" className="w-full">
-            <TabsList className="grid w-full grid-cols-2"> {/* Changed from grid-cols-3 */}
+            <TabsList className="grid w-full grid-cols-2"> 
               <TabsTrigger value="posts">Posts</TabsTrigger>
               <TabsTrigger value="connections">Connections</TabsTrigger>
             </TabsList>
@@ -210,26 +226,31 @@ export default function UserProfilePage({ params }: { params: { username: string
                 />
               ))}
             </TabsContent>
-            {/* Removed TabsContent for "stats" */}
             <TabsContent value="connections" className="mt-6">
                <Card>
                 <CardHeader>
-                  <CardTitle className="flex items-center gap-2"><UserCog /> Connections & Trust Score</CardTitle>
-                  <CardDescription>{mockUser.name}'s network and community standing.</CardDescription>
+                  <CardTitle className="flex items-center gap-2"><Users /> Connections</CardTitle>
+                  <CardDescription>People connected with {mockUser.name}.</CardDescription>
                 </CardHeader>
                 <CardContent>
-                    <div className="flex items-center justify-center gap-2 text-lg font-semibold mb-4">
-                        <ShieldCheck className="h-6 w-6 text-green-500" />
-                        <span>Trust Score: 85/100</span>
+                  {mockProfileConnections.length === 0 ? (
+                    <p className="text-muted-foreground">No connections to display.</p>
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                      {mockProfileConnections.map((connection) => (
+                        <Card key={connection.id} className="flex flex-col items-center p-4 shadow-md rounded-lg">
+                          <Avatar className="h-20 w-20 mb-3 border-2 border-primary">
+                            <AvatarImage src={connection.avatar} alt={connection.name} data-ai-hint={connection.aiHint || "profile picture"}/>
+                            <AvatarFallback>{connection.name.substring(0,1)}</AvatarFallback>
+                          </Avatar>
+                          <p className="font-semibold text-center text-md mb-1">{connection.name}</p>
+                          <Link href={`/profile/${connection.username}`} passHref className="mt-auto w-full">
+                            <Button variant="outline" size="sm" className="w-full">View Profile</Button>
+                          </Link>
+                        </Card>
+                      ))}
                     </div>
-                    <p className="text-sm text-muted-foreground">This user is a verified member of the community. They actively engage and contribute positively.</p>
-                    <div className="mt-4">
-                        <h4 className="font-semibold mb-2">Notable Connections:</h4>
-                        <ul className="list-disc list-inside text-sm text-muted-foreground">
-                            <li>Connected with 10+ Pro Players</li>
-                            <li>Member of 'High Stakes Strategy' group</li>
-                        </ul>
-                    </div>
+                  )}
                 </CardContent>
               </Card>
             </TabsContent>
@@ -239,3 +260,4 @@ export default function UserProfilePage({ params }: { params: { username: string
     </div>
   );
 }
+
