@@ -15,7 +15,7 @@ import { LoadScript, Autocomplete } from "@react-google-maps/api";
 import type { MockUserPin } from "@/app/(app)/map/page";
 import { auth, firestore } from "@/lib/firebase";
 import { createUserWithEmailAndPassword } from "firebase/auth";
-import { doc, setDoc, serverTimestamp, Timestamp } from "firebase/firestore";
+import { doc, setDoc, Timestamp } from "firebase/firestore"; // Ensure Timestamp is imported
 
 const googleMapsApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
 const libraries: ("places")[] = ['places'];
@@ -35,9 +35,6 @@ export default function SignupPage() {
 
   const autocompleteRef = useRef<google.maps.places.Autocomplete | null>(null);
   const locationInputRef = useRef<HTMLInputElement | null>(null);
-
-  console.log("SignupPage: Firestore instance on page load:", firestore);
-
 
   const onLoad = (autocompleteInstance: google.maps.places.Autocomplete) => {
     autocompleteRef.current = autocompleteInstance;
@@ -89,20 +86,14 @@ export default function SignupPage() {
       const user = userCredential.user;
       console.log("SignupPage: Firebase Auth signup successful. UID:", user.uid);
 
-      const userProfile = {
+      const minimalUserProfile = {
         uid: user.uid,
-        fullName: fullName,
-        email: user.email,
-        username: username,
-        location: location || "",
-        locationCoords: selectedLocationCoords || null,
-        bio: "",
-        avatar: "",
-        coverImage: "",
-        createdAt: serverTimestamp(),
+        email: user.email, // From the authenticated user
+        testField: "signupWriteAttempt_" + new Date().toISOString(),
+        createdAt: Timestamp.now(), 
       };
       
-      console.log("SignupPage: Preparing to write to Firestore. UserProfile object:", userProfile);
+      console.log("SignupPage: Preparing to write to Firestore. Minimal UserProfile object:", minimalUserProfile);
       console.log("SignupPage: Firestore instance being used for setDoc:", firestore);
 
 
@@ -110,14 +101,15 @@ export default function SignupPage() {
         console.error("SignupPage: Firestore instance is undefined! Check firebase.ts initialization.");
         toast({
           title: "Internal Error",
-          description: "Firestore service is not available. Please contact support. Ensure Firebase is correctly initialized.",
+          description: "Firestore service is not available. Please check Firebase initialization.",
           variant: "destructive",
         });
         setIsLoading(false);
         return;
       }
       
-      await setDoc(doc(firestore, "users", user.uid), userProfile);
+      console.log(`SignupPage: Attempting to write to Firestore path: users/${user.uid}`);
+      await setDoc(doc(firestore, "users", user.uid), minimalUserProfile);
       console.log("SignupPage: User profile successfully written to Firestore for UID:", user.uid);
       
 
@@ -129,8 +121,8 @@ export default function SignupPage() {
           name: fullName,
           avatar: `https://placehold.co/40x40.png?text=${initials}&c=${Math.random().toString(36).substring(7)}`, 
           position: selectedLocationCoords,
-          bio: userProfile.bio,
-          coverImage: userProfile.coverImage,
+          bio: "", // Add bio from full userProfile if you decide to store it
+          coverImage: "", // Add coverImage from full userProfile
         };
 
         const existingMapUsersString = localStorage.getItem("pokerConnectMapUsers");
@@ -146,7 +138,7 @@ export default function SignupPage() {
       } else {
          toast({
           title: "Location Notice",
-          description: "Location coordinates not available. User will not appear on the map if location was not selected from suggestions.",
+          description: "Location coordinates not available for map. User profile saved without precise map location.",
           variant: "default"
         })
       }
@@ -165,7 +157,7 @@ export default function SignupPage() {
         errorMessage = "The email address is not valid."
       } else if (error.message && (error.message.toLowerCase().includes("firestore") || error.code?.toLowerCase().includes("firestore") || error.message.toLowerCase().includes("write") || (error.name && error.name.toLowerCase().includes("firestore")) )) {
         console.error("SIGNUP PAGE FIRESTORE ERROR:", error.name, error.code, error.message);
-        errorMessage = `Failed to save profile data. Please check Firestore setup: 1. Database is CREATED in Firebase Console (Production Mode, choose region). 2. Firestore API is ENABLED in Google Cloud. 3. Firestore Security Rules are PUBLISHED and allow 'create' on 'users/{userId}'. Error: ${error.message}`;
+        errorMessage = `Failed to save profile data to Firestore. Please ensure your Firebase project's Firestore database is correctly created (in Production Mode), the Cloud Firestore API is enabled, and your Security Rules allow this write operation. Error: ${error.message}`;
       }
       toast({ title: "Signup Error", description: errorMessage, variant: "destructive", duration: 15000 });
     } finally {
@@ -251,6 +243,13 @@ export default function SignupPage() {
             </div>
             <div>
               <Label htmlFor="location">Location (Optional, select from suggestions for map)</Label>
+              {/* 
+                NOTE: google.maps.places.Autocomplete is being deprecated for new customers as of March 1st, 2025.
+                The recommended alternative is google.maps.places.PlaceAutocompleteElement.
+                The @react-google-maps/api library may need to be updated or a custom component created
+                to use the new PlaceAutocompleteElement in the future. For now, the existing Autocomplete
+                component should still function.
+              */}
               {googleMapsApiKey ? (
                  <LoadScript
                   googleMapsApiKey={googleMapsApiKey}
@@ -265,13 +264,6 @@ export default function SignupPage() {
                     });
                   }}
                 >
-                  {/*
-                    NOTE: google.maps.places.Autocomplete is being deprecated for new customers as of March 1st, 2025.
-                    The recommended alternative is google.maps.places.PlaceAutocompleteElement.
-                    The @react-google-maps/api library may need to be updated or a custom component created
-                    to use the new PlaceAutocompleteElement in the future. For now, the existing Autocomplete
-                    component should still function.
-                  */}
                   <Autocomplete
                     onLoad={onLoad}
                     onPlaceChanged={onPlaceChanged}
@@ -287,7 +279,7 @@ export default function SignupPage() {
                       onChange={(e) => {
                         setLocation(e.target.value);
                         if (autocompleteRef.current && autocompleteRef.current.getPlace()?.formatted_address !== e.target.value) {
-                            setSelectedLocationCoords(null); // Clear coords if user types manually after selecting
+                            setSelectedLocationCoords(null); 
                         }
                       }}
                       ref={locationInputRef}
