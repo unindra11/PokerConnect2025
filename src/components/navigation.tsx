@@ -24,7 +24,7 @@ const menuItems = [
   { href: "/map", label: "Player Map", icon: MapPinned },
   { href: "/my-posts", label: "My Posts", icon: UserSquare },
   { href: "/friends", label: "Friends", icon: Users },
-  { href: "/chat", label: "Chat", icon: MessageCircleMore }, 
+  { href: "/chat", label: "Chat", icon: MessageCircleMore },
   { href: "/notifications", label: "Notifications", icon: Bell },
   { href: "/community-wall", label: "Community Wall", icon: LayoutGrid },
 ];
@@ -38,12 +38,15 @@ export function AppNavigation() {
         const Icon = item.icon;
         return (
           <SidebarMenuItem key={item.href}>
-            <Link href={item.href} asChild>
+            <Link href={item.href} passHref legacyBehavior={false} asChild>
               <SidebarMenuButton
                 isActive={pathname === item.href || (item.href !== "/home" && pathname.startsWith(item.href))}
                 tooltip={item.label}
+                // The asChild prop for SidebarMenuButton is handled by its own definition
+                // when Link asChild passes its own asChild=true to it.
+                // No explicit asChild here is needed.
               >
-                {/* Wrap Icon and text span in a single parent for Slot compatibility */}
+                {/* Single child for Link asChild */}
                 <span className="flex items-center justify-start gap-2 w-full">
                   <Icon size={20} />
                   <span className="group-data-[collapsible=icon]:hidden delay-300 whitespace-nowrap truncate">

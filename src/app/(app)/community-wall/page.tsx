@@ -12,8 +12,6 @@ import { useToast } from "@/hooks/use-toast";
 import { getFirestore, collection, query, orderBy, getDocs, Timestamp } from "firebase/firestore";
 import { app } from "@/lib/firebase"; // Import the initialized Firebase app
 
-// const USER_POSTS_STORAGE_KEY = "pokerConnectUserPosts"; // No longer primary source
-
 export default function CommunityWallPage() {
   const [communityPosts, setCommunityPosts] = useState<Post[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -46,12 +44,12 @@ export default function CommunityWallPage() {
             image: data.image,
             imageAiHint: data.imageAiHint,
             likes: data.likes || 0,
-            likedByCurrentUser: data.likedByCurrentUser || false, // This will need to be managed per user later
+            likedByCurrentUser: data.likedByCurrentUser || false, 
             comments: data.comments || 0,
             commentTexts: data.commentTexts || [],
             shares: data.shares || 0,
-            createdAt: data.createdAt, // Keep as Firestore Timestamp or Date
-            timestamp: data.createdAt instanceof Timestamp ? data.createdAt.toDate().toLocaleString() : (data.createdAt || new Date()).toLocaleString(), // For display
+            createdAt: data.createdAt, 
+            timestamp: data.createdAt instanceof Timestamp ? data.createdAt.toDate().toLocaleString() : (data.createdAt?.toDate?.().toLocaleString() || new Date(data.createdAt?.seconds * 1000 || Date.now()).toLocaleString()),
           });
         });
         setCommunityPosts(posts);
@@ -79,33 +77,17 @@ export default function CommunityWallPage() {
   }, [toast]);
 
   const handleLikePost = (postId: string) => {
-    // TODO: Update this to interact with Firestore
     toast({
       title: "Like Action (Simulated)",
-      description: ` Firestore like for post ${postId} coming soon!`,
+      description: ` Firestore like for post ${postId} coming soon! Firestore interaction for likes needs to be implemented.`,
     });
-    // For now, we can optimistically update the UI if desired, but it won't persist to Firestore yet.
-    // Or, we can disable this until Firestore write is implemented.
-    // Example optimistic UI update (will revert on refresh if not saved to Firestore):
-    setCommunityPosts(prevPosts =>
-      prevPosts.map(p => 
-        p.id === postId ? { ...p, likes: p.likes + (p.likedByCurrentUser ? -1 : 1), likedByCurrentUser: !p.likedByCurrentUser } : p
-      )
-    );
   };
 
   const handleCommentOnPost = (postId: string, commentText: string) => {
-    // TODO: Update this to interact with Firestore
      toast({
       title: "Comment Action (Simulated)",
-      description: `Firestore comment '${commentText}' for post ${postId} coming soon!`,
+      description: `Firestore comment '${commentText}' for post ${postId} coming soon! Firestore interaction for comments needs to be implemented.`,
     });
-    // Example optimistic UI update:
-    setCommunityPosts(prevPosts =>
-      prevPosts.map(p =>
-        p.id === postId ? { ...p, comments: (p.comments || 0) + 1, commentTexts: [...(p.commentTexts || []), commentText] } : p
-      )
-    );
   };
 
   if (isLoading) {
@@ -149,12 +131,13 @@ export default function CommunityWallPage() {
             </CardContent>
           </Card>
         )}
-        {communityPosts.map((post) => (
+        {communityPosts.map((post, index) => (
           <PostCard 
             key={post.id} 
             post={post} 
             onLikePost={handleLikePost}
             onCommentPost={handleCommentOnPost}
+            isLCPItem={index === 0} // Mark the first post as LCP item
           />
         ))}
       </div>

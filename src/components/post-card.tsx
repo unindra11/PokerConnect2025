@@ -24,6 +24,7 @@ interface PostCardProps {
   onDeletePost?: (postId: string) => void;
   onLikePost?: (postId: string) => void;
   onCommentPost?: (postId: string, commentText: string) => void;
+  isLCPItem?: boolean; // New prop to indicate if this post might be the LCP
 }
 
 export function PostCard({
@@ -31,7 +32,8 @@ export function PostCard({
   showManagementControls = false,
   onDeletePost,
   onLikePost,
-  onCommentPost
+  onCommentPost,
+  isLCPItem = false, // Default to false
 }: PostCardProps) {
   const { toast } = useToast();
   const router = useRouter();
@@ -56,7 +58,7 @@ export function PostCard({
 
   const handleComment = () => {
     const commentText = window.prompt("Enter your comment:");
-    if (commentText === null) {
+    if (commentText === null) { // User clicked cancel
       return;
     }
     if (commentText.trim() !== "") {
@@ -68,7 +70,7 @@ export function PostCard({
           description: "Your comment would be added here.",
         });
       }
-    } else { 
+    } else {
       toast({
         title: "Empty Comment",
         description: "Comment cannot be empty.",
@@ -78,7 +80,12 @@ export function PostCard({
   };
 
   const handleEdit = () => {
-    router.push(`/create-post?editPostId=${post.id}`);
+    // Pass existing image URL if available to prefill in edit mode
+    const queryParams = new URLSearchParams({ editPostId: post.id, editContent: post.content });
+    if (post.image) {
+      queryParams.append("editImage", post.image);
+    }
+    router.push(`/create-post?${queryParams.toString()}`);
   };
 
   const handleDelete = () => {
@@ -132,14 +139,15 @@ export function PostCard({
       <CardContent className="px-4 pb-2">
         <p className="text-foreground mb-3">{post.content}</p>
         {post.image && (
-          <div className="rounded-lg overflow-hidden border">
+          <div className="rounded-lg overflow-hidden border relative aspect-[3/2]">
             <Image
               src={post.image}
               alt="Post image"
-              width={600}
-              height={400}
-              className="w-full h-auto object-cover"
+              fill
+              style={{objectFit: "cover"}}
+              sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
               data-ai-hint={post.imageAiHint || "post image"}
+              priority={isLCPItem} // Add priority prop
             />
           </div>
         )}
@@ -147,20 +155,20 @@ export function PostCard({
       <CardFooter className="flex flex-col items-start p-2 border-t">
         <div className="flex justify-around w-full px-2 py-1">
             <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-primary" onClick={handleComment}>
-            <MessageCircle className="mr-1 h-4 w-4" /> {post.comments}
+            <MessageCircle className="mr-1 h-4 w-4" /> {post.comments || 0}
             </Button>
             <Button variant="ghost" size="sm" className={`${post.likedByCurrentUser ? 'text-primary' : 'text-muted-foreground'} hover:text-primary`} onClick={handleLike}>
-            <Heart className={`mr-1 h-4 w-4 ${post.likedByCurrentUser ? 'fill-primary' : ''}`} /> {post.likes}
+            <Heart className={`mr-1 h-4 w-4 ${post.likedByCurrentUser ? 'fill-primary' : ''}`} /> {post.likes || 0}
             </Button>
             <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-primary" onClick={handleShare}>
-            <Repeat className="mr-1 h-4 w-4" /> {post.shares}
+            <Repeat className="mr-1 h-4 w-4" /> {post.shares || 0}
             </Button>
         </div>
         {post.commentTexts && post.commentTexts.length > 0 && (
           <div className="w-full px-4 pt-2 mt-2 border-t border-dashed">
             <h4 className="text-sm font-semibold mb-2 text-foreground/80">Comments:</h4>
             <ul className="space-y-2 max-h-40 overflow-y-auto">
-              {post.commentTexts.slice(0).reverse().map((comment, index) => ( // Show newest comments first
+              {post.commentTexts.slice(0).reverse().map((comment, index) => (
                 <li key={index} className="text-xs text-muted-foreground bg-muted/50 p-2 rounded-md flex items-start">
                   <CornerDownRight className="h-3 w-3 mr-2 mt-0.5 flex-shrink-0 text-primary" />
                   <span>{comment}</span>
