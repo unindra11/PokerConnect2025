@@ -24,7 +24,7 @@ interface PostCardProps {
   onDeletePost?: (postId: string) => void;
   onLikePost?: (postId: string) => void;
   onCommentPost?: (postId: string, commentText: string) => void;
-  isLCPItem?: boolean; // New prop to indicate if this post might be the LCP
+  isLCPItem?: boolean; 
 }
 
 export function PostCard({
@@ -33,7 +33,7 @@ export function PostCard({
   onDeletePost,
   onLikePost,
   onCommentPost,
-  isLCPItem = false, // Default to false
+  isLCPItem = false,
 }: PostCardProps) {
   const { toast } = useToast();
   const router = useRouter();
@@ -58,7 +58,7 @@ export function PostCard({
 
   const handleComment = () => {
     const commentText = window.prompt("Enter your comment:");
-    if (commentText === null) { // User clicked cancel
+    if (commentText === null) { 
       return;
     }
     if (commentText.trim() !== "") {
@@ -80,11 +80,8 @@ export function PostCard({
   };
 
   const handleEdit = () => {
-    // Pass existing image URL if available to prefill in edit mode
-    const queryParams = new URLSearchParams({ editPostId: post.id, editContent: post.content });
-    if (post.image) {
-      queryParams.append("editImage", post.image);
-    }
+    const queryParams = new URLSearchParams({ editPostId: post.id });
+    // Content and image will be fetched from Firestore on the edit page
     router.push(`/create-post?${queryParams.toString()}`);
   };
 
@@ -99,6 +96,7 @@ export function PostCard({
     }
   };
 
+  const displayedLikes = Math.max(0, post.likes || 0);
 
   return (
     <Card key={post.id} className="overflow-hidden shadow-lg rounded-xl">
@@ -128,7 +126,7 @@ export function PostCard({
               variant="ghost"
               size="icon"
               className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
-              onClick={onDeletePost ? handleDelete : undefined}
+              onClick={handleDelete}
             >
               <Trash2 className="h-4 w-4" />
               <span className="sr-only">Delete Post</span>
@@ -147,7 +145,7 @@ export function PostCard({
               style={{objectFit: "cover"}}
               sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
               data-ai-hint={post.imageAiHint || "post image"}
-              priority={isLCPItem} // Add priority prop
+              priority={isLCPItem} 
             />
           </div>
         )}
@@ -158,7 +156,7 @@ export function PostCard({
             <MessageCircle className="mr-1 h-4 w-4" /> {post.comments || 0}
             </Button>
             <Button variant="ghost" size="sm" className={`${post.likedByCurrentUser ? 'text-primary' : 'text-muted-foreground'} hover:text-primary`} onClick={handleLike}>
-            <Heart className={`mr-1 h-4 w-4 ${post.likedByCurrentUser ? 'fill-primary' : ''}`} /> {post.likes || 0}
+            <Heart className={`mr-1 h-4 w-4 ${post.likedByCurrentUser ? 'fill-primary' : ''}`} /> {displayedLikes}
             </Button>
             <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-primary" onClick={handleShare}>
             <Repeat className="mr-1 h-4 w-4" /> {post.shares || 0}
