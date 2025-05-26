@@ -14,10 +14,9 @@ import { ImagePlus, Send, Edit, Loader2, X, ArrowLeft } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useRouter, useSearchParams } from "next/navigation";
 import type { Post, User } from "@/types/post";
-import { storage, app } from "@/lib/firebase"; // Import app for getFirestore
+import { storage, app, auth } from "@/lib/firebase"; 
 import { ref, uploadBytesResumable, getDownloadURL } from "firebase/storage";
-import { addDoc, collection, serverTimestamp, doc, getDoc, updateDoc, Timestamp, getFirestore } from "firebase/firestore"; // Added getFirestore
-import { getAuth, type User as FirebaseUser } from "firebase/auth";
+import { addDoc, collection, serverTimestamp, doc, getDoc, updateDoc, Timestamp, getFirestore } from "firebase/firestore";
 
 const MAX_FILE_SIZE_MB = 5;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
@@ -33,14 +32,13 @@ const USER_POSTS_STORAGE_KEY = "pokerConnectUserPosts";
 export default function CreatePostPage() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [imageToSaveUrl, setImageToSaveUrl] = useState<string | null>(null);
+  const [imageToSaveUrl, setImageToSaveUrl] = useState<string | null>(null); // For existing image in edit mode
   const [isLoading, setIsLoading] = useState(false);
   const { toast } = useToast();
   const router = useRouter();
   const searchParams = useSearchParams();
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const auth = getAuth(app);
-
+  
   const editPostId = searchParams.get("editPostId");
   const isEditMode = !!editPostId;
 
@@ -56,6 +54,7 @@ export default function CreatePostPage() {
       if (isEditMode && editPostId) {
         setIsLoading(true);
         try {
+          // First, try fetching from Firestore
           const db = getFirestore(app, "poker");
           const postDocRef = doc(db, "posts", editPostId);
           const postDocSnap = await getDoc(postDocRef);
@@ -64,19 +63,20 @@ export default function CreatePostPage() {
             const postToEdit = postDocSnap.data() as Post;
             form.setValue("postContent", postToEdit.content);
             if (postToEdit.image) {
-              setPreviewUrl(postToEdit.image);
+              setPreviewUrl(postToEdit.image); // This could be a Firebase Storage URL
               setImageToSaveUrl(postToEdit.image);
             }
           } else {
+            // Fallback to localStorage if not in Firestore (for older posts)
             const storedPostsString = localStorage.getItem(USER_POSTS_STORAGE_KEY);
             if (storedPostsString) {
               const storedPosts: Post[] = JSON.parse(storedPostsString);
               const postToEdit = storedPosts.find(p => p.id === editPostId);
               if (postToEdit) {
                 form.setValue("postContent", postToEdit.content);
-                if (postToEdit.image) {
+                if (postToEdit.image) { // This might be a Data URI
                   setPreviewUrl(postToEdit.image);
-                  setImageToSaveUrl(postToEdit.image);
+                  setImageToSaveUrl(postToEdit.image); 
                 }
               } else {
                 toast({ title: "Error", description: "Post not found for editing.", variant: "destructive" });
@@ -109,10 +109,10 @@ export default function CreatePostPage() {
         });
         if (fileInputRef.current) fileInputRef.current.value = "";
         setSelectedFile(null);
-        setPreviewUrl(imageToSaveUrl);
+        setPreviewUrl(imageToSaveUrl); // Revert to existing image if edit mode
         return;
       }
-      if (!file.type.startsWith("image/")) {
+      if (!file.type.startsWith("image/")) { // Only allowing images for now
         toast({
           title: "Unsupported File Type",
           description: "Only image uploads are supported.",
@@ -120,23 +120,23 @@ export default function CreatePostPage() {
         });
         if (fileInputRef.current) fileInputRef.current.value = "";
         setSelectedFile(null);
-        setPreviewUrl(imageToSaveUrl);
+        setPreviewUrl(imageToSaveUrl); // Revert to existing image
         return;
       }
       setSelectedFile(file);
       const reader = new FileReader();
       reader.onloadend = () => {
-        setPreviewUrl(reader.result as string);
+        setPreviewUrl(reader.result as string); // Local preview
       };
       reader.readAsDataURL(file);
-      setImageToSaveUrl(null);
+      setImageToSaveUrl(null); // Clear if user is uploading new file
     }
   };
 
   const clearMedia = () => {
     setSelectedFile(null);
     setPreviewUrl(null);
-    setImageToSaveUrl(null);
+    setImageToSaveUrl(null); // Clear this too
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
@@ -148,6 +148,7 @@ export default function CreatePostPage() {
     let loggedInUserForPost: User | null = null;
 
     if (currentUserAuth) {
+      // Try to get fuller details from localStorage if available
       const loggedInUserString = localStorage.getItem("loggedInUser");
       if (loggedInUserString) {
         const parsedUser = JSON.parse(loggedInUserString);
@@ -156,8 +157,16 @@ export default function CreatePostPage() {
           avatar: parsedUser.avatar || `https://placehold.co/100x100.png?text=${(parsedUser.fullName || parsedUser.username || "A").substring(0,1)}`,
           handle: `@${parsedUser.username || 'anonymous'}`
         };
+      } else { // Fallback if no full details in localStorage
+        loggedInUserForPost = {
+          name: currentUserAuth.displayName || currentUserAuth.email?.split('@')[0] || "Anonymous",
+          avatar: currentUserAuth.photoURL || `https://placehold.co/100x100.png?text=${(currentUserAuth.displayName || currentUserAuth.email || "A").substring(0,1)}`,
+          handle: `@${currentUserAuth.email?.split('@')[0] || 'anonymous'}`
+        };
       }
     }
+    
+    console.log("CreatePostPage: currentUserAuth object before storage upload:", currentUserAuth);
 
     if (!currentUserAuth || !loggedInUserForPost) {
       toast({ title: "Authentication Error", description: "You must be logged in to create or edit a post.", variant: "destructive" });
@@ -165,31 +174,35 @@ export default function CreatePostPage() {
       return;
     }
 
-    let finalImageUrl: string | undefined = imageToSaveUrl || undefined;
+    let finalImageUrl: string | undefined = imageToSaveUrl || undefined; // Keep existing image if no new file
 
-    if (selectedFile) {
+    if (selectedFile) { // If a new file is selected, upload it
       const storageRefPath = `posts/${currentUserAuth.uid}/${Date.now()}_${selectedFile.name}`;
       const fileStorageRef = ref(storage, storageRefPath);
       const uploadTask = uploadBytesResumable(fileStorageRef, selectedFile);
+
       try {
+        console.log(`CreatePostPage: Attempting to upload to Firebase Storage path: ${storageRefPath}`);
         await uploadTask;
         finalImageUrl = await getDownloadURL(uploadTask.snapshot.ref);
+        console.log("CreatePostPage: Firebase Storage upload successful. Download URL:", finalImageUrl);
       } catch (error: any) {
-        console.error("Firebase Storage upload error:", error);
-        toast({ title: "Upload Failed", description: `Could not upload image: ${error.message}. Post will be saved without image. Please check Storage Security Rules.`, variant: "destructive", duration: 7000 });
+        console.error("CreatePostPage: Firebase Storage upload error:", error);
+        toast({ title: "Upload Failed", description: `Could not upload image: ${error.message}. Ensure Storage rules are correctly set. Post will be saved without image/with previous image.`, variant: "destructive", duration: 9000 });
+        // finalImageUrl remains as imageToSaveUrl or undefined
       }
     }
     
     const db = getFirestore(app, "poker");
     console.log("CreatePostPage: Firestore instance for 'poker' DB:", db?._databaseId?.projectId, db?._databaseId?.database);
 
-
     try {
       if (isEditMode && editPostId) {
+        // Firestore Update Logic
         const postDocRef = doc(db, "posts", editPostId);
         await updateDoc(postDocRef, {
           content: data.postContent,
-          image: finalImageUrl === undefined ? imageToSaveUrl : finalImageUrl, // Preserve existing if new upload failed or wasn't done
+          image: finalImageUrl, // This will be the new URL if uploaded, or the existing one, or null
         });
         toast({ title: "Post Updated!", description: "Your changes have been saved to Firestore." });
 
@@ -200,13 +213,14 @@ export default function CreatePostPage() {
           p.id === editPostId ? { 
             ...p, 
             content: data.postContent, 
-            image: finalImageUrl === undefined ? p.image : finalImageUrl, 
+            image: finalImageUrl, 
             timestamp: new Date().toLocaleString() // Using client-side string for localStorage mock
           } : p
         );
         localStorage.setItem(USER_POSTS_STORAGE_KEY, JSON.stringify(posts));
 
       } else {
+        // Firestore Add Logic
         const postDataForFirestore = {
           userId: currentUserAuth.uid,
           user: loggedInUserForPost,
@@ -239,7 +253,7 @@ export default function CreatePostPage() {
             commentTexts: [],
             shares: 0,
             timestamp: new Date().toLocaleString(), // Client-side string for localStorage mock
-            createdAt: new Date(), 
+            createdAt: new Date(), // Firestore uses serverTimestamp, localStorage uses client Date
         };
         posts = [newPostForLocalStorage, ...posts];
         localStorage.setItem(USER_POSTS_STORAGE_KEY, JSON.stringify(posts));
@@ -255,7 +269,7 @@ export default function CreatePostPage() {
     } catch (error: any) {
       console.error("Error saving post to Firestore:", error);
       let firestoreErrorMessage = `Could not save post: ${error.message}`;
-      if (error.message && (error.message.includes("firestore") || error.message.includes("Firestore") || error.message.includes("RPC") || (typeof error.code === 'string' && error.code.startsWith("permission-denied")) || error.code === 'unavailable' || error.code === 'unimplemented' || error.code === 'internal')) {
+       if (error.message && (error.message.includes("firestore") || error.message.includes("Firestore") || error.message.includes("RPC") || (typeof error.code === 'string' && error.code.startsWith("permission-denied")) || error.code === 'unavailable' || error.code === 'unimplemented' || error.code === 'internal')) {
         firestoreErrorMessage = `Failed to save post to Firestore. Please ensure Firestore database ('poker') is correctly created, API enabled, and security rules are published in Firebase Console. Details: ${error.message}`;
       }
       toast({ title: "Firestore Error", description: firestoreErrorMessage, variant: "destructive", duration: 9000 });
@@ -342,7 +356,7 @@ export default function CreatePostPage() {
                 )}
               </div>
                <p className="text-xs text-muted-foreground mt-2 text-center">
-                Images will be uploaded to Firebase Cloud Storage. Ensure your Firebase project and Storage rules are configured.
+                Images will be uploaded to Firebase Cloud Storage. Ensure your Firebase project (ID: {process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || 'Not Set'}) and Storage rules are configured.
               </p>
             </div>
             
@@ -367,3 +381,5 @@ export default function CreatePostPage() {
     </div>
   );
 }
+
+    
