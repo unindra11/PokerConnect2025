@@ -1,9 +1,9 @@
 
 // src/lib/firebase.ts
 import { initializeApp, getApp, getApps, type FirebaseOptions, type FirebaseApp } from "firebase/app";
-import { getStorage } from "firebase/storage";
 import { getAuth } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
+import { getStorage } from "firebase/storage";
 
 const firebaseConfig: FirebaseOptions = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -12,78 +12,68 @@ const firebaseConfig: FirebaseOptions = {
   storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
   messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
   appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
-  measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID,
+  measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID, // Optional
 };
-
-const APP_NAME = "PokerConnectApp"; // Define a unique name for your app
 
 let app: FirebaseApp;
 
 if (!firebaseConfig.apiKey || !firebaseConfig.projectId) {
-  console.warn(
-    "Firebase.ts: Firebase API Key or Project ID is missing in environment variables. Firebase features might not work. Check your .env file and ensure it's loaded correctly."
+  console.error(
+    "Firebase.ts: Critical Firebase API Key or Project ID is missing in environment variables. Firebase will not initialize correctly. Check your .env file."
   );
-}
-
-try {
-  // Attempt to get an existing app with this name
-  app = getApp(APP_NAME);
-  console.log(`Firebase.ts: Retrieved existing Firebase app: ${APP_NAME}`);
-} catch (e) {
-  // If app doesn't exist, initialize it
-  if (!firebaseConfig.apiKey || !firebaseConfig.projectId) {
-    console.error("Firebase.ts: Cannot initialize Firebase - missing API Key or Project ID in config. App will not function correctly.");
-    // Create a placeholder to prevent crashes if services are called, but log the severe error.
-    app = {} as FirebaseApp; 
-  } else {
+  // Provide non-functional placeholders to prevent hard crashes if these are imported elsewhere.
+  app = {} as FirebaseApp; // This app instance will not work.
+} else {
+  if (!getApps().length) {
     try {
-      app = initializeApp(firebaseConfig, APP_NAME);
-      console.log(`Firebase.ts: Initialized new Firebase app: ${APP_NAME}`);
+      app = initializeApp(firebaseConfig);
+      console.log("Firebase.ts: Initialized new Firebase app (default instance).");
     } catch (initError) {
-      console.error(`Firebase.ts: Critical error initializing Firebase app '${APP_NAME}':`, initError);
+      console.error("Firebase.ts: Critical error initializing Firebase app:", initError);
       console.error("Firebase.ts: Firebase config used:", firebaseConfig);
-      app = {} as FirebaseApp; // Placeholder on error
+      app = {} as FirebaseApp; // This app instance will not work.
     }
+  } else {
+    app = getApp(); // Get the default app if already initialized
+    console.log("Firebase.ts: Retrieved existing Firebase app (default instance).");
   }
 }
-
-
-let auth: ReturnType<typeof getAuth>;
-let firestore: ReturnType<typeof getFirestore>;
-let storage: ReturnType<typeof getStorage>;
 
 // Initialize services, guarding against app initialization failure
-if (app && app.name === APP_NAME) { // Check if app was successfully initialized or retrieved
+// Ensure services are initialized only if the app object is valid (i.e., has a name, indicating successful init)
+let authInstance: ReturnType<typeof getAuth>;
+let firestoreInstance: ReturnType<typeof getFirestore>;
+let storageInstance: ReturnType<typeof getStorage>;
+
+if (app && app.name) { // A successfully initialized app will have a name.
   try {
-    auth = getAuth(app);
-    console.log("Firebase.ts: Auth instance initialized from app:", APP_NAME);
+    authInstance = getAuth(app);
+    console.log("Firebase.ts: Auth instance initialized from app:", app.name);
   } catch (e) {
-    console.error(`Firebase.ts: Error initializing Auth for app '${APP_NAME}':`, e);
-    auth = {} as any; // Placeholder
+    console.error(`Firebase.ts: Error initializing Auth for app '${app.name}':`, e);
+    authInstance = {} as any;
   }
 
   try {
-    firestore = getFirestore(app);
-    console.log("Firebase.ts: Firestore instance initialized:", firestore); // Log instance
+    firestoreInstance = getFirestore(app);
+    console.log("Firebase.ts: Firestore instance initialized from app:", app.name, firestoreInstance);
   } catch (e) {
-    console.error(`Firebase.ts: Error initializing Firestore for app '${APP_NAME}':`, e);
-    firestore = {} as any; // Placeholder
+    console.error(`Firebase.ts: Error initializing Firestore for app '${app.name}':`, e);
+    firestoreInstance = {} as any;
   }
 
   try {
-    storage = getStorage(app);
-    console.log("Firebase.ts: Storage instance initialized from app:", APP_NAME);
+    storageInstance = getStorage(app);
+    console.log("Firebase.ts: Storage instance initialized from app:", app.name);
   } catch (e) {
-    console.error(`Firebase.ts: Error initializing Storage for app '${APP_NAME}':`, e);
-    storage = {} as any; // Placeholder
+    console.error(`Firebase.ts: Error initializing Storage for app '${app.name}':`, e);
+    storageInstance = {} as any;
   }
 } else {
-  console.error(`Firebase.ts: Firebase app '${APP_NAME}' not available. Services (Auth, Firestore, Storage) cannot be initialized.`);
-  auth = {} as any;
-  firestore = {} as any;
-  storage = {} as any;
+  console.error("Firebase.ts: Firebase app not available or not correctly initialized. Services (Auth, Firestore, Storage) cannot be initialized.");
+  authInstance = {} as any;
+  firestoreInstance = {} as any;
+  storageInstance = {} as any;
 }
 
-
-export { app, storage, auth, firestore };
-
+export { app, storageInstance as storage, authInstance as auth, firestoreInstance as firestore };
