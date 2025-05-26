@@ -11,14 +11,14 @@ import Link from "next/link";
 import { LogInIcon, Eye, EyeOff, Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/hooks/use-toast";
-import { auth, firestore } from "@/lib/firebase";
+import { app, auth } from "@/lib/firebase"; // Import app for getting specific DB instance
 import { signInWithEmailAndPassword } from "firebase/auth";
-import { doc, getDoc } from "firebase/firestore";
+import { getFirestore, doc, getDoc } from "firebase/firestore"; // Import getFirestore
 
 export default function LoginPage() {
   const router = useRouter();
   const { toast } = useToast();
-  const [emailOrUsername, setEmailOrUsername] = useState(""); // For simplicity, we'll assume users log in with email
+  const [emailOrUsername, setEmailOrUsername] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -27,23 +27,27 @@ export default function LoginPage() {
     e.preventDefault();
     setIsLoading(true);
     console.log("Login attempt submitted.");
-    console.log("Entered Email:", emailOrUsername); // Assuming email for login
+    console.log("Entered Email:", emailOrUsername);
 
     try {
       const userCredential = await signInWithEmailAndPassword(auth, emailOrUsername, password);
       const user = userCredential.user;
       console.log("Firebase Auth login successful for UID:", user.uid);
 
-      // Fetch user profile from Firestore
-      const userDocRef = doc(firestore, "users", user.uid);
+      // Explicitly get Firestore instance for "poker" database
+      const db = getFirestore(app, "poker");
+      console.log("LoginPage: Firestore instance for 'poker' DB:", db._databaseId.projectId, db._databaseId.database);
+
+      const userDocRef = doc(db, "users", user.uid);
+      console.log("LoginPage: Attempting to fetch from Firestore path:", userDocRef.path);
       const userDocSnap = await getDoc(userDocRef);
 
       if (userDocSnap.exists()) {
         const userProfileData = userDocSnap.data();
         const loggedInUserDetails = {
           uid: user.uid,
-          email: user.email, // From Firebase Auth
-          displayName: userProfileData.fullName || userProfileData.username, // Use fullName as displayName
+          email: user.email,
+          displayName: userProfileData.fullName || userProfileData.username,
           username: userProfileData.username,
           fullName: userProfileData.fullName,
           bio: userProfileData.bio,
@@ -61,32 +65,46 @@ export default function LoginPage() {
         router.push("/home");
       } else {
         console.warn("User profile not found in Firestore for UID:", user.uid);
-        // Handle case where user exists in Auth but not Firestore (e.g., incomplete signup)
-        // For now, store basic auth info and proceed
         const basicUserDetails = {
           uid: user.uid,
           email: user.email,
-          displayName: user.email, // Fallback
+          displayName: user.email || "User",
         };
         localStorage.setItem("loggedInUser", JSON.stringify(basicUserDetails));
         toast({
           title: "Login Successful (Profile Incomplete)",
-          description: `Welcome back, ${user.email}! Your profile details are being set up.`,
+          description: `Welcome back, ${user.email}! Your profile details might be incomplete.`,
         });
         router.push("/home");
       }
     } catch (error: any) {
-      console.error("Error logging in with Firebase Auth:", error);
-      let errorMessage = "Invalid email or password. Please try again.";
-      if (error.code === "auth/user-not-found" || error.code === "auth/wrong-password" || error.code === "auth/invalid-credential") {
-        errorMessage = "Invalid email or password.";
-      } else if (error.code === "auth/invalid-email") {
-        errorMessage = "Please enter a valid email address.";
+      console.error("Error logging in:", error);
+      let errorMessage = "An error occurred during login. Please try again.";
+      if (error.code) {
+        switch (error.code) {
+          case "auth/user-not-found":
+          case "auth/wrong-password":
+          case "auth/invalid-credential":
+            errorMessage = "Invalid email or password.";
+            break;
+          case "auth/invalid-email":
+            errorMessage = "Please enter a valid email address.";
+            break;
+          default:
+            if (error.message && (error.message.includes("firestore") || error.message.includes("Firestore") || error.message.includes("RPC"))) {
+                errorMessage = `Login successful, but failed to fetch profile. Ensure Firestore is set up (DB created, API enabled, Rules published). Details: ${error.message}`;
+            } else {
+                errorMessage = `Login error. Code: ${error.code}, Message: ${error.message || 'Unknown error'}`;
+            }
+        }
+      } else if (error.message) {
+        errorMessage = `An unexpected error occurred: ${error.message}`;
       }
       toast({
         title: "Login Failed",
         description: errorMessage,
         variant: "destructive",
+        duration: 9000,
       });
     } finally {
       setIsLoading(false);
@@ -112,7 +130,7 @@ export default function LoginPage() {
               <Label htmlFor="emailOrUsername">Email</Label>
               <Input
                 id="emailOrUsername"
-                type="email" // Assuming login with email
+                type="email"
                 placeholder="Your email"
                 className="mt-1"
                 value={emailOrUsername}
