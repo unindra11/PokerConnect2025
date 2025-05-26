@@ -12,10 +12,10 @@ import { UserPlus, Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/hooks/use-toast";
 import { LoadScript, Autocomplete } from "@react-google-maps/api";
-import type { MockUserPin } from "@/app/(app)/map/page";
+import type { MockUserPin } from "@/app/(app)/map/page"; // Ensure this path is correct
 import { auth, firestore } from "@/lib/firebase";
 import { createUserWithEmailAndPassword } from "firebase/auth";
-import { doc, setDoc, serverTimestamp, Timestamp } from "firebase/firestore";
+import { doc, setDoc, serverTimestamp, Timestamp } from "firebase/firestore"; // Corrected import
 
 const googleMapsApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
 const libraries: ("places")[] = ['places'];
@@ -57,8 +57,9 @@ export default function SignupPage() {
           console.warn("SignupPage: Autocomplete place selected, but no geometry/location data found.");
         }
       } else if (locationInputRef.current) {
+        // User might have typed without selecting, or cleared a selection
         setLocation(locationInputRef.current.value);
-        setSelectedLocationCoords(null); // Clear coords if user types manually after selecting
+        setSelectedLocationCoords(null);
         console.log("SignupPage: Location input changed manually:", locationInputRef.current.value);
       }
     }
@@ -86,6 +87,23 @@ export default function SignupPage() {
       const user = userCredential.user;
       console.log("SignupPage: Firebase Auth signup successful. UID:", user.uid);
 
+      const userProfile = {
+        uid: user.uid,
+        fullName: fullName,
+        email: user.email,
+        username: username,
+        location: location || "",
+        locationCoords: selectedLocationCoords || null,
+        bio: "",
+        avatar: "",
+        coverImage: "",
+        createdAt: serverTimestamp(), // Use serverTimestamp
+      };
+      
+      console.log("SignupPage: Preparing to write to Firestore. UserProfile object:", userProfile);
+      console.log("SignupPage: Firestore instance being used for setDoc:", firestore);
+
+
       if (!firestore) {
         console.error("SignupPage: Firestore instance is undefined! Check firebase.ts initialization.");
         toast({
@@ -97,22 +115,6 @@ export default function SignupPage() {
         return;
       }
       
-      const userProfile = {
-        uid: user.uid,
-        fullName: fullName,
-        email: user.email, // Use email from auth user object for consistency
-        username: username,
-        location: location || "",
-        locationCoords: selectedLocationCoords, // This can be null
-        bio: "",
-        avatar: "", // Will be Firebase Storage URL later
-        coverImage: "", // Will be Firebase Storage URL or Data URI later
-        createdAt: serverTimestamp(),
-      };
-
-      console.log("SignupPage: Preparing to write to Firestore. UserProfile object:", userProfile );
-      console.log("SignupPage: Firestore instance being used for setDoc:", firestore); // Diagnostic log
-
       await setDoc(doc(firestore, "users", user.uid), userProfile);
       console.log("SignupPage: User profile successfully written to Firestore for UID:", user.uid);
       
@@ -126,7 +128,7 @@ export default function SignupPage() {
           name: fullName,
           avatar: `https://placehold.co/40x40.png?text=${initials}&c=${Math.random().toString(36).substring(7)}`, 
           position: selectedLocationCoords,
-          bio: userProfile.bio,
+          bio: userProfile.bio, // ensure bio and coverImage are part of MockUserPin if needed
           coverImage: userProfile.coverImage,
         };
 
@@ -143,7 +145,7 @@ export default function SignupPage() {
       } else {
          toast({
           title: "Location Notice",
-          description: "Location coordinates not available. User will not appear on the map.",
+          description: "Location coordinates not available. User will not appear on the map if location was not selected from suggestions.",
           variant: "default"
         })
       }
@@ -154,6 +156,7 @@ export default function SignupPage() {
     } catch (error: any) {
       console.error("SignupPage: Error during signup process:", error.message, error.code, error.stack);
       console.error("Full error object:", error);
+      
       let errorMessage = "Could not sign up. Please try again.";
       if (error.code === "auth/email-already-in-use") {
         errorMessage = "This email is already in use. Please use a different email or log in.";
@@ -161,10 +164,12 @@ export default function SignupPage() {
         errorMessage = "Password is too weak. Please choose a stronger password.";
       } else if (error.code === 'auth/invalid-email') {
         errorMessage = "The email address is not valid."
-      } else if (error.message && error.message.includes("firestore")) {
-        errorMessage = `Failed to save profile to database: ${error.message}. Please ensure Firestore is set up correctly in your Firebase project.`
+      } else if (error.code === 'permission-denied' || (error.message && (error.message.toLowerCase().includes("firestore") || error.message.toLowerCase().includes("write") || error.code?.toLowerCase().includes("firestore")))) {
+        // More specific check for Firestore permission denied or general Firestore write issues
+        errorMessage = `Failed to save profile data (Error: ${error.code || 'Firestore Write Error'}). Please verify Firebase Firestore setup: 1. Database is CREATED in Firebase Console. 2. Firestore API is ENABLED in Google Cloud Console. 3. Firestore Security Rules are PUBLISHED and allow 'create' on 'users/{userId}' for authenticated users.`;
+        console.error("POTENTIAL FIREBASE SETUP ISSUE (Firestore Write Failed):", error);
       }
-      toast({ title: "Signup Error", description: errorMessage, variant: "destructive", duration: 7000 });
+      toast({ title: "Signup Error", description: errorMessage, variant: "destructive", duration: 12000 });
     } finally {
       setIsLoading(false);
     }
@@ -276,7 +281,6 @@ export default function SignupPage() {
                       value={location}
                       onChange={(e) => {
                         setLocation(e.target.value);
-                        // If user types manually after selecting a place, clear selected coords
                         if (autocompleteRef.current && autocompleteRef.current.getPlace()?.formatted_address !== e.target.value) {
                             setSelectedLocationCoords(null);
                         }
@@ -303,7 +307,7 @@ export default function SignupPage() {
             </Button>
             <p className="text-sm text-muted-foreground">
               Already have an account?{" "}
-              <Link href="/login" className="text-primary hover:underline">
+              <Link href="/quiz" className="text-primary hover:underline">
                 Log In
               </Link>
             </p>
@@ -313,3 +317,5 @@ export default function SignupPage() {
     </div>
   );
 }
+
+    
