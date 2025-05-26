@@ -14,10 +14,10 @@ import { ImagePlus, Send, Edit, Loader2, X, ArrowLeft } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useRouter, useSearchParams } from "next/navigation";
 import type { Post, User } from "@/types/post";
-import { storage, firestore, app } from "@/lib/firebase";
+import { storage, app } from "@/lib/firebase"; // Import app for getFirestore
 import { ref, uploadBytesResumable, getDownloadURL } from "firebase/storage";
-import { addDoc, collection, serverTimestamp, doc, getDoc, updateDoc, Timestamp } from "firebase/firestore";
-import { getAuth } from "firebase/auth";
+import { addDoc, collection, serverTimestamp, doc, getDoc, updateDoc, Timestamp, getFirestore } from "firebase/firestore"; // Added getFirestore
+import { getAuth, type User as FirebaseUser } from "firebase/auth";
 
 const MAX_FILE_SIZE_MB = 5;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
@@ -28,12 +28,12 @@ const createPostSchema = z.object({
 
 type CreatePostFormValues = z.infer<typeof createPostSchema>;
 
-const USER_POSTS_STORAGE_KEY = "pokerConnectUserPosts"; // We'll still update this temporarily
+const USER_POSTS_STORAGE_KEY = "pokerConnectUserPosts";
 
 export default function CreatePostPage() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [imageToSaveUrl, setImageToSaveUrl] = useState<string | null>(null); // For existing image URL in edit mode
+  const [imageToSaveUrl, setImageToSaveUrl] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const { toast } = useToast();
   const router = useRouter();
@@ -41,7 +41,7 @@ export default function CreatePostPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const auth = getAuth(app);
 
-  const editPostId = searchParams.get("editPostId"); // Firestore document ID
+  const editPostId = searchParams.get("editPostId");
   const isEditMode = !!editPostId;
 
   const form = useForm<CreatePostFormValues>({
@@ -56,7 +56,6 @@ export default function CreatePostPage() {
       if (isEditMode && editPostId) {
         setIsLoading(true);
         try {
-          // Try fetching from Firestore first for edit mode
           const db = getFirestore(app, "poker");
           const postDocRef = doc(db, "posts", editPostId);
           const postDocSnap = await getDoc(postDocRef);
@@ -69,7 +68,6 @@ export default function CreatePostPage() {
               setImageToSaveUrl(postToEdit.image);
             }
           } else {
-            // Fallback to localStorage if not in Firestore (for older posts)
             const storedPostsString = localStorage.getItem(USER_POSTS_STORAGE_KEY);
             if (storedPostsString) {
               const storedPosts: Post[] = JSON.parse(storedPostsString);
@@ -84,6 +82,9 @@ export default function CreatePostPage() {
                 toast({ title: "Error", description: "Post not found for editing.", variant: "destructive" });
                 router.push("/my-posts");
               }
+            } else {
+                toast({ title: "Error", description: "Post not found in Firestore or localStorage.", variant: "destructive" });
+                router.push("/my-posts");
             }
           }
         } catch (error) {
@@ -108,7 +109,7 @@ export default function CreatePostPage() {
         });
         if (fileInputRef.current) fileInputRef.current.value = "";
         setSelectedFile(null);
-        setPreviewUrl(imageToSaveUrl); // Revert to original image if edit mode, or null
+        setPreviewUrl(imageToSaveUrl);
         return;
       }
       if (!file.type.startsWith("image/")) {
@@ -128,7 +129,7 @@ export default function CreatePostPage() {
         setPreviewUrl(reader.result as string);
       };
       reader.readAsDataURL(file);
-      setImageToSaveUrl(null); // Clear existing image URL if a new file is selected
+      setImageToSaveUrl(null);
     }
   };
 
@@ -143,23 +144,23 @@ export default function CreatePostPage() {
 
   const onSubmit: SubmitHandler<CreatePostFormValues> = async (data) => {
     setIsLoading(true);
-    const currentUser = auth.currentUser;
+    const currentUserAuth = auth.currentUser;
     let loggedInUserForPost: User | null = null;
 
-    if (currentUser) {
-        const loggedInUserString = localStorage.getItem("loggedInUser");
-        if (loggedInUserString) {
-            const parsedUser = JSON.parse(loggedInUserString);
-            loggedInUserForPost = {
-                name: parsedUser.fullName || parsedUser.username || "Anonymous",
-                avatar: parsedUser.avatar || `https://placehold.co/100x100.png?text=${(parsedUser.fullName || parsedUser.username || "A").substring(0,1)}`,
-                handle: `@${parsedUser.username || 'anonymous'}`
-            };
-        }
+    if (currentUserAuth) {
+      const loggedInUserString = localStorage.getItem("loggedInUser");
+      if (loggedInUserString) {
+        const parsedUser = JSON.parse(loggedInUserString);
+        loggedInUserForPost = {
+          name: parsedUser.fullName || parsedUser.username || "Anonymous",
+          avatar: parsedUser.avatar || `https://placehold.co/100x100.png?text=${(parsedUser.fullName || parsedUser.username || "A").substring(0,1)}`,
+          handle: `@${parsedUser.username || 'anonymous'}`
+        };
+      }
     }
 
-    if (!currentUser || !loggedInUserForPost) {
-      toast({ title: "Error", description: "You must be logged in to create or edit a post.", variant: "destructive" });
+    if (!currentUserAuth || !loggedInUserForPost) {
+      toast({ title: "Authentication Error", description: "You must be logged in to create or edit a post.", variant: "destructive" });
       setIsLoading(false);
       return;
     }
@@ -167,7 +168,7 @@ export default function CreatePostPage() {
     let finalImageUrl: string | undefined = imageToSaveUrl || undefined;
 
     if (selectedFile) {
-      const storageRefPath = `posts/${currentUser.uid}/${Date.now()}_${selectedFile.name}`;
+      const storageRefPath = `posts/${currentUserAuth.uid}/${Date.now()}_${selectedFile.name}`;
       const fileStorageRef = ref(storage, storageRefPath);
       const uploadTask = uploadBytesResumable(fileStorageRef, selectedFile);
       try {
@@ -175,39 +176,45 @@ export default function CreatePostPage() {
         finalImageUrl = await getDownloadURL(uploadTask.snapshot.ref);
       } catch (error: any) {
         console.error("Firebase Storage upload error:", error);
-        toast({ title: "Upload Failed", description: `Could not upload image: ${error.message}. Post will be saved without image.`, variant: "destructive" });
-        // Don't return, allow saving post without image if upload fails
+        toast({ title: "Upload Failed", description: `Could not upload image: ${error.message}. Post will be saved without image. Please check Storage Security Rules.`, variant: "destructive", duration: 7000 });
       }
     }
     
     const db = getFirestore(app, "poker");
+    console.log("CreatePostPage: Firestore instance for 'poker' DB:", db?._databaseId?.projectId, db?._databaseId?.database);
+
 
     try {
       if (isEditMode && editPostId) {
-        // Update existing post in Firestore
         const postDocRef = doc(db, "posts", editPostId);
         await updateDoc(postDocRef, {
           content: data.postContent,
-          image: finalImageUrl, // If finalImageUrl is undefined, it keeps the old one or sets to undefined
-          // userId, username, user object, createdAt should generally not be updated here
+          image: finalImageUrl === undefined ? imageToSaveUrl : finalImageUrl, // Preserve existing if new upload failed or wasn't done
         });
         toast({ title: "Post Updated!", description: "Your changes have been saved to Firestore." });
 
-        // Also update localStorage for now
+        // Also update localStorage (temporary)
         const storedPostsString = localStorage.getItem(USER_POSTS_STORAGE_KEY);
         let posts: Post[] = storedPostsString ? JSON.parse(storedPostsString) : [];
-        posts = posts.map(p => p.id === editPostId ? { ...p, content: data.postContent, image: finalImageUrl || p.image, timestamp: new Date().toLocaleString() } : p);
+        posts = posts.map(p => 
+          p.id === editPostId ? { 
+            ...p, 
+            content: data.postContent, 
+            image: finalImageUrl === undefined ? p.image : finalImageUrl, 
+            timestamp: new Date().toLocaleString() // Using client-side string for localStorage mock
+          } : p
+        );
         localStorage.setItem(USER_POSTS_STORAGE_KEY, JSON.stringify(posts));
 
       } else {
-        // Create new post in Firestore
         const postDataForFirestore = {
-          userId: currentUser.uid,
-          user: loggedInUserForPost, // User object for display convenience
+          userId: currentUserAuth.uid,
+          user: loggedInUserForPost,
           content: data.postContent,
           image: finalImageUrl || null,
           imageAiHint: selectedFile ? "user uploaded image" : undefined,
           likes: 0,
+          likedByCurrentUser: false,
           comments: 0,
           commentTexts: [],
           shares: 0,
@@ -216,22 +223,23 @@ export default function CreatePostPage() {
         const docRef = await addDoc(collection(db, "posts"), postDataForFirestore);
         toast({ title: "Post Created!", description: "Your thoughts have been shared on Firestore." });
         
-        // Also save to localStorage for now (with client-side timestamp)
+        // Also save to localStorage (temporary)
         const storedPostsString = localStorage.getItem(USER_POSTS_STORAGE_KEY);
         let posts: Post[] = storedPostsString ? JSON.parse(storedPostsString) : [];
         const newPostForLocalStorage: Post = {
-            id: docRef.id, // Use Firestore ID
-            userId: currentUser.uid,
+            id: docRef.id, 
+            userId: currentUserAuth.uid,
             user: loggedInUserForPost,
             content: data.postContent,
             image: finalImageUrl,
             imageAiHint: selectedFile ? "user uploaded image" : undefined,
             likes: 0,
+            likedByCurrentUser: false,
             comments: 0,
             commentTexts: [],
             shares: 0,
-            timestamp: new Date().toLocaleString(), // Client-side timestamp for localStorage
-            createdAt: new Date(), // Client-side timestamp for localStorage
+            timestamp: new Date().toLocaleString(), // Client-side string for localStorage mock
+            createdAt: new Date(), 
         };
         posts = [newPostForLocalStorage, ...posts];
         localStorage.setItem(USER_POSTS_STORAGE_KEY, JSON.stringify(posts));
@@ -246,7 +254,11 @@ export default function CreatePostPage() {
 
     } catch (error: any) {
       console.error("Error saving post to Firestore:", error);
-      toast({ title: "Firestore Error", description: `Could not save post: ${error.message}`, variant: "destructive" });
+      let firestoreErrorMessage = `Could not save post: ${error.message}`;
+      if (error.message && (error.message.includes("firestore") || error.message.includes("Firestore") || error.message.includes("RPC") || (typeof error.code === 'string' && error.code.startsWith("permission-denied")) || error.code === 'unavailable' || error.code === 'unimplemented' || error.code === 'internal')) {
+        firestoreErrorMessage = `Failed to save post to Firestore. Please ensure Firestore database ('poker') is correctly created, API enabled, and security rules are published in Firebase Console. Details: ${error.message}`;
+      }
+      toast({ title: "Firestore Error", description: firestoreErrorMessage, variant: "destructive", duration: 9000 });
     } finally {
       setIsLoading(false);
     }
