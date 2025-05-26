@@ -10,8 +10,8 @@ import type { Post } from "@/types/post";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { generatePokerTips, type GeneratePokerTipsInput, type GeneratePokerTipsOutput } from "@/ai/flows/generate-poker-tips";
 import { useToast } from "@/hooks/use-toast";
-import { getFirestore, collection, query, orderBy, getDocs, Timestamp } from "firebase/firestore";
-import { app } from "@/lib/firebase"; // Import the initialized Firebase app
+import { getFirestore, collection, query, orderBy, getDocs, Timestamp, doc, updateDoc, increment } from "firebase/firestore";
+import { app } from "@/lib/firebase"; 
 
 export default function HomePage() {
   const [aiTips, setAiTips] = useState<string[]>([]);
@@ -56,13 +56,13 @@ export default function HomePage() {
       const postsData: Post[] = [];
       querySnapshot.forEach((doc) => {
         const data = doc.data();
-        const postUser = data.user || { name: "Unknown User", avatar: "", handle: "@unknown" };
+        const postUser = data.user || { name: "Unknown User", avatar: `https://placehold.co/100x100.png?text=U`, handle: "@unknown" };
         postsData.push({
           id: doc.id,
           userId: data.userId,
           user: {
-            name: postUser.name || postUser.fullName || "Unknown User",
-            avatar: postUser.avatar || `https://placehold.co/100x100.png?text=${(postUser.name || postUser.fullName || "U").substring(0,1)}`,
+            name: postUser.name || "Unknown User",
+            avatar: postUser.avatar || `https://placehold.co/100x100.png?text=${(postUser.name || "U").substring(0,1)}`,
             handle: postUser.handle || `@${postUser.username || 'unknown'}`,
           },
           content: data.content,
@@ -73,8 +73,8 @@ export default function HomePage() {
           comments: data.comments || 0,
           commentTexts: data.commentTexts || [],
           shares: data.shares || 0,
-          createdAt: data.createdAt, // Keep as Firestore Timestamp or convert as needed by PostCard
-          timestamp: data.createdAt instanceof Timestamp ? data.createdAt.toDate().toLocaleString() : (data.createdAt?.toDate?.().toLocaleString() || new Date(data.createdAt?.seconds * 1000 || Date.now()).toLocaleString()),
+          createdAt: data.createdAt, 
+          timestamp: data.createdAt instanceof Timestamp ? data.createdAt.toDate().toLocaleString() : (data.createdAt?.seconds ? new Date(data.createdAt.seconds * 1000).toLocaleString() : new Date().toLocaleString()),
         });
       });
       setFeedPosts(postsData);
@@ -102,15 +102,57 @@ export default function HomePage() {
   useEffect(() => {
     fetchPokerTips();
     fetchFeedPosts();
-  }, []); // Empty dependency array to run once on mount
+  }, []);
 
-  // Placeholder like/comment handlers for Home Feed as PostCard expects them,
-  // but Firestore interaction for these will be a separate step.
-  const handleLikePost = (postId: string) => {
-    toast({
-      title: "Like Action (Simulated)",
-      description: `Firestore like for post ${postId} on home feed coming soon!`,
-    });
+  const handleLikePost = async (postId: string) => {
+    let postContentForToast = "";
+    let newLikedByCurrentUser = false;
+
+    setFeedPosts(prevPosts =>
+      prevPosts.map(p => {
+        if (p.id === postId) {
+          postContentForToast = p.content.substring(0, 20) + "...";
+          newLikedByCurrentUser = !p.likedByCurrentUser;
+          return { 
+            ...p, 
+            likes: p.likes + (newLikedByCurrentUser ? 1 : -1), 
+            likedByCurrentUser: newLikedByCurrentUser 
+          };
+        }
+        return p;
+      })
+    );
+
+    try {
+      const db = getFirestore(app, "poker");
+      const postRef = doc(db, "posts", postId);
+      await updateDoc(postRef, {
+        likes: increment(newLikedByCurrentUser ? 1 : -1)
+      });
+      toast({
+        title: newLikedByCurrentUser ? "Post Liked!" : "Like Removed",
+        description: `You reacted to "${postContentForToast}". (Firestore updated)`,
+      });
+    } catch (error) {
+      console.error("Error updating likes in Firestore:", error);
+      toast({
+        title: "Error Liking Post",
+        description: "Could not save your like to Firestore.",
+        variant: "destructive",
+      });
+      setFeedPosts(prevPosts =>
+        prevPosts.map(p => {
+          if (p.id === postId) {
+            return { 
+              ...p, 
+              likes: p.likes + (newLikedByCurrentUser ? -1 : 1), 
+              likedByCurrentUser: !newLikedByCurrentUser 
+            };
+          }
+          return p;
+        })
+      );
+    }
   };
 
   const handleCommentOnPost = (postId: string, commentText: string) => {
@@ -123,7 +165,6 @@ export default function HomePage() {
 
   return (
     <div className="container mx-auto max-w-2xl">
-      {/* AI Poker Tips Section */}
       <Card className="mb-8 shadow-lg rounded-xl">
         <CardHeader>
           <div className="flex justify-between items-center">
@@ -165,7 +206,6 @@ export default function HomePage() {
         </CardContent>
       </Card>
 
-      {/* Home Feed Posts Section */}
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-3xl font-bold">Home Feed</h1>
         <Link href="/create-post" passHref>
