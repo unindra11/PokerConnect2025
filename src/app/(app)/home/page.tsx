@@ -10,52 +10,21 @@ import type { Post } from "@/types/post";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { generatePokerTips, type GeneratePokerTipsInput, type GeneratePokerTipsOutput } from "@/ai/flows/generate-poker-tips";
 import { useToast } from "@/hooks/use-toast";
-
-const initialPostsData: Post[] = [
-  {
-    id: "1",
-    user: { name: "PokerPro123", avatar: "https://placehold.co/100x100.png?a=1", handle: "@pokerpro" },
-    content: "Just won a huge tournament! Feeling on top of the world. #poker #win",
-    image: "https://placehold.co/600x400.png?t=1",
-    imageAiHint: "poker chips celebration",
-    likes: 120,
-    comments: 15,
-    shares: 5,
-    timestamp: "2h ago",
-  },
-  {
-    id: "2",
-    user: { name: "CardSharkJane", avatar: "https://placehold.co/100x100.png?a=2", handle: "@janeplays" },
-    content: "Anyone else find pocket aces tricky to play post-flop? Share your strategies! 🤔",
-    likes: 75,
-    comments: 32,
-    shares: 2,
-    timestamp: "5h ago",
-  },
-    {
-    id: "3",
-    user: { name: "RiverRatRon", avatar: "https://placehold.co/100x100.png?a=3", handle: "@ronriver" },
-    content: "Bad beat story of the day... got rivered again! 😭 Still love the game though.",
-    image: "https://placehold.co/600x400.png?t=2",
-    imageAiHint: "sad poker player",
-    likes: 40,
-    comments: 22,
-    shares: 1,
-    timestamp: "8h ago",
-  },
-];
+import { getFirestore, collection, query, orderBy, getDocs, Timestamp } from "firebase/firestore";
+import { app } from "@/lib/firebase"; // Import the initialized Firebase app
 
 export default function HomePage() {
   const [aiTips, setAiTips] = useState<string[]>([]);
   const [isLoadingTips, setIsLoadingTips] = useState(true);
   const [tipsError, setTipsError] = useState<string | null>(null);
   const { toast } = useToast();
+  const [feedPosts, setFeedPosts] = useState<Post[]>([]);
+  const [isLoadingPosts, setIsLoadingPosts] = useState(true);
 
   const fetchPokerTips = async () => {
     setIsLoadingTips(true);
     setTipsError(null);
     try {
-      // Mock inputs for the AI tips generation
       const input: GeneratePokerTipsInput = {
         recentActivity: "Playing low-stakes Texas Hold'em tournaments online, focusing on tight-aggressive play.",
         skillLevel: "intermediate",
@@ -76,9 +45,81 @@ export default function HomePage() {
     }
   };
 
+  const fetchFeedPosts = async () => {
+    setIsLoadingPosts(true);
+    try {
+      const db = getFirestore(app, "poker");
+      const postsCollectionRef = collection(db, "posts");
+      const q = query(postsCollectionRef, orderBy("createdAt", "desc"));
+      const querySnapshot = await getDocs(q);
+      
+      const postsData: Post[] = [];
+      querySnapshot.forEach((doc) => {
+        const data = doc.data();
+        const postUser = data.user || { name: "Unknown User", avatar: "", handle: "@unknown" };
+        postsData.push({
+          id: doc.id,
+          userId: data.userId,
+          user: {
+            name: postUser.name || postUser.fullName || "Unknown User",
+            avatar: postUser.avatar || `https://placehold.co/100x100.png?text=${(postUser.name || postUser.fullName || "U").substring(0,1)}`,
+            handle: postUser.handle || `@${postUser.username || 'unknown'}`,
+          },
+          content: data.content,
+          image: data.image,
+          imageAiHint: data.imageAiHint,
+          likes: data.likes || 0,
+          likedByCurrentUser: data.likedByCurrentUser || false, 
+          comments: data.comments || 0,
+          commentTexts: data.commentTexts || [],
+          shares: data.shares || 0,
+          createdAt: data.createdAt, // Keep as Firestore Timestamp or convert as needed by PostCard
+          timestamp: data.createdAt instanceof Timestamp ? data.createdAt.toDate().toLocaleString() : (data.createdAt?.toDate?.().toLocaleString() || new Date(data.createdAt?.seconds * 1000 || Date.now()).toLocaleString()),
+        });
+      });
+      setFeedPosts(postsData);
+       if (postsData.length === 0) {
+          toast({
+            title: "No Posts Yet",
+            description: "The home feed is quiet. Create a post!",
+          });
+        }
+    } catch (error) {
+      console.error("Error fetching posts from Firestore for Home Feed:", error);
+      toast({
+        title: "Error Loading Feed Posts",
+        description: "Could not retrieve posts from Firestore. Please ensure Firestore is set up and rules allow reads.",
+        variant: "destructive",
+        duration: 7000,
+      });
+      setFeedPosts([]);
+    } finally {
+      setIsLoadingPosts(false);
+    }
+  };
+
+
   useEffect(() => {
     fetchPokerTips();
-  }, []);
+    fetchFeedPosts();
+  }, []); // Empty dependency array to run once on mount
+
+  // Placeholder like/comment handlers for Home Feed as PostCard expects them,
+  // but Firestore interaction for these will be a separate step.
+  const handleLikePost = (postId: string) => {
+    toast({
+      title: "Like Action (Simulated)",
+      description: `Firestore like for post ${postId} on home feed coming soon!`,
+    });
+  };
+
+  const handleCommentOnPost = (postId: string, commentText: string) => {
+     toast({
+      title: "Comment Action (Simulated)",
+      description: `Firestore comment '${commentText}' for post ${postId} on home feed coming soon!`,
+    });
+  };
+
 
   return (
     <div className="container mx-auto max-w-2xl">
@@ -133,10 +174,38 @@ export default function HomePage() {
           </Button>
         </Link>
       </div>
+        
+      {isLoadingPosts && (
+        <div className="text-center py-10">
+          <Loader2 className="h-12 w-12 animate-spin text-primary mx-auto" />
+          <p className="mt-4">Loading feed posts from Firestore...</p>
+        </div>
+      )}
 
       <div className="space-y-6">
-        {initialPostsData.map((post) => (
-          <PostCard key={post.id} post={post} />
+        {!isLoadingPosts && feedPosts.length === 0 && (
+          <Card className="text-center p-8 shadow-lg rounded-xl">
+            <CardHeader>
+              <CardTitle className="text-xl mb-2">Feed is Empty</CardTitle>
+              <CardDescription className="mb-4 text-muted-foreground">
+                No posts to show yet. Be the first to share something or check back later!
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Link href="/create-post" passHref>
+                <Button>Create a Post</Button>
+              </Link>
+            </CardContent>
+          </Card>
+        )}
+        {feedPosts.map((post, index) => (
+          <PostCard 
+            key={post.id} 
+            post={post} 
+            onLikePost={handleLikePost}
+            onCommentPost={handleCommentOnPost}
+            isLCPItem={index === 0}
+          />
         ))}
       </div>
     </div>
