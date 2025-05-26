@@ -1,7 +1,7 @@
 
 // src/lib/firebase.ts
 import { initializeApp, getApp, getApps, type FirebaseOptions, type FirebaseApp } from "firebase/app";
-import { getAuth, browserLocalPersistence, initializeAuth, type Auth } from "firebase/auth"; // Added Auth type
+import { getAuth, browserLocalPersistence, initializeAuth, type Auth } from "firebase/auth";
 import { getFirestore, initializeFirestore, type Firestore } from "firebase/firestore";
 import { getStorage, type FirebaseStorage } from "firebase/storage";
 import { initializeAppCheck, ReCaptchaV3Provider, type AppCheck } from "firebase/app-check";
@@ -28,32 +28,27 @@ if (!firebaseConfig.apiKey || !firebaseConfig.projectId) {
   console.error(
     "Firebase.ts: Critical Firebase API Key or Project ID is missing in environment variables. Firebase will not initialize correctly. Check your .env file."
   );
-  app = {} as FirebaseApp; // Assign dummy app
+  // Assign dummy objects to prevent runtime errors if used before proper init
+  app = {} as FirebaseApp;
   authInstance = {} as Auth;
   firestoreInstance = {} as Firestore;
   storageInstance = {} as FirebaseStorage;
   appCheckInstance = undefined;
 } else {
-  if (!getApps().length) {
+  if (!getApps().find(existingApp => existingApp.name === APP_NAME)) {
     try {
       app = initializeApp(firebaseConfig, APP_NAME);
       console.log(`Firebase.ts: Initialized new Firebase app: ${APP_NAME}`);
     } catch (initError) {
       console.error(`Firebase.ts: Critical error initializing Firebase app '${APP_NAME}':`, initError);
-      app = {} as FirebaseApp; // Assign dummy app on error
+      app = {} as FirebaseApp;
     }
   } else {
-    try {
-      app = getApp(APP_NAME);
-      console.log(`Firebase.ts: Retrieved existing Firebase app: ${APP_NAME}`);
-    } catch (e) {
-      console.warn(`Firebase.ts: Could not get app named '${APP_NAME}', trying default app if it exists or initializing a new default one.`);
-      app = getApps().length ? getApp() : initializeApp(firebaseConfig);
-      console.log(`Firebase.ts: Using default Firebase app: ${app.name}`);
-    }
+    app = getApp(APP_NAME);
+    console.log(`Firebase.ts: Retrieved existing Firebase app: ${APP_NAME}`);
   }
 
-  if (app && app.name) {
+  if (app && app.name) { // Ensure app was successfully initialized or retrieved
     try {
       authInstance = initializeAuth(app, { persistence: browserLocalPersistence });
       console.log(`Firebase.ts: Auth instance initialized from app: ${app.name}`);
@@ -83,7 +78,7 @@ if (!firebaseConfig.apiKey || !firebaseConfig.projectId) {
       try {
         const reCaptchaSiteKey = process.env.NEXT_PUBLIC_RECAPTCHA_SITE_KEY;
         if (reCaptchaSiteKey) {
-          console.log(`Firebase.ts: Attempting to initialize App Check with reCAPTCHA site key: ${reCaptchaSiteKey ? 'found' : 'NOT FOUND'}`);
+          console.log(`Firebase.ts: Attempting to initialize App Check with reCAPTCHA site key: found`);
           appCheckInstance = initializeAppCheck(app, {
             provider: new ReCaptchaV3Provider(reCaptchaSiteKey),
             isTokenAutoRefreshEnabled: true
@@ -99,7 +94,6 @@ if (!firebaseConfig.apiKey || !firebaseConfig.projectId) {
     } else {
       console.log("Firebase.ts: App Check initialization skipped (server-side or window not defined).");
     }
-
   } else {
     console.error("Firebase.ts: Firebase app object is not valid. Firebase services (Auth, Firestore, Storage, App Check) cannot be initialized.");
     authInstance = {} as Auth;

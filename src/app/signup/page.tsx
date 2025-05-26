@@ -36,6 +36,13 @@ export default function SignupPage() {
   const autocompleteRef = useRef<google.maps.places.Autocomplete | null>(null);
   const locationInputRef = useRef<HTMLInputElement | null>(null);
 
+  useEffect(() => {
+    console.log("SignupPage: Firestore object on mount:", firestore);
+    if (!googleMapsApiKey) {
+      console.warn("SignupPage: NEXT_PUBLIC_GOOGLE_MAPS_API_KEY is not set. Location autocomplete will be disabled.");
+    }
+  }, []);
+
   const onLoad = (autocompleteInstance: google.maps.places.Autocomplete) => {
     autocompleteRef.current = autocompleteInstance;
   };
@@ -89,26 +96,27 @@ export default function SignupPage() {
       const userProfile = {
         uid: user.uid,
         fullName: fullName,
-        email: user.email, // Use email from auth response for consistency
+        email: user.email,
         username: username,
         location: location,
         locationCoords: selectedLocationCoords || null,
         bio: "",
         avatar: "", 
         coverImage: "", 
-        createdAt: serverTimestamp(), 
-        testField: "signupWriteAttempt_" + new Date().toISOString(),
+        createdAt: serverTimestamp(),
+        testField: "signupWriteAttempt_" + new Date().toISOString(), // Added for debugging
       };
       
       console.log("SignupPage: Preparing to write to Firestore. UserProfile object:", userProfile);
       console.log("SignupPage: Firestore instance being used for setDoc:", firestore);
+      console.log("SignupPage: Firestore database ID:", firestore.app.options.projectId, firestore.databaseId);
 
 
       if (!firestore || typeof firestore.app === 'undefined') { 
         console.error("SignupPage: Firestore instance is undefined or not properly initialized! Check firebase.ts and Firebase project setup.");
         toast({
           title: "Internal Configuration Error",
-          description: "Database service is not available. Please check Firebase setup (Firestore database created, API enabled, rules published) or contact support.",
+          description: "Database service is not available. Please ensure Firebase is correctly initialized with the 'poker' databaseId or contact support.",
           variant: "destructive",
           duration: 15000,
         });
@@ -121,7 +129,21 @@ export default function SignupPage() {
       await setDoc(userDocRef, userProfile);
       console.log("SignupPage: User profile successfully written to Firestore for UID:", user.uid);
       
-
+      // Save basic user details to localStorage for immediate use in AppLayout
+      const loggedInUserDetailsForStorage = {
+        uid: user.uid,
+        email: user.email,
+        displayName: fullName,
+        username: username,
+        fullName: fullName,
+        bio: userProfile.bio,
+        avatar: userProfile.avatar,
+        coverImage: userProfile.coverImage,
+        location: userProfile.location,
+        locationCoords: userProfile.locationCoords,
+      };
+      localStorage.setItem("loggedInUser", JSON.stringify(loggedInUserDetailsForStorage));
+      
       if (selectedLocationCoords) {
         const initials = fullName.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase() || username.substring(0,1).toUpperCase() || 'P';
         const mapUser: MockUserPin = {
@@ -164,23 +186,19 @@ export default function SignupPage() {
         errorMessage = "Password is too weak. Please choose a stronger password (min. 6 characters).";
       } else if (error.code === 'auth/invalid-email') {
         errorMessage = "The email address is not valid."
+      } else if (error.message && (error.message.includes("firestore") || error.message.includes("Firestore"))) {
+        // More specific error for Firestore write issues
+        errorMessage = `Failed to save profile to database. Please ensure your Firebase project (Firestore database created & in 'poker' if custom, API enabled, and security rules published) and try again. Details: ${error.message}`;
+        console.error("SignupPage: Firestore setDoc error:", error.name, error.code, error.message, error);
       } else {
-        // This will catch Firestore write errors or other unexpected issues
-        console.error("SIGNUP PAGE FIRESTORE OR OTHER SUBMISSION ERROR:", error.name, error.code, error.message, error);
-        errorMessage = `Failed to save profile data. Please ensure your Firebase project (Firestore database created, API enabled, and security rules published) and try again. Details: ${error.message || 'Unknown error'}`;
+        console.error("SIGNUP PAGE UNHANDLED ERROR:", error.name, error.code, error.message, error);
+        errorMessage = `An unexpected error occurred. Details: ${error.message || 'Unknown error'}`;
       }
       toast({ title: "Signup Error", description: errorMessage, variant: "destructive", duration: 15000 });
     } finally {
       setIsLoading(false);
     }
   };
-
-  useEffect(() => {
-    if (!googleMapsApiKey) {
-      console.warn("SignupPage: NEXT_PUBLIC_GOOGLE_MAPS_API_KEY is not set. Location autocomplete will be disabled.");
-    }
-    console.log("SignupPage: Firestore object on mount:", firestore);
-  }, []);
 
   return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-br from-background to-muted/50 p-4">
@@ -257,6 +275,7 @@ export default function SignupPage() {
               {/* 
                 NOTE: google.maps.places.Autocomplete is being deprecated for new customers as of March 1st, 2025.
                 The recommended alternative is google.maps.places.PlaceAutocompleteElement.
+                This is a library limitation if @react-google-maps/api hasn't updated yet.
               */}
               {googleMapsApiKey ? (
                  <LoadScript
