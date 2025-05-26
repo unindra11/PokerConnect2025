@@ -27,12 +27,12 @@ export default function CommunityWallPage() {
         const querySnapshot = await getDocs(q);
         
         const posts: Post[] = [];
-        querySnapshot.forEach((doc) => {
-          const data = doc.data();
+        querySnapshot.forEach((docSnap) => {
+          const data = docSnap.data();
           const postUser = data.user || { name: "Unknown User", avatar: `https://placehold.co/100x100.png?text=U`, handle: "@unknown" };
           
           posts.push({
-            id: doc.id,
+            id: docSnap.id,
             userId: data.userId,
             user: {
               name: postUser.name || "Unknown User",
@@ -77,18 +77,27 @@ export default function CommunityWallPage() {
 
   const handleLikePost = async (postId: string) => {
     let postContentForToast = "";
-    let newLikedByCurrentUser = false;
+    let newLikedByCurrentUserOptimistic = false;
 
-    // Optimistic UI update
     setCommunityPosts(prevPosts =>
       prevPosts.map(p => {
         if (p.id === postId) {
           postContentForToast = p.content.substring(0, 20) + "...";
-          newLikedByCurrentUser = !p.likedByCurrentUser;
+          newLikedByCurrentUserOptimistic = !p.likedByCurrentUser;
+
+          let newLikesCount = p.likes;
+          if (newLikedByCurrentUserOptimistic) { // User is "liking"
+            newLikesCount = p.likes + 1;
+          } else { // User is "unliking"
+            newLikesCount = p.likes > 0 ? p.likes - 1 : 0; // Prevent going below 0 in UI
+          }
+           // If likes become 0, ensure likedByCurrentUser is false
+          const finalLikedByCurrentUser = newLikesCount === 0 ? false : newLikedByCurrentUserOptimistic;
+
           return { 
             ...p, 
-            likes: p.likes + (newLikedByCurrentUser ? 1 : -1), 
-            likedByCurrentUser: newLikedByCurrentUser 
+            likes: newLikesCount, 
+            likedByCurrentUser: finalLikedByCurrentUser
           };
         }
         return p;
@@ -98,11 +107,13 @@ export default function CommunityWallPage() {
     try {
       const db = getFirestore(app, "poker");
       const postRef = doc(db, "posts", postId);
+      const incrementValue = newLikedByCurrentUserOptimistic ? 1 : -1;
+
       await updateDoc(postRef, {
-        likes: increment(newLikedByCurrentUser ? 1 : -1)
+        likes: increment(incrementValue)
       });
       toast({
-        title: newLikedByCurrentUser ? "Post Liked!" : "Like Removed",
+        title: newLikedByCurrentUserOptimistic ? "Post Liked!" : "Like Removed",
         description: `You reacted to "${postContentForToast}". (Firestore updated)`,
       });
     } catch (error) {
@@ -116,10 +127,18 @@ export default function CommunityWallPage() {
       setCommunityPosts(prevPosts =>
         prevPosts.map(p => {
           if (p.id === postId) {
+            const originalLikedByCurrentUser = !newLikedByCurrentUserOptimistic;
+            let revertedLikes = p.likes;
+             if (newLikedByCurrentUserOptimistic) { // Was a "like" attempt that failed
+                revertedLikes = p.likes -1 < 0 ? 0 : p.likes -1;
+            } else { // Was an "unlike" attempt that failed
+                revertedLikes = p.likes +1;
+            }
+            const finalRevertedLikedByCurrentUser = revertedLikes === 0 ? false : originalLikedByCurrentUser;
             return { 
               ...p, 
-              likes: p.likes + (newLikedByCurrentUser ? -1 : 1), // Revert the change
-              likedByCurrentUser: !newLikedByCurrentUser // Revert the change
+              likes: revertedLikes, 
+              likedByCurrentUser: finalRevertedLikedByCurrentUser 
             };
           }
           return p;
