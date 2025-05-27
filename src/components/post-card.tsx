@@ -38,6 +38,8 @@ export function PostCard({
   const { toast } = useToast();
   const router = useRouter();
 
+  console.log(`PostCard rendering for post ID ${post.id}: likes=${post.likes}, likedByCurrentUser=${post.likedByCurrentUser}`);
+
   const handleShare = () => {
     toast({
       title: "Post Shared!",
@@ -50,8 +52,8 @@ export function PostCard({
       onLikePost(post.id);
     } else {
       toast({
-        title: "Action Simulated",
-        description: `Like action for "${post.content.substring(0,20)}...".`,
+        title: "Like Action (Simulated)",
+        description: `Like action for "${post.content.substring(0,20)}...". Firestore interaction needed.`,
       });
     }
   };
@@ -67,7 +69,7 @@ export function PostCard({
       } else {
          toast({
           title: "Comment Simulated",
-          description: "Your comment would be added here.",
+          description: `Comment: "${commentText}" for post "${post.content.substring(0,20)}...". Firestore interaction needed.`,
         });
       }
     } else {
@@ -80,19 +82,23 @@ export function PostCard({
   };
 
   const handleEdit = () => {
-    const queryParams = new URLSearchParams({ editPostId: post.id });
-    // Content and image will be fetched from Firestore on the edit page
+    const queryParams = new URLSearchParams({ 
+      editPostId: post.id,
+     });
     router.push(`/create-post?${queryParams.toString()}`);
   };
 
   const handleDelete = () => {
-    if (onDeletePost) {
-      onDeletePost(post.id);
-    } else {
-      toast({
-        title: "Delete Simulated",
-        description: `Post "${post.content.substring(0,20)}..." would be removed.`,
-      });
+    const confirmDelete = window.confirm("Are you sure you want to delete this post? This action cannot be undone.");
+    if (confirmDelete) {
+      if (onDeletePost) {
+        onDeletePost(post.id);
+      } else {
+        toast({
+          title: "Delete Simulated",
+          description: `Post "${post.content.substring(0,20)}..." would be removed. Firestore interaction needed.`,
+        });
+      }
     }
   };
 
@@ -103,7 +109,7 @@ export function PostCard({
       <CardHeader className="flex flex-row items-start space-x-4 p-4">
         <Avatar>
           <AvatarImage src={post.user.avatar} alt={post.user.name} data-ai-hint="profile picture" />
-          <AvatarFallback>{post.user.name.substring(0, 1)}</AvatarFallback>
+          <AvatarFallback>{post.user.name?.substring(0, 1)?.toUpperCase() || 'P'}</AvatarFallback>
         </Avatar>
         <div className="flex-1">
           <div className="flex items-center gap-2">
@@ -135,7 +141,7 @@ export function PostCard({
         )}
       </CardHeader>
       <CardContent className="px-4 pb-2">
-        <p className="text-foreground mb-3">{post.content}</p>
+        <p className="text-foreground mb-3 whitespace-pre-wrap">{post.content}</p>
         {post.image && (
           <div className="rounded-lg overflow-hidden border relative aspect-[3/2]">
             <Image
@@ -178,12 +184,15 @@ export function PostCard({
             )}
           </div>
         )}
-         {(!post.commentTexts || post.commentTexts.length === 0) && post.comments > 0 && (
+         {(!post.commentTexts || post.commentTexts.length === 0) && (post.comments || 0) > 0 && (
             <div className="w-full px-4 pt-2 mt-2 border-t border-dashed">
-                 <p className="text-xs text-muted-foreground italic">This post has {post.comments} {post.comments === 1 ? "comment" : "comments"}, but text is not available.</p>
+                 <p className="text-xs text-muted-foreground italic">This post has {post.comments} {post.comments === 1 ? "comment" : "comments"}, but text is not available to display.</p>
             </div>
         )}
       </CardFooter>
     </Card>
   );
 }
+
+
+    
