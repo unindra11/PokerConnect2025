@@ -24,10 +24,11 @@ import {
   where,
   writeBatch,
   serverTimestamp,
-  deleteDoc
+  deleteDoc,
+  addDoc // Added for creating like documents
 } from "firebase/firestore";
-import { app, auth } from "@/lib/firebase"; 
-import type { User as FirebaseUser } from "firebase/auth";
+import { app } from "@/lib/firebase"; 
+import { getAuth, type User as FirebaseUser } from "firebase/auth";
 
 export default function HomePage() {
   const [aiTips, setAiTips] = useState<string[]>([]);
@@ -37,13 +38,14 @@ export default function HomePage() {
   const [feedPosts, setFeedPosts] = useState<Post[]>([]);
   const [isLoadingPosts, setIsLoadingPosts] = useState(true);
   const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
+  const auth = getAuth(app);
 
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged(user => {
       setCurrentUser(user);
     });
     return () => unsubscribe();
-  }, []);
+  }, [auth]);
 
   const fetchPokerTips = async () => {
     setIsLoadingTips(true);
@@ -71,8 +73,8 @@ export default function HomePage() {
 
   const fetchFeedPosts = async () => {
     setIsLoadingPosts(true);
+    const db = getFirestore(app, "poker");
     try {
-      const db = getFirestore(app, "poker");
       const postsCollectionRef = collection(db, "posts");
       const q = query(postsCollectionRef, orderBy("createdAt", "desc"));
       const querySnapshot = await getDocs(q);
@@ -84,6 +86,7 @@ export default function HomePage() {
         let likedByCurrentUser = false;
         if (currentUser) {
           const likesCollectionRef = collection(db, "likes");
+          // Use a composite key for like document ID if possible, or query.
           const likeQuery = query(likesCollectionRef, where("postId", "==", docSnap.id), where("userId", "==", currentUser.uid));
           const likeSnapshot = await getDocs(likeQuery);
           likedByCurrentUser = !likeSnapshot.empty;
@@ -111,19 +114,23 @@ export default function HomePage() {
       });
       const postsData = await Promise.all(postsDataPromises);
       setFeedPosts(postsData);
-       if (postsData.length === 0) {
+       if (postsData.length === 0 && !isLoadingPosts) { 
           toast({
             title: "No Posts Yet",
             description: "The home feed is quiet. Create a post!",
           });
         }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error fetching posts from Firestore for Home Feed:", error);
+      let firestoreErrorMessage = "Could not retrieve posts from Firestore. Please ensure Firestore is set up and rules allow reads.";
+      if (error.message && (error.message.includes("firestore") || error.message.includes("Firestore") || error.message.includes("RPC") || (typeof error.code === 'string' && error.code.startsWith("permission-denied")) || error.code === 'unavailable' || error.code === 'unimplemented' || error.code === 'internal')) {
+        firestoreErrorMessage = `Failed to fetch posts. Ensure Firestore is correctly set up (DB 'poker' exists, API enabled, and security rules published for 'posts' collection). Details: ${error.message}`;
+      }
       toast({
         title: "Error Loading Feed Posts",
-        description: "Could not retrieve posts from Firestore. Please ensure Firestore is set up and rules allow reads.",
+        description: firestoreErrorMessage,
         variant: "destructive",
-        duration: 7000,
+        duration: 10000,
       });
       setFeedPosts([]);
     } finally {
@@ -134,13 +141,13 @@ export default function HomePage() {
 
   useEffect(() => {
     fetchPokerTips();
-  }, []); // Fetch tips once on mount
+  }, []); 
 
   useEffect(() => {
-    if (currentUser !== undefined) { // Fetch posts once currentUser state is determined (null or user object)
+    if (currentUser !== undefined) { 
         fetchFeedPosts();
     }
-  }, [currentUser]); // Re-fetch posts if currentUser changes (e.g., login/logout)
+  }, [currentUser]); 
 
 
   const handleLikePost = async (postId: string) => {
@@ -150,59 +157,66 @@ export default function HomePage() {
     }
 
     const db = getFirestore(app, "poker");
-    const postRef = doc(db, "posts", postId);
-    const likesCollectionRef = collection(db, "likes");
-    const likeQuery = query(likesCollectionRef, where("postId", "==", postId), where("userId", "==", currentUser.uid));
+    const originalPosts = feedPosts.map(p => ({...p}));
+    
+    console.log(`Liking post ${postId}. Current state:`, feedPosts.find(p => p.id === postId));
 
-    const originalPosts = feedPosts.map(p => ({...p})); // Deep copy for potential revert
-    let isCurrentlyLikedOptimistic = false;
-
-    // Optimistic UI update
-    setFeedPosts(prevPosts =>
-      prevPosts.map(p => {
+    setFeedPosts(prevPosts => {
+      const updatedPosts = prevPosts.map(p => {
         if (p.id === postId) {
-          isCurrentlyLikedOptimistic = !!p.likedByCurrentUser;
-          let newLikesCount = p.likes;
-          if (!isCurrentlyLikedOptimistic) { // User is "liking"
+          const isCurrentlyLiked = !!p.likedByCurrentUser;
+          const newLikedByCurrentUser = !isCurrentlyLiked;
+          
+          console.log(`Post ${postId} - Before optimistic update: p.likes = ${p.likes}, p.likedByCurrentUser = ${p.likedByCurrentUser}`);
+          
+          let newLikesCount = p.likes || 0;
+          if (newLikedByCurrentUser) { // If becoming liked
             newLikesCount = (p.likes || 0) + 1;
-          } else { // User is "unliking"
-            newLikesCount = (p.likes || 0) > 0 ? (p.likes || 0) - 1 : 0; 
+          } else { // If becoming unliked
+            newLikesCount = Math.max(0, (p.likes || 0) - 1);
           }
-          const finalLikedByCurrentUser = newLikesCount === 0 ? false : !isCurrentlyLikedOptimistic;
+          
+          console.log(`Post ${postId} - Calculated for optimistic update: newLikesCount = ${newLikesCount}, newLikedByCurrentUser = ${newLikedByCurrentUser}`);
+          
           return { 
             ...p, 
             likes: newLikesCount, 
-            likedByCurrentUser: finalLikedByCurrentUser
+            likedByCurrentUser: newLikedByCurrentUser 
           };
         }
         return p;
-      })
-    );
+      });
+      const postAfterUpdate = updatedPosts.find(p => p.id === postId);
+      console.log(`Post ${postId} - After optimistic update attempt (inside map):`, postAfterUpdate);
+      return updatedPosts;
+    });
 
     try {
-      const likeSnapshot = await getDocs(likeQuery);
+      const likesCollectionRef = collection(db, "likes");
+      const postDocRef = doc(db, "posts", postId);
+      // Use a predictable ID for the like document to easily check for existence
+      const likeDocId = `${currentUser.uid}_${postId}`;
+      const likeDocRef = doc(likesCollectionRef, likeDocId);
+      
       const batch = writeBatch(db);
+      const postToUpdate = feedPosts.find(p => p.id === postId);
+      const isCurrentlyLiked = postToUpdate ? !!postToUpdate.likedByCurrentUser : false; // Use the state before optimistic update
 
-      if (likeSnapshot.empty) { // User is liking the post
-        const newLikeRef = doc(likesCollectionRef); // Auto-generate ID
-        batch.set(newLikeRef, {
+      if (!isCurrentlyLiked) { // User is liking the post (likedByCurrentUser was false)
+        batch.set(likeDocRef, {
           postId: postId,
           userId: currentUser.uid,
           createdAt: serverTimestamp()
         });
-        batch.update(postRef, { likes: increment(1) });
+        batch.update(postDocRef, { likes: increment(1) });
         await batch.commit();
-        toast({ title: "Post Liked!", description: "Your like has been recorded in Firestore." });
-      } else { // User is unliking the post
-        likeSnapshot.forEach(doc => {
-          batch.delete(doc.ref);
-        });
-        batch.update(postRef, { likes: increment(-1) });
+        toast({ title: "Post Liked!", description: "Your like has been recorded." });
+      } else { // User is unliking the post (likedByCurrentUser was true)
+        batch.delete(likeDocRef);
+        batch.update(postDocRef, { likes: increment(-1) });
         await batch.commit();
-        toast({ title: "Like Removed", description: "Your like has been removed from Firestore." });
+        toast({ title: "Like Removed", description: "Your like has been removed." });
       }
-      // Optionally re-fetch posts to ensure sync, or rely on optimistic update
-      // await fetchFeedPosts(); 
     } catch (error) {
       console.error("Error updating likes in Firestore:", error);
       setFeedPosts(originalPosts); // Revert optimistic update on error
@@ -310,5 +324,3 @@ export default function HomePage() {
     </div>
   );
 }
-
-    
