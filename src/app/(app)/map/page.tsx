@@ -7,6 +7,9 @@ import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Loader2 } from "lucide-react";
+import { getFirestore, collection, getDocs, query, where } from "firebase/firestore";
+import { app, auth } from "@/lib/firebase"; // Assuming 'auth' is exported for checking currentUser
+import type { User as FirebaseUser } from "firebase/auth";
 
 const containerStyle = {
   width: "100%",
@@ -20,14 +23,14 @@ const initialCenter = {
 };
 
 export interface MockUserPin {
-  id: string;
+  id: string; // UID
   username: string;
-  name: string;
+  name: string; // fullName
   avatar: string;
   position: { lat: number; lng: number };
   aiHint?: string;
-  coverImage?: string; // Added
-  bio?: string;        // Added
+  coverImage?: string;
+  bio?: string;
 }
 
 const googleMapsApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
@@ -43,46 +46,86 @@ const googleMapsApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
 export default function MapPage() {
   const [selectedUser, setSelectedUser] = useState<MockUserPin | null>(null);
   const [mapMarkersData, setMapMarkersData] = useState<MockUserPin[]>([]);
+  const [isLoadingUsers, setIsLoadingUsers] = useState(true);
+  const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
+
+  useEffect(() => {
+    const unsubscribe = auth.onAuthStateChanged(user => {
+      setCurrentUser(user);
+    });
+    return () => unsubscribe();
+  }, []);
 
   const { isLoaded, loadError } = useJsApiLoader({
     id: 'google-map-script',
     googleMapsApiKey: googleMapsApiKey || "",
-    // libraries: ['places'], // Not strictly needed for just map display and markers
   });
 
   useEffect(() => {
-    console.log("MapPage Mount: Initializing map data source determination.");
-    try {
-      const storedMapUsersString = localStorage.getItem("pokerConnectMapUsers");
-      if (storedMapUsersString) {
-        const storedMapUsers: MockUserPin[] = JSON.parse(storedMapUsersString);
-        if (Array.isArray(storedMapUsers) && storedMapUsers.length > 0) {
-          console.log("MapPage: Found users in localStorage. Using them for markers.", storedMapUsers);
-          setMapMarkersData(storedMapUsers);
-        } else {
-          console.log("MapPage: localStorage users empty or invalid. Displaying an empty map.");
-          setMapMarkersData([]); // Ensure it's an empty array if no valid users
-        }
-      } else {
-        console.log("MapPage: No users in localStorage. Displaying an empty map.");
-        setMapMarkersData([]);
+    const fetchUsersFromFirestore = async () => {
+      if (!currentUser) { // Only fetch if a user is logged in (due to security rules for reading users)
+        setIsLoadingUsers(false);
+        setMapMarkersData([]); // Clear markers if no user is logged in
+        return;
       }
-    } catch (error) {
-      console.error("MapPage: Error reading map users from localStorage. Displaying an empty map.", error);
-      setMapMarkersData([]);
+      setIsLoadingUsers(true);
+      console.log("MapPage: Attempting to fetch users from Firestore.");
+      try {
+        const db = getFirestore(app, "poker");
+        const usersCollectionRef = collection(db, "users");
+        // Query all users. Ensure your Firestore rules allow this for authenticated users.
+        const q = query(usersCollectionRef); 
+        const querySnapshot = await getDocs(q);
+        
+        const usersForMap: MockUserPin[] = [];
+        querySnapshot.forEach((doc) => {
+          const userData = doc.data();
+          // Check if user has locationCoords and they are valid
+          if (userData.locationCoords && typeof userData.locationCoords.lat === 'number' && typeof userData.locationCoords.lng === 'number') {
+            usersForMap.push({
+              id: doc.id, // UID
+              username: userData.username || "unknown_user",
+              name: userData.fullName || userData.username || "Unknown User",
+              avatar: userData.avatar || `https://placehold.co/40x40.png?text=${(userData.fullName || userData.username || "U").substring(0,1).toUpperCase()}`,
+              position: {
+                lat: userData.locationCoords.lat,
+                lng: userData.locationCoords.lng,
+              },
+              bio: userData.bio,
+              coverImage: userData.coverImage,
+              aiHint: "map user profile",
+            });
+          }
+        });
+        setMapMarkersData(usersForMap);
+        console.log(`MapPage: Fetched ${usersForMap.length} users from Firestore for map.`);
+      } catch (error) {
+        console.error("MapPage: Error fetching users from Firestore:", error);
+        // Potentially a permissions error or Firestore not set up for 'poker' DB
+        // For now, display an empty map on error
+        setMapMarkersData([]);
+      } finally {
+        setIsLoadingUsers(false);
+      }
+    };
+
+    if (isLoaded && !loadError && googleMapsApiKey) {
+        fetchUsersFromFirestore();
+    } else if (!googleMapsApiKey || loadError) {
+        setIsLoadingUsers(false); // Don't attempt to load users if map can't load
     }
-  }, []);
+  }, [isLoaded, loadError, googleMapsApiKey, currentUser]);
 
 
   useEffect(() => {
     console.log(
-      `%cMapPage Update: isLoaded=${isLoaded}, selectedUser=${selectedUser?.id || 'null'}, markerCount=${mapMarkersData.length}`,
+      `%cMapPage Update: isLoaded=${isLoaded}, selectedUser=${selectedUser?.id || 'null'}, markerCount=${mapMarkersData.length}, isLoadingUsers=${isLoadingUsers}`,
       'color: blue; font-weight: bold;'
     );
     if (loadError) {
       console.error("%cMapPage: Error loading Google Maps script via useJsApiLoader:", 'color: red; font-weight: bold;', loadError);
     }
-  }, [isLoaded, selectedUser, mapMarkersData, loadError]);
+  }, [isLoaded, selectedUser, mapMarkersData, loadError, isLoadingUsers]);
 
 
   if (!googleMapsApiKey) {
@@ -100,7 +143,7 @@ export default function MapPage() {
               <code>NEXT_PUBLIC_GOOGLE_MAPS_API_KEY</code> environment variable.
             </p>
             <p className="mt-2 text-muted-foreground">
-              For now, this map feature cannot be displayed.
+              This map feature cannot be displayed.
             </p>
           </CardContent>
         </Card>
@@ -132,22 +175,22 @@ export default function MapPage() {
       <h1 className="text-3xl font-bold mb-6">Player Map</h1>
       <Card className="shadow-lg rounded-xl overflow-hidden">
         <CardHeader>
-          <CardTitle>Interactive Player Map - India</CardTitle>
+          <CardTitle>Interactive Player Map - India (Users from Firestore)</CardTitle>
         </CardHeader>
         <CardContent>
-          {!isLoaded ? (
+          {!isLoaded || isLoadingUsers ? (
             <div className="flex items-center justify-center h-[600px]">
               <Loader2 className="h-16 w-16 animate-spin text-primary" />
-              <p className="ml-4 text-lg">Loading Map...</p>
+              <p className="ml-4 text-lg">{!isLoaded ? "Loading Map Script..." : "Loading Player Locations..."}</p>
             </div>
           ) : (
             <GoogleMap
               mapContainerStyle={containerStyle}
               center={initialCenter}
-              zoom={5} // Adjusted zoom for a broader view of India
+              zoom={5} 
               onLoad={(map) => console.log("%cGoogleMap: component mounted (onLoad event). Map instance:", 'color: purple;', map)}
               onUnmount={() => console.log("%cGoogleMap: component unmounted (onUnmount event).", 'color: red;')}
-              options={{ zoomControl: true, mapId: "POKER_CONNECT_MAP_ID" }} // Ensure zoomControl is true
+              options={{ zoomControl: true, mapId: "POKER_CONNECT_MAP_ID" }}
             >
               {mapMarkersData.map((user) => (
                 <Marker
@@ -157,7 +200,6 @@ export default function MapPage() {
                     console.log(`Marker clicked: ${user.username}`);
                     setSelectedUser(user);
                   }}
-                  // Default Google Maps red pin markers will be used
                 />
               ))}
 
@@ -172,7 +214,7 @@ export default function MapPage() {
                   <div className="p-2 flex items-center space-x-3">
                     <Avatar className="h-10 w-10">
                       <AvatarImage src={selectedUser.avatar} alt={selectedUser.name} data-ai-hint={selectedUser.aiHint || "profile picture"} />
-                      <AvatarFallback>{selectedUser.name.substring(0,1)}</AvatarFallback>
+                      <AvatarFallback>{selectedUser.name.substring(0,1).toUpperCase()}</AvatarFallback>
                     </Avatar>
                     <div>
                       <p className="font-semibold">{selectedUser.name}</p>
@@ -185,12 +227,14 @@ export default function MapPage() {
               )}
             </GoogleMap>
           )}
-          <p className="text-sm text-muted-foreground mt-4">
-            {mapMarkersData.length > 0
-              ? `This map shows approximate locations of ${mapMarkersData.length} PokerConnect user(s) across India who have shared their location. Click on a marker to see more details.`
-              : "No signed-up users with location data to display on the map yet. Sign up and select a location to appear!"
-            }
-          </p>
+          {!isLoadingUsers && (
+            <p className="text-sm text-muted-foreground mt-4">
+                {mapMarkersData.length > 0
+                ? `This map shows approximate locations of ${mapMarkersData.length} PokerConnect user(s) across India who have shared their location (data from Firestore). Click on a marker to see more details.`
+                : "No users with location data found in Firestore to display on the map. Sign up and select a location to appear!"
+                }
+            </p>
+          )}
         </CardContent>
       </Card>
     </div>
