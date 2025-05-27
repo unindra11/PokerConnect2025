@@ -11,11 +11,11 @@ import Link from "next/link";
 import { UserPlus, Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/hooks/use-toast";
-import { LoadScript, Autocomplete } from "@react-google-maps/api";
+import { useJsApiLoader, Autocomplete } from "@react-google-maps/api"; // Changed import
 import type { MockUserPin } from "@/app/(app)/map/page";
-import { app, auth } from "@/lib/firebase"; 
+import { app, auth } from "@/lib/firebase";
 import { createUserWithEmailAndPassword, type UserCredential, type AuthError } from "firebase/auth";
-import { getFirestore, doc, setDoc, Timestamp, serverTimestamp } from "firebase/firestore"; 
+import { getFirestore, doc, setDoc, Timestamp, serverTimestamp } from "firebase/firestore";
 
 const googleMapsApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
 const libraries: ("places")[] = ['places'];
@@ -35,25 +35,30 @@ export default function SignupPage() {
 
   const autocompleteRef = useRef<google.maps.places.Autocomplete | null>(null);
   const locationInputRef = useRef<HTMLInputElement | null>(null);
-  const [isGoogleMapsScriptLoaded, setIsGoogleMapsScriptLoaded] = useState(false);
+
+  const { isLoaded, loadError } = useJsApiLoader({ // Added hook
+    id: 'google-map-signup-script',
+    googleMapsApiKey: googleMapsApiKey || "",
+    libraries,
+  });
 
   useEffect(() => {
     if (!googleMapsApiKey) {
       console.warn("SignupPage: NEXT_PUBLIC_GOOGLE_MAPS_API_KEY is not set. Location autocomplete will be disabled.");
     }
-    // Test Firestore instance (can be removed later)
-    try {
-      const db = getFirestore(app, "poker"); // Get instance for "poker" database
-      console.log("SignupPage: Firestore object on mount:", db);
-    } catch (e) {
-      console.error("SignupPage: Error getting Firestore instance on mount:", e);
+    if (loadError) {
+      console.error("SignupPage: Error loading Google Maps for Autocomplete", loadError);
+      toast({
+        title: "Location API Error",
+        description: "Could not load location suggestions. Please enter manually.",
+        variant: "default",
+      });
     }
-  }, []);
+  }, [loadError, toast]);
 
   const onLoad = (autocompleteInstance: google.maps.places.Autocomplete) => {
     autocompleteRef.current = autocompleteInstance;
-    setIsGoogleMapsScriptLoaded(true);
-    console.log("SignupPage: Google Maps Autocomplete script loaded.");
+    console.log("SignupPage: Google Maps Autocomplete instance loaded.");
   };
 
   const onPlaceChanged = () => {
@@ -101,33 +106,37 @@ export default function SignupPage() {
       const userCredential: UserCredential = await createUserWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
       console.log("SignupPage: Firebase Auth signup successful. UID:", user.uid);
-      
+
       const userProfile = {
         uid: user.uid,
         fullName: fullName,
         email: user.email,
         username: username,
         location: location,
-        locationCoords: selectedLocationCoords || null,
+        locationCoords: selectedLocationCoords, // Will be null if not set
         bio: "",
-        avatar: "", 
-        coverImage: "", 
-        createdAt: serverTimestamp(), // Use Firestore server timestamp
+        avatar: "",
+        coverImage: "",
+        createdAt: serverTimestamp(),
       };
 
       console.log("SignupPage: Preparing to write to Firestore. UserProfile object:", userProfile);
-      
-      // Get Firestore instance specifically for 'poker' database right before use
+
+      // Explicitly get the Firestore instance for the "poker" database
       const db = getFirestore(app, "poker");
       console.log("SignupPage: Firestore instance being used for setDoc:", db);
-      console.log("SignupPage: Firestore database ID for 'poker' DB:", db?._databaseId?.projectId, db?._databaseId?.database);
+      if (db && db._databaseId) {
+        console.log(`SignupPage: Firestore database ID for '${db._databaseId.database}' DB: ${db._databaseId.projectId} ${db._databaseId.database}`);
+      } else {
+        console.warn("SignupPage: Firestore instance _databaseId is not available as expected.");
+      }
 
 
       const userDocRef = doc(db, "users", user.uid);
       console.log("SignupPage: Attempting to write to Firestore path:", userDocRef.path);
       await setDoc(userDocRef, userProfile);
       console.log("SignupPage: User profile successfully written to Firestore for UID:", user.uid);
-      
+
       const loggedInUserDetailsForStorage = {
         uid: user.uid,
         email: user.email,
@@ -141,16 +150,16 @@ export default function SignupPage() {
         locationCoords: userProfile.locationCoords,
       };
       localStorage.setItem("loggedInUser", JSON.stringify(loggedInUserDetailsForStorage));
-      
+
       if (selectedLocationCoords) {
         const initials = fullName.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase() || username.substring(0,1).toUpperCase() || 'P';
         const mapUser: MockUserPin = {
-          id: user.uid, 
+          id: user.uid,
           username: username,
           name: fullName,
-          avatar: `https://placehold.co/40x40.png?text=${initials}&c=${Math.random().toString(36).substring(7)}`, 
+          avatar: `https://placehold.co/40x40.png?text=${initials}&c=${Math.random().toString(36).substring(7)}`,
           position: selectedLocationCoords,
-          bio: userProfile.bio, 
+          bio: userProfile.bio,
           coverImage: userProfile.coverImage,
         };
 
@@ -160,7 +169,7 @@ export default function SignupPage() {
           try { mapUsers = JSON.parse(existingMapUsersString); if (!Array.isArray(mapUsers)) mapUsers = []; }
           catch (parseError) { console.error("SignupPage: Error parsing pokerConnectMapUsers from localStorage:", parseError); mapUsers = []; }
         }
-        mapUsers = mapUsers.filter(u => u.id !== mapUser.id); 
+        mapUsers = mapUsers.filter(u => u.id !== mapUser.id);
         mapUsers.push(mapUser);
         localStorage.setItem("pokerConnectMapUsers", JSON.stringify(mapUsers));
         console.log("SignupPage: Added/Updated user in pokerConnectMapUsers localStorage:", mapUser);
@@ -178,7 +187,7 @@ export default function SignupPage() {
     } catch (error: any) {
       console.error("SignupPage: Error during signup process:", error);
       let errorMessage = "Could not sign up. Please try again.";
-      if (error.code) { 
+      if (error.code) {
         switch (error.code) {
           case "auth/email-already-in-use":
             errorMessage = "This email is already in use. Please use a different email or log in.";
@@ -190,8 +199,7 @@ export default function SignupPage() {
             errorMessage = "The email address is not valid.";
             break;
           default:
-            // Corrected if condition
-            if (error.message && (error.message.includes("firestore") || error.message.includes("Firestore") || error.message.includes("RPC") || (typeof error.code === 'string' && error.code.startsWith("permission-denied")) || error.code === 'unavailable' || error.code === 'unimplemented' || error.code === 'internal')) {
+             if (error.message && (error.message.includes("firestore") || error.message.includes("Firestore") || error.message.includes("RPC") || (typeof error.code === 'string' && error.code.startsWith("permission-denied")) || error.code === 'unavailable' || error.code === 'unimplemented' || error.code === 'internal')) {
               errorMessage = `Failed to save profile. Please ensure Firestore database ('poker') is correctly created, API enabled, and security rules are published in Firebase Console. Details: ${error.message}`;
             } else {
               errorMessage = `An unexpected error occurred. Code: ${error.code || 'N/A'}, Message: ${error.message || 'Unknown error'}`;
@@ -247,7 +255,7 @@ export default function SignupPage() {
                 placeholder="e.g., johnwick (no spaces)"
                 className="mt-1"
                 value={username}
-                onChange={(e) => setUsername(e.target.value.replace(/\s/g, ''))} 
+                onChange={(e) => setUsername(e.target.value.replace(/\s/g, ''))}
                 required
               />
             </div>
@@ -278,57 +286,52 @@ export default function SignupPage() {
             </div>
             <div>
               <Label htmlFor="location">Location (Optional, select from suggestions for map)</Label>
-              {googleMapsApiKey ? (
-                 <LoadScript
-                  googleMapsApiKey={googleMapsApiKey}
-                  libraries={libraries}
-                  loadingElement={<Input placeholder="Loading location suggestions..." disabled className="mt-1" />}
-                  onLoad={() => {
-                    console.log("SignupPage: Google Maps API script for Autocomplete successfully loaded.");
-                    setIsGoogleMapsScriptLoaded(true);
-                  }}
-                  onError={(error) => {
-                    console.error("SignupPage: Error loading Google Maps for Autocomplete", error);
-                    toast({
-                      title: "Location API Error",
-                      description: "Could not load location suggestions. Please enter manually or ensure API key is correct.",
-                      variant: "default",
-                    });
-                    setIsGoogleMapsScriptLoaded(false);
-                  }}
-                >
-                  <Autocomplete
-                    onLoad={onLoad}
-                    onPlaceChanged={onPlaceChanged}
-                    restrictions={{ country: "in" }} 
-                    fields={["formatted_address", "geometry.location", "name"]}
-                    disabled={!isGoogleMapsScriptLoaded}
-                  >
-                    <Input
-                      id="location"
-                      type="text"
-                      placeholder="e.g., Mumbai, India"
-                      className="mt-1"
-                      value={location}
-                      onChange={(e) => {
-                        setLocation(e.target.value);
-                        if (autocompleteRef.current && autocompleteRef.current.getPlace()?.formatted_address !== e.target.value) {
-                            setSelectedLocationCoords(null); 
-                        }
-                      }}
-                      ref={locationInputRef}
-                      disabled={!isGoogleMapsScriptLoaded && !!googleMapsApiKey} 
-                    />
-                  </Autocomplete>
-                </LoadScript>
-              ) : (
+              {!googleMapsApiKey ? (
                 <Input
                   id="location"
                   placeholder="e.g., Mumbai, India (Location suggestions unavailable - API Key missing)"
                   className="mt-1"
                   value={location}
-                  onChange={(e) => setLocation(e.target.value)}
+                  onChange={(e) => {
+                    setLocation(e.target.value);
+                    setSelectedLocationCoords(null);
+                  }}
                 />
+              ) : !isLoaded ? (
+                <Input placeholder="Loading location suggestions..." disabled className="mt-1" />
+              ) : loadError ? (
+                 <Input
+                  id="location"
+                  placeholder="e.g., Mumbai, India (Error loading suggestions, enter manually)"
+                  className="mt-1"
+                  value={location}
+                  onChange={(e) => {
+                    setLocation(e.target.value);
+                    setSelectedLocationCoords(null);
+                  }}
+                />
+              ) : (
+                <Autocomplete
+                  onLoad={onLoad}
+                  onPlaceChanged={onPlaceChanged}
+                  restrictions={{ country: "in" }}
+                  fields={["formatted_address", "geometry.location", "name"]}
+                >
+                  <Input
+                    id="location"
+                    type="text"
+                    placeholder="e.g., Mumbai, India"
+                    className="mt-1"
+                    value={location}
+                    onChange={(e) => {
+                      setLocation(e.target.value);
+                      if (autocompleteRef.current && autocompleteRef.current.getPlace()?.formatted_address !== e.target.value) {
+                          setSelectedLocationCoords(null);
+                      }
+                    }}
+                    ref={locationInputRef}
+                  />
+                </Autocomplete>
               )}
             </div>
           </CardContent>
