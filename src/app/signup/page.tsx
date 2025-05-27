@@ -8,11 +8,11 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter }
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import Link from "next/link";
-import { UserPlus, Loader2, MapPin } from "lucide-react"; // Added MapPin
+import { UserPlus, Loader2, MapPin } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/hooks/use-toast";
-import type { MockUserPin } from "@/app/(app)/map/page";
-import { app, auth, firestore } from "@/lib/firebase";
+import type { MockUserPin } from "@/app/(app)/map/page"; // Assuming this type is still relevant for map user structure
+import { app, auth, firestore as db } from "@/lib/firebase"; // Use 'db' alias for clarity
 import { createUserWithEmailAndPassword, type UserCredential, type AuthError } from "firebase/auth";
 import { getFirestore, doc, setDoc, Timestamp, serverTimestamp } from "firebase/firestore";
 
@@ -27,8 +27,17 @@ export default function SignupPage() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [location, setLocation] = useState("");
+  const [location, setLocation] = useState(""); // For text display of location
   const [selectedLocationCoords, setSelectedLocationCoords] = useState<{ lat: number; lng: number } | null>(null);
+  
+  const locationInputRef = useRef<HTMLInputElement>(null);
+
+  // Log the Firestore instance on mount to ensure it's correctly initialized
+  useEffect(() => {
+    const firestoreInstance = getFirestore(app, "poker");
+    console.log("SignupPage: Firestore object on mount:", firestoreInstance);
+  }, []);
+
 
   const handleGetDeviceLocation = () => {
     if (!navigator.geolocation) {
@@ -54,6 +63,7 @@ export default function SignupPage() {
           description: "Your current location has been set.",
         });
         setIsFetchingLocation(false);
+        console.log("SignupPage: Fetched device location:", coords);
       },
       (error) => {
         console.error("Error getting geolocation:", error);
@@ -96,28 +106,32 @@ export default function SignupPage() {
       const userCredential: UserCredential = await createUserWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
       console.log("SignupPage: Firebase Auth signup successful. UID:", user.uid);
-
-      const db = getFirestore(app, "poker");
-      const dbName = db._databaseId.database || "(default)";
-      console.log(`SignupPage: Firestore instance for '${dbName}' DB:`, db._databaseId.projectId, dbName);
       
       const userProfile = {
         uid: user.uid,
         fullName: fullName,
-        email: user.email,
+        email: user.email, // Use email from authenticated user for consistency
         username: username,
-        location: location,
-        locationCoords: selectedLocationCoords, // Will be null if not fetched
+        location: location, // The text description of the location
+        locationCoords: selectedLocationCoords, // The lat/lng object, or null
         bio: "",
-        avatar: "",
-        coverImage: "",
+        avatar: "", 
+        coverImage: "", 
         createdAt: serverTimestamp(),
       };
 
       console.log("SignupPage: Preparing to write to Firestore. UserProfile object:", userProfile);
-      const userDocRef = doc(db, "users", user.uid);
-      console.log(`SignupPage: Attempting to write to Firestore path: ${userDocRef.path} in database '${dbName}'`);
-      await setDoc(userDocRef, userProfile);
+      
+      // Explicitly get the Firestore instance for the "poker" database
+      const firestoreDb = getFirestore(app, "poker");
+      console.log("SignupPage: Firestore instance being used for setDoc:", firestoreDb);
+      console.log("SignupPage: Firestore database ID for 'poker' DB:", firestoreDb.app.options.projectId, firestoreDb.app.name === "[DEFAULT]" ? "(default)" : firestoreDb.app.name);
+      // The line above might not give the actual DB ID directly; more reliably check the network request.
+
+
+      const userDocRefPath = `users/${user.uid}`;
+      console.log("SignupPage: Attempting to write to Firestore path:", userDocRefPath);
+      await setDoc(doc(firestoreDb, "users", user.uid), userProfile);
       console.log(`SignupPage: User profile successfully written to Firestore for UID: ${user.uid}`);
 
       const loggedInUserDetailsForStorage = {
@@ -152,7 +166,7 @@ export default function SignupPage() {
           try { mapUsers = JSON.parse(existingMapUsersString); if (!Array.isArray(mapUsers)) mapUsers = []; }
           catch (parseError) { console.error("SignupPage: Error parsing pokerConnectMapUsers from localStorage:", parseError); mapUsers = []; }
         }
-        mapUsers = mapUsers.filter(u => u.id !== mapUser.id);
+        mapUsers = mapUsers.filter(u => u.id !== mapUser.id); // Remove existing if any, then add
         mapUsers.push(mapUser);
         localStorage.setItem("pokerConnectMapUsers", JSON.stringify(mapUsers));
         console.log("SignupPage: Added/Updated user in pokerConnectMapUsers localStorage:", mapUser);
@@ -182,7 +196,8 @@ export default function SignupPage() {
             errorMessage = "The email address is not valid.";
             break;
           default:
-            if (error.message && (error.message.includes("firestore") || error.message.includes("Firestore") || error.message.includes("RPC") || (typeof error.code === 'string' && error.code.startsWith("permission-denied")) || error.code === 'unavailable' || error.code === 'unimplemented' || error.code === 'internal'))) {
+            // Check if it's a Firestore error related to project setup
+            if (error.message && (error.message.includes("firestore") || error.message.includes("Firestore") || error.message.includes("RPC") || (typeof error.code === 'string' && error.code.startsWith("permission-denied")) || error.code === 'unavailable' || error.code === 'unimplemented' || error.code === 'internal')) {
               errorMessage = `Failed to save profile. Please ensure Firestore database ('poker') is correctly created, API enabled, and security rules are published in Firebase Console. Details: ${error.message}`;
             } else {
                errorMessage = `An unexpected error occurred. Code: ${error.code || 'N/A'}, Message: ${error.message || 'Unknown error'}`;
@@ -268,7 +283,7 @@ export default function SignupPage() {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="location">Location (Optional)</Label>
+              <Label htmlFor="location-manual">Location (Optional)</Label>
                <Button
                 type="button"
                 variant="outline"
@@ -284,19 +299,16 @@ export default function SignupPage() {
                 {isFetchingLocation ? "Fetching Location..." : "Get My Current Location"}
               </Button>
               <Input
-                id="location"
-                placeholder="Or type your city, country (e.g., Mumbai, India)"
+                id="location-manual"
+                ref={locationInputRef}
+                placeholder="Or type city, country (e.g., Mumbai, India)"
                 className="mt-1"
-                value={location}
+                value={location} // This will display "Current Location (...)" or manually typed text
                 onChange={(e) => {
                   setLocation(e.target.value);
-                  // If user types manually after fetching, we might want to clear coords
-                  // or indicate that typed location will be used if no coords.
-                  // For now, if coords are set, they'll be used.
-                  if (selectedLocationCoords && e.target.value !== `Current Location (${selectedLocationCoords.lat.toFixed(4)}, ${selectedLocationCoords.lng.toFixed(4)})`) {
-                    // Optionally clear selectedLocationCoords if user types something different
-                    // setSelectedLocationCoords(null); 
-                  }
+                  // If user types manually after fetching, we might want to clear selectedLocationCoords
+                  // or let the fetched coords persist if they don't select a new place.
+                  // For now, manual typing only updates the text, fetched coords are used if available.
                 }}
               />
                {selectedLocationCoords && (
@@ -323,3 +335,5 @@ export default function SignupPage() {
     </div>
   );
 }
+
+    
