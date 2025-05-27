@@ -14,7 +14,7 @@ import { ImagePlus, Send, Edit, Loader2, X, ArrowLeft } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useRouter, useSearchParams } from "next/navigation";
 import type { Post, User } from "@/types/post";
-import { storage, app, auth, firestore } from "@/lib/firebase"; 
+import { storage, app, auth } from "@/lib/firebase"; 
 import { ref, uploadBytesResumable, getDownloadURL } from "firebase/storage";
 import { addDoc, collection, serverTimestamp, doc, getDoc, updateDoc, Timestamp, getFirestore } from "firebase/firestore";
 
@@ -63,7 +63,21 @@ export default function CreatePostPage() {
           const postDocSnap = await getDoc(postDocRef);
 
           if (postDocSnap.exists()) {
-            const fetchedPost = { id: postDocSnap.id, ...postDocSnap.data() } as Post; 
+            const postData = postDocSnap.data();
+            const fetchedPost: Post = { 
+              id: postDocSnap.id,
+              userId: postData.userId,
+              user: postData.user,
+              content: postData.content,
+              image: postData.image,
+              imageAiHint: postData.imageAiHint,
+              likes: postData.likes || 0,
+              comments: postData.comments || 0,
+              commentTexts: postData.commentTexts || [],
+              shares: postData.shares || 0,
+              createdAt: postData.createdAt,
+              timestamp: postData.createdAt instanceof Timestamp ? postData.createdAt.toDate().toLocaleString() : new Date().toLocaleString(),
+            };
             setPostToEdit(fetchedPost);
             form.setValue("postContent", fetchedPost.content);
             if (fetchedPost.image) {
@@ -144,7 +158,7 @@ export default function CreatePostPage() {
         loggedInUserForPost = {
           name: parsedUser.fullName || parsedUser.username || "Anonymous",
           avatar: parsedUser.avatar || `https://placehold.co/100x100.png?text=${(parsedUser.fullName || parsedUser.username || "A").substring(0,1)}`,
-          handle: `@${parsedUser.username || 'anonymous'}`
+          handle: `@${parsedUser.username || currentUserAuth.uid}` // Fallback to UID if username is missing
         };
       } else { 
         loggedInUserForPost = {
@@ -163,11 +177,15 @@ export default function CreatePostPage() {
       return;
     }
 
-    let finalImageUrl: string | null = imageToSaveUrl || null; 
-    let finalImageAiHint: string | null | undefined = existingImageAiHint;
+    let finalImageUrl: string | null = null;
+    let finalImageAiHint: string | undefined = undefined;
 
-
-    if (selectedFile) {
+    if (isEditMode && postToEdit) { // If editing, start with existing image unless cleared or new one selected
+      finalImageUrl = imageToSaveUrl; // This is null if user cleared media, or existing URL if not touched
+      finalImageAiHint = existingImageAiHint; // This is undefined if user cleared media
+    }
+    
+    if (selectedFile) { // If a new file is selected (for new post or replacing in edit)
       const storageRefPath = `posts/${currentUserAuth.uid}/${Date.now()}_${selectedFile.name}`;
       const fileStorageRef = ref(storage, storageRefPath);
       const uploadTask = uploadBytesResumable(fileStorageRef, selectedFile);
@@ -176,47 +194,45 @@ export default function CreatePostPage() {
         console.log(`CreatePostPage: Attempting to upload to Firebase Storage path: ${storageRefPath}`);
         await uploadTask;
         finalImageUrl = await getDownloadURL(uploadTask.snapshot.ref);
-        finalImageAiHint = "user uploaded image";
+        finalImageAiHint = "user uploaded image"; // Or generate something more specific
         console.log("CreatePostPage: Firebase Storage upload successful. Download URL:", finalImageUrl);
       } catch (error: any) {
         console.error("CreatePostPage: Firebase Storage upload error:", error);
-        toast({ title: "Upload Failed", description: `Could not upload image: ${error.message}. Post will proceed without new image.`, variant: "destructive", duration: 9000 });
-        finalImageUrl = imageToSaveUrl || null; 
-        finalImageAiHint = imageToSaveUrl ? existingImageAiHint : null;
+        toast({ title: "Upload Failed", description: `Could not upload image: ${error.message}. Post will proceed with previous or no image.`, variant: "destructive", duration: 9000 });
+        // Keep existing image if upload fails during edit, or null if new post
+        finalImageUrl = isEditMode ? imageToSaveUrl : null;
+        finalImageAiHint = isEditMode ? existingImageAiHint : undefined;
       }
-    } else {
-        // If no new file is selected, ensure finalImageUrl is null if it wasn't an existing image
-        if (!isEditMode || !imageToSaveUrl) {
-            finalImageUrl = null;
-            finalImageAiHint = null;
-        }
     }
     
     const db = getFirestore(app, "poker");
     
+    const postDataForFirestore = {
+      userId: currentUserAuth.uid,
+      user: loggedInUserForPost,
+      content: data.postContent,
+      image: finalImageUrl, 
+      imageAiHint: finalImageAiHint,
+      likes: isEditMode && postToEdit ? postToEdit.likes : 0,
+      comments: isEditMode && postToEdit ? postToEdit.comments : 0,
+      commentTexts: isEditMode && postToEdit ? postToEdit.commentTexts || [] : [],
+      shares: isEditMode && postToEdit ? postToEdit.shares : 0,
+      createdAt: isEditMode && postToEdit?.createdAt ? postToEdit.createdAt : serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    };
+    
+    console.log("CreatePostPage: Attempting to save to Firestore. Is Edit Mode:", isEditMode);
+    console.log("CreatePostPage: Data for Firestore:", JSON.stringify(postDataForFirestore, null, 2));
+
     try {
-      const postDataForFirestore = {
-        userId: currentUserAuth.uid,
-        user: loggedInUserForPost,
-        content: data.postContent,
-        image: finalImageUrl, // Will be null if no image
-        imageAiHint: finalImageAiHint, // Will be null or existing if no new image
-        likes: isEditMode && postToEdit ? postToEdit.likes : 0,
-        comments: isEditMode && postToEdit ? postToEdit.comments : 0,
-        commentTexts: isEditMode && postToEdit ? postToEdit.commentTexts || [] : [],
-        shares: isEditMode && postToEdit ? postToEdit.shares : 0,
-        createdAt: isEditMode && postToEdit?.createdAt ? postToEdit.createdAt : serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      };
-      
-      console.log("CreatePostPage: Attempting to save to Firestore. Is Edit Mode:", isEditMode);
-      console.log("CreatePostPage: Data for Firestore:", JSON.stringify(postDataForFirestore, null, 2));
-
-
       if (isEditMode && editPostId) {
         const postDocRef = doc(db, "posts", editPostId);
-        const { createdAt, ...updateData } = postDataForFirestore; 
-        await updateDoc(postDocRef, updateData);
+        // For updates, we don't want to overwrite createdAt with serverTimestamp if it exists.
+        // Let's exclude createdAt if it's an update and postToEdit.createdAt exists.
+        const { createdAt, ...updateData } = postDataForFirestore;
+        const dataToUpdate = postToEdit && postToEdit.createdAt ? updateData : postDataForFirestore;
+        
+        await updateDoc(postDocRef, dataToUpdate);
         console.log("CreatePostPage: Firestore post UPDATE successful for ID:", editPostId);
         toast({ title: "Post Updated!", description: "Your changes have been saved to Firestore." });
 
@@ -225,6 +241,7 @@ export default function CreatePostPage() {
         console.log("CreatePostPage: Firestore post ADD successful. New Post ID:", docRef.id);
         toast({ title: "Post Created!", description: "Your thoughts have been shared on Firestore." });
         
+        // Update localStorage (temporary)
         const storedPostsString = localStorage.getItem(USER_POSTS_STORAGE_KEY);
         let posts: Post[] = storedPostsString ? JSON.parse(storedPostsString) : [];
         const newPostForLocalStorage: Post = {
@@ -257,10 +274,10 @@ export default function CreatePostPage() {
     } catch (error: any) {
       console.error("CreatePostPage: Error saving post to Firestore:", error);
       let firestoreErrorMessage = `Could not save post: ${error.message}`;
-      if (error.message && (error.message.includes("firestore") || error.message.includes("Firestore") || error.message.includes("RPC") || (typeof error.code === 'string' && error.code.startsWith("permission-denied")) || error.code === 'unavailable' || error.code === 'unimplemented' || error.code === 'internal')) {
-        firestoreErrorMessage = `Failed to save post to Firestore. Details: ${error.message}. Check rules and DB setup.`;
+      if (error.message && (error.message.includes("firestore") || error.message.includes("Firestore") || error.message.includes("RPC") || (typeof error.code === 'string' && error.code.startsWith("permission-denied")) || error.code === 'unavailable' || error.code === 'unimplemented' || error.code === 'internal'))) {
+        firestoreErrorMessage = `Failed to save post to Firestore. Ensure Firestore is correctly set up (database instance created in 'poker', API enabled, and security rules published in Firebase Console for the 'posts' collection) and check console for details. Error: ${error.message}`;
       }
-      toast({ title: "Firestore Error", description: firestoreErrorMessage, variant: "destructive", duration: 9000 });
+      toast({ title: "Firestore Error", description: firestoreErrorMessage, variant: "destructive", duration: 15000 });
     } finally {
       setIsLoading(false);
     }
@@ -344,7 +361,7 @@ export default function CreatePostPage() {
                 )}
               </div>
                <p className="text-xs text-muted-foreground mt-2 text-center">
-                Images will be uploaded to Firebase Cloud Storage. Your project is '{process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || 'Not Set'}'.
+                Images will be uploaded to Firebase Cloud Storage in your project '{process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || 'Not Set'}'.
               </p>
             </div>
             
@@ -369,5 +386,4 @@ export default function CreatePostPage() {
     </div>
   );
 }
-
     
