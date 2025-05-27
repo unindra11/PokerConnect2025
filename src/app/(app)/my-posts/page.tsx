@@ -9,7 +9,21 @@ import { PlusCircle, Loader2 } from "lucide-react";
 import { PostCard } from "@/components/post-card";
 import type { Post } from "@/types/post";
 import { useToast } from "@/hooks/use-toast";
-import { getFirestore, collection, query, where, orderBy, getDocs, doc, updateDoc, increment, deleteDoc, Timestamp } from "firebase/firestore";
+import { 
+  getFirestore, 
+  collection, 
+  query, 
+  where, 
+  orderBy, 
+  getDocs, 
+  doc, 
+  updateDoc, 
+  increment, 
+  deleteDoc, 
+  Timestamp,
+  writeBatch,
+  serverTimestamp
+} from "firebase/firestore";
 import { getAuth, onAuthStateChanged, type User as FirebaseUser } from "firebase/auth";
 import { app } from "@/lib/firebase";
 
@@ -18,20 +32,20 @@ export default function MyPostsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
   const { toast } = useToast();
-  const auth = getAuth(app);
+  const authInstance = getAuth(app);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
+    const unsubscribe = onAuthStateChanged(authInstance, (user) => {
       if (user) {
         setCurrentUser(user);
       } else {
         setCurrentUser(null);
-        setUserPosts([]); // Clear posts if user logs out
+        setUserPosts([]); 
         setIsLoading(false);
       }
     });
     return () => unsubscribe();
-  }, [auth]);
+  }, [authInstance]);
 
   useEffect(() => {
     const fetchUserPosts = async () => {
@@ -50,11 +64,19 @@ export default function MyPostsPage() {
         );
         const querySnapshot = await getDocs(q);
         
-        const posts: Post[] = [];
-        querySnapshot.forEach((docSnap) => {
+        const postsPromises = querySnapshot.docs.map(async (docSnap) => {
           const data = docSnap.data();
           const postUser = data.user || { name: "Unknown User", avatar: `https://placehold.co/100x100.png?text=U`, handle: "@unknown" };
-          posts.push({
+          
+          let likedByCurrentUser = false;
+          if (currentUser) {
+            const likesCollectionRef = collection(db, "likes");
+            const likeQuery = query(likesCollectionRef, where("postId", "==", docSnap.id), where("userId", "==", currentUser.uid));
+            const likeSnapshot = await getDocs(likeQuery);
+            likedByCurrentUser = !likeSnapshot.empty;
+          }
+
+          return {
             id: docSnap.id,
             userId: data.userId,
             user: {
@@ -66,9 +88,7 @@ export default function MyPostsPage() {
             image: data.image,
             imageAiHint: data.imageAiHint,
             likes: data.likes || 0,
-            // likedByCurrentUser needs to be managed, potentially in a separate user-specific collection or fetched.
-            // For now, we'll keep it as a transient client-side state after fetching.
-            likedByCurrentUser: false, 
+            likedByCurrentUser: likedByCurrentUser, 
             comments: data.comments || 0,
             commentTexts: data.commentTexts || [],
             shares: data.shares || 0,
@@ -76,15 +96,17 @@ export default function MyPostsPage() {
             timestamp: data.createdAt instanceof Timestamp 
               ? data.createdAt.toDate().toLocaleString() 
               : (data.createdAt?.seconds ? new Date(data.createdAt.seconds * 1000).toLocaleString() : new Date().toLocaleString()),
-          });
+          };
         });
+        const posts = await Promise.all(postsPromises);
         setUserPosts(posts);
       } catch (error) {
         console.error("Error fetching user posts from Firestore:", error);
         toast({
           title: "Error Loading Your Posts",
-          description: "Could not retrieve your posts from Firestore.",
+          description: "Could not retrieve your posts from Firestore. Check console for details (e.g. missing index).",
           variant: "destructive",
+          duration: 7000,
         });
         setUserPosts([]);
       } finally {
@@ -98,16 +120,21 @@ export default function MyPostsPage() {
   }, [currentUser, toast]);
 
   const handleDeletePost = async (postId: string) => {
+    if (!currentUser) {
+      toast({ title: "Authentication Error", description: "You must be logged in to delete a post.", variant: "destructive" });
+      return;
+    }
     const originalPosts = [...userPosts];
     setUserPosts(prevPosts => prevPosts.filter(post => post.id !== postId));
     toast({
       title: "Post Deleting...",
-      description: "Removing your post.",
+      description: "Removing your post from Firestore.",
     });
 
     try {
       const db = getFirestore(app, "poker");
       const postRef = doc(db, "posts", postId);
+      // Optional: Delete associated likes in a batch if needed, but for now just the post.
       await deleteDoc(postRef);
       toast({
         title: "Post Deleted",
@@ -115,7 +142,7 @@ export default function MyPostsPage() {
       });
     } catch (error) {
       console.error("Error deleting post from Firestore:", error);
-      setUserPosts(originalPosts); // Revert optimistic update
+      setUserPosts(originalPosts); 
       toast({
         title: "Error Deleting Post",
         description: "Could not remove the post from Firestore. Please try again.",
@@ -125,23 +152,30 @@ export default function MyPostsPage() {
   };
 
   const handleLikePost = async (postId: string) => {
-    let postContentForToast = "";
-    let newLikedByCurrentUserOptimistic = false;
-    const originalPosts = userPosts.map(p => ({...p})); // Deep copy for potential revert
+    if (!currentUser) {
+      toast({ title: "Authentication Error", description: "You must be logged in to like a post.", variant: "destructive" });
+      return;
+    }
+
+    const db = getFirestore(app, "poker");
+    const postRef = doc(db, "posts", postId);
+    const likesCollectionRef = collection(db, "likes");
+    const likeQuery = query(likesCollectionRef, where("postId", "==", postId), where("userId", "==", currentUser.uid));
+    
+    const originalPosts = userPosts.map(p => ({...p}));
+    let isCurrentlyLikedOptimistic = false;
 
     setUserPosts(prevPosts =>
       prevPosts.map(p => {
         if (p.id === postId) {
-          postContentForToast = p.content.substring(0, 20) + "...";
-          newLikedByCurrentUserOptimistic = !p.likedByCurrentUser;
-          
+          isCurrentlyLikedOptimistic = !!p.likedByCurrentUser;
           let newLikesCount = p.likes;
-          if (newLikedByCurrentUserOptimistic) {
+          if (!isCurrentlyLikedOptimistic) { // User is "liking"
             newLikesCount = p.likes + 1;
-          } else {
-            newLikesCount = p.likes > 0 ? p.likes - 1 : 0;
+          } else { // User is "unliking"
+            newLikesCount = p.likes > 0 ? p.likes - 1 : 0; 
           }
-          const finalLikedByCurrentUser = newLikesCount === 0 ? false : newLikedByCurrentUserOptimistic;
+          const finalLikedByCurrentUser = newLikesCount === 0 ? false : !isCurrentlyLikedOptimistic;
           return { 
             ...p, 
             likes: newLikesCount, 
@@ -153,18 +187,27 @@ export default function MyPostsPage() {
     );
 
     try {
-      const db = getFirestore(app, "poker");
-      const postRef = doc(db, "posts", postId);
-      const incrementValue = newLikedByCurrentUserOptimistic ? 1 : -1;
-      
-      await updateDoc(postRef, {
-        likes: increment(incrementValue)
-      });
+      const likeSnapshot = await getDocs(likeQuery);
+      const batch = writeBatch(db);
 
-      toast({
-        title: newLikedByCurrentUserOptimistic ? "Post Liked!" : "Like Removed",
-        description: `You reacted to "${postContentForToast}". (Firestore updated)`,
-      });
+      if (likeSnapshot.empty) { // User is liking the post
+        const newLikeRef = doc(likesCollectionRef); 
+        batch.set(newLikeRef, {
+          postId: postId,
+          userId: currentUser.uid,
+          createdAt: serverTimestamp()
+        });
+        batch.update(postRef, { likes: increment(1) });
+        await batch.commit();
+        toast({ title: "Post Liked!", description: "Your like has been recorded." });
+      } else { // User is unliking the post
+        likeSnapshot.forEach(doc => {
+          batch.delete(doc.ref);
+        });
+        batch.update(postRef, { likes: increment(-1) });
+        await batch.commit();
+        toast({ title: "Like Removed", description: "Your like has been removed." });
+      }
     } catch (error) {
       console.error("Error updating likes in Firestore:", error);
       setUserPosts(originalPosts); // Revert optimistic update
@@ -203,10 +246,17 @@ export default function MyPostsPage() {
   if (!currentUser) {
     return (
         <div className="container mx-auto max-w-2xl text-center py-10">
-            <p>Please log in to see your posts.</p>
-             <Link href="/login" passHref>
-                <Button className="mt-4">Go to Login</Button>
-            </Link>
+            <Card className="shadow-lg rounded-xl p-6">
+              <CardHeader>
+                <CardTitle>Please Log In</CardTitle>
+                <CardDescription>You need to be logged in to view your posts.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Link href="/login" passHref>
+                    <Button className="mt-4">Go to Login</Button>
+                </Link>
+              </CardContent>
+            </Card>
         </div>
     );
   }
@@ -251,3 +301,4 @@ export default function MyPostsPage() {
     </div>
   );
 }
+
