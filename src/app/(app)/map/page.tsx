@@ -8,7 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Loader2 } from "lucide-react";
 import { getFirestore, collection, getDocs, query, where } from "firebase/firestore";
-import { app, auth } from "@/lib/firebase"; // Assuming 'auth' is exported for checking currentUser
+import { app, auth } from "@/lib/firebase";
 import type { User as FirebaseUser } from "firebase/auth";
 
 const containerStyle = {
@@ -34,6 +34,7 @@ export interface MockUserPin {
 }
 
 const googleMapsApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
+const libraries: ("places")[] = ['places'];
 
 // COMMON ERROR: RefererNotAllowedMapError
 // To fix this:
@@ -59,31 +60,37 @@ export default function MapPage() {
   const { isLoaded, loadError } = useJsApiLoader({
     id: 'google-map-script',
     googleMapsApiKey: googleMapsApiKey || "",
+    libraries,
   });
 
   useEffect(() => {
     const fetchUsersFromFirestore = async () => {
-      if (!currentUser) { // Only fetch if a user is logged in (due to security rules for reading users)
+      if (!currentUser) {
         setIsLoadingUsers(false);
-        setMapMarkersData([]); // Clear markers if no user is logged in
+        setMapMarkersData([]);
+        console.log("MapPage: No current user, not fetching Firestore users for map.");
         return;
       }
       setIsLoadingUsers(true);
-      console.log("MapPage: Attempting to fetch users from Firestore.");
+      console.log("MapPage: Current user detected, attempting to fetch users from Firestore.");
       try {
         const db = getFirestore(app, "poker");
         const usersCollectionRef = collection(db, "users");
-        // Query all users. Ensure your Firestore rules allow this for authenticated users.
-        const q = query(usersCollectionRef); 
+        const q = query(usersCollectionRef);
+        console.log("MapPage: Querying 'users' collection in 'poker' database.");
         const querySnapshot = await getDocs(q);
         
+        console.log(`MapPage: Fetched ${querySnapshot.docs.length} total user documents from Firestore.`);
         const usersForMap: MockUserPin[] = [];
-        querySnapshot.forEach((doc) => {
-          const userData = doc.data();
-          // Check if user has locationCoords and they are valid
+        querySnapshot.forEach((docSnap) => {
+          const userData = docSnap.data();
+          const userId = docSnap.id;
+          console.log(`MapPage: Processing user ID: ${userId}, Data:`, JSON.stringify(userData));
+          
           if (userData.locationCoords && typeof userData.locationCoords.lat === 'number' && typeof userData.locationCoords.lng === 'number') {
+            console.log(`MapPage: User ID: ${userId} has valid locationCoords. Adding to map. Coords: lat=${userData.locationCoords.lat}, lng=${userData.locationCoords.lng}`);
             usersForMap.push({
-              id: doc.id, // UID
+              id: docSnap.id,
               username: userData.username || "unknown_user",
               name: userData.fullName || userData.username || "Unknown User",
               avatar: userData.avatar || `https://placehold.co/40x40.png?text=${(userData.fullName || userData.username || "U").substring(0,1).toUpperCase()}`,
@@ -95,24 +102,24 @@ export default function MapPage() {
               coverImage: userData.coverImage,
               aiHint: "map user profile",
             });
+          } else {
+            console.warn(`MapPage: User ID: ${userId} SKIPPED. Missing or invalid locationCoords. locationCoords data:`, userData.locationCoords);
           }
         });
         setMapMarkersData(usersForMap);
-        console.log(`MapPage: Fetched ${usersForMap.length} users from Firestore for map.`);
+        console.log(`MapPage: Final usersForMap to be rendered on map (${usersForMap.length} users):`, usersForMap.map(u => ({id: u.id, name: u.name, lat: u.position.lat, lng: u.position.lng })));
       } catch (error) {
         console.error("MapPage: Error fetching users from Firestore:", error);
-        // Potentially a permissions error or Firestore not set up for 'poker' DB
-        // For now, display an empty map on error
         setMapMarkersData([]);
       } finally {
         setIsLoadingUsers(false);
       }
     };
 
-    if (isLoaded && !loadError && googleMapsApiKey) {
+    if (isLoaded && !loadError && googleMapsApiKey && currentUser !== undefined) { // Check currentUser is not undefined to avoid race condition
         fetchUsersFromFirestore();
     } else if (!googleMapsApiKey || loadError) {
-        setIsLoadingUsers(false); // Don't attempt to load users if map can't load
+        setIsLoadingUsers(false);
     }
   }, [isLoaded, loadError, googleMapsApiKey, currentUser]);
 
@@ -192,16 +199,19 @@ export default function MapPage() {
               onUnmount={() => console.log("%cGoogleMap: component unmounted (onUnmount event).", 'color: red;')}
               options={{ zoomControl: true, mapId: "POKER_CONNECT_MAP_ID" }}
             >
-              {mapMarkersData.map((user) => (
-                <Marker
-                  key={user.id}
-                  position={user.position}
-                  onClick={() => {
-                    console.log(`Marker clicked: ${user.username}`);
-                    setSelectedUser(user);
-                  }}
-                />
-              ))}
+              {mapMarkersData.map((user) => {
+                console.log(`MapPage: Rendering Marker for ${user.username} at lat: ${user.position.lat}, lng: ${user.position.lng}`);
+                return (
+                  <Marker
+                    key={user.id}
+                    position={user.position}
+                    onClick={() => {
+                      console.log(`Marker clicked: ${user.username}`);
+                      setSelectedUser(user);
+                    }}
+                  />
+                );
+              })}
 
               {selectedUser && (
                 <InfoWindow
@@ -230,7 +240,7 @@ export default function MapPage() {
           {!isLoadingUsers && (
             <p className="text-sm text-muted-foreground mt-4">
                 {mapMarkersData.length > 0
-                ? `This map shows approximate locations of ${mapMarkersData.length} PokerConnect user(s) across India who have shared their location (data from Firestore). Click on a marker to see more details.`
+                ? `This map shows approximate locations of ${mapMarkersData.length} PokerConnect user(s) who have shared their location (data from Firestore). Click on a marker to see more details.`
                 : "No users with location data found in Firestore to display on the map. Sign up and select a location to appear!"
                 }
             </p>
@@ -240,3 +250,4 @@ export default function MapPage() {
     </div>
   );
 }
+
