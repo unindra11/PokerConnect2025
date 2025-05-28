@@ -15,7 +15,7 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { MessageCircle, Heart, Repeat, Edit3, Trash2, CornerDownRight, Send } from "lucide-react";
+import { MessageCircle, Heart, Repeat, Edit3, Trash2, CornerDownRight, Send, Loader2 } from "lucide-react"; // Added Loader2
 import type { Post, Comment as PostComment } from "@/types/post"; // Use PostComment alias
 import { useToast } from "@/hooks/use-toast";
 import { useRouter } from "next/navigation";
@@ -23,11 +23,11 @@ import { formatDistanceToNow } from 'date-fns';
 
 interface PostCardProps {
   post: Post;
-  currentUserId?: string | null; // To check if the logged-in user can delete their own comment (optional)
+  currentUserId?: string | null; 
   showManagementControls?: boolean;
   onDeletePost?: (postId: string) => void;
   onLikePost?: (postId: string) => void;
-  onCommentPost?: (postId: string, commentText: string) => Promise<void>; // Make it async
+  onCommentPost?: (postId: string, commentText: string) => Promise<void>; 
   isLCPItem?: boolean; 
 }
 
@@ -73,9 +73,10 @@ export function PostCard({
       setIsSubmittingComment(true);
       try {
         await onCommentPost(post.id, newComment.trim());
-        setNewComment(""); // Clear input on success
+        setNewComment(""); 
       } catch (error) {
-        // Error toast is handled by the parent component
+        // Error toast is handled by the parent component's catch block
+        console.error("PostCard: Error during onCommentPost call:", error);
       } finally {
         setIsSubmittingComment(false);
       }
@@ -84,6 +85,7 @@ export function PostCard({
         title: "Comment Simulated",
         description: `Comment: "${newComment}" for post ID ${post.id}. Firestore interaction needed.`,
       });
+       setNewComment(""); // Clear even for simulated
     }
   };
 
@@ -110,19 +112,27 @@ export function PostCard({
   
   const getTimestampString = (timestamp: any): string => {
     if (!timestamp) return 'Just now';
-    if (timestamp.toDate) { // Firestore Timestamp
-      return formatDistanceToNow(timestamp.toDate(), { addSuffix: true });
+    let date: Date | null = null;
+    if (timestamp.toDate) { 
+      date = timestamp.toDate();
+    } else if (timestamp.seconds) { 
+      date = new Date(timestamp.seconds * 1000 + (timestamp.nanoseconds || 0) / 1000000);
+    } else if (typeof timestamp === 'string' || typeof timestamp === 'number') {
+      const parsedDate = new Date(timestamp);
+      if (!isNaN(parsedDate.getTime())) {
+        date = parsedDate;
+      }
     }
-    if (timestamp.seconds) { // Object with seconds and nanoseconds
-      return formatDistanceToNow(new Date(timestamp.seconds * 1000), { addSuffix: true });
+    
+    if (date) {
+      try {
+        return formatDistanceToNow(date, { addSuffix: true });
+      } catch (e) {
+        console.warn("Error formatting date:", e, "Timestamp was:", timestamp);
+        return new Date(timestamp).toLocaleString(); // Fallback to basic locale string
+      }
     }
-    if (typeof timestamp === 'string') {
-        const date = new Date(timestamp);
-        if (!isNaN(date.getTime())) {
-             return formatDistanceToNow(date, { addSuffix: true });
-        }
-    }
-    return 'A while ago';
+    return new Date().toLocaleString(); // Fallback if timestamp is not recognized
   };
 
 
@@ -184,19 +194,18 @@ export function PostCard({
               <MessageCircle className="mr-1 h-4 w-4" /> {displayedCommentsCount}
             </Button>
             <Button variant="ghost" size="sm" className={`${post.likedByCurrentUser ? 'text-primary' : 'text-muted-foreground'} hover:text-primary`} onClick={handleLike}>
-              <Heart className={`mr-1 h-4 w-4 ${post.likedByCurrentUser ? 'fill-primary' : ''}`} /> {displayedLikes}
+              <Heart className={`mr-1 h-4 w-4 ${post.likedByCurrentUser ? 'fill-primary' : ''}`} /> {Math.max(0, post.likes || 0)}
             </Button>
             <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-primary" onClick={handleShare}>
               <Repeat className="mr-1 h-4 w-4" /> {post.shares || 0}
             </Button>
         </div>
 
-        {/* Display Comments */}
         {(post.fetchedComments && post.fetchedComments.length > 0) && (
           <div className="w-full px-4 pt-3 mt-2 border-t border-dashed space-y-3">
             <h4 className="text-sm font-semibold text-foreground/80">Comments:</h4>
             <ul className="space-y-2 max-h-48 overflow-y-auto">
-              {post.fetchedComments.slice().reverse().map((comment) => ( // Show newest first
+              {post.fetchedComments.slice().reverse().map((comment) => ( 
                 <li key={comment.id} className="text-xs text-muted-foreground bg-muted/30 p-2 rounded-md flex items-start space-x-2">
                   <Avatar className="h-6 w-6 mt-0.5">
                     <AvatarImage src={comment.avatar || `https://placehold.co/40x40.png?text=${comment.username?.substring(0,1)?.toUpperCase() || 'U'}`} alt={comment.username} data-ai-hint="commenter avatar" />
@@ -213,7 +222,6 @@ export function PostCard({
           </div>
         )}
         
-        {/* Add Comment Form */}
         {onCommentPost && (
           <form onSubmit={handleSubmitComment} className="w-full px-4 pt-3 mt-2 border-t border-dashed flex items-center gap-2">
             <Input
