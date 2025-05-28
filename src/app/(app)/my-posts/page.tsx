@@ -22,7 +22,8 @@ import {
   deleteDoc, 
   Timestamp,
   writeBatch,
-  serverTimestamp
+  serverTimestamp,
+  addDoc // For creating like documents
 } from "firebase/firestore";
 import { getAuth, onAuthStateChanged, type User as FirebaseUser } from "firebase/auth";
 import { app } from "@/lib/firebase";
@@ -100,13 +101,23 @@ export default function MyPostsPage() {
         });
         const posts = await Promise.all(postsPromises);
         setUserPosts(posts);
-      } catch (error) {
+        if (posts.length === 0) {
+            toast({
+                title: "No Posts Yet",
+                description: "You haven't created any posts. Share your thoughts!",
+            });
+        }
+      } catch (error: any) {
         console.error("Error fetching user posts from Firestore:", error);
+        let firestoreErrorMessage = "Could not retrieve your posts. Please ensure Firestore is correctly set up.";
+         if (error.message && error.message.includes("firestore") && error.message.includes("index")) {
+            firestoreErrorMessage = `Failed to fetch posts. The query requires a Firestore index. Please check the browser console for a link to create it. Details: ${error.message}`;
+        }
         toast({
           title: "Error Loading Your Posts",
-          description: "Could not retrieve your posts from Firestore. Check console for details (e.g. missing index).",
+          description: firestoreErrorMessage,
           variant: "destructive",
-          duration: 7000,
+          duration: 10000,
         });
         setUserPosts([]);
       } finally {
@@ -126,6 +137,7 @@ export default function MyPostsPage() {
     }
     const originalPosts = [...userPosts];
     setUserPosts(prevPosts => prevPosts.filter(post => post.id !== postId));
+    
     toast({
       title: "Post Deleting...",
       description: "Removing your post from Firestore.",
@@ -134,8 +146,17 @@ export default function MyPostsPage() {
     try {
       const db = getFirestore(app, "poker");
       const postRef = doc(db, "posts", postId);
-      // Optional: Delete associated likes in a batch if needed, but for now just the post.
       await deleteDoc(postRef);
+
+      // Optional: Delete associated likes for this post
+      const likesQuery = query(collection(db, "likes"), where("postId", "==", postId));
+      const likesSnapshot = await getDocs(likesQuery);
+      if (!likesSnapshot.empty) {
+        const batch = writeBatch(db);
+        likesSnapshot.forEach(likeDoc => batch.delete(likeDoc.ref));
+        await batch.commit();
+      }
+      
       toast({
         title: "Post Deleted",
         description: "Your post has been successfully removed from Firestore.",
@@ -158,28 +179,25 @@ export default function MyPostsPage() {
     }
 
     const db = getFirestore(app, "poker");
-    const postRef = doc(db, "posts", postId);
-    const likesCollectionRef = collection(db, "likes");
-    const likeQuery = query(likesCollectionRef, where("postId", "==", postId), where("userId", "==", currentUser.uid));
+    const originalPosts = userPosts.map(p => ({...p})); 
     
-    const originalPosts = userPosts.map(p => ({...p}));
-    let isCurrentlyLikedOptimistic = false;
-
+    // Optimistic UI Update
     setUserPosts(prevPosts =>
       prevPosts.map(p => {
         if (p.id === postId) {
-          isCurrentlyLikedOptimistic = !!p.likedByCurrentUser;
-          let newLikesCount = p.likes;
-          if (!isCurrentlyLikedOptimistic) { // User is "liking"
-            newLikesCount = p.likes + 1;
-          } else { // User is "unliking"
-            newLikesCount = p.likes > 0 ? p.likes - 1 : 0; 
+          const isCurrentlyLiked = !!p.likedByCurrentUser;
+          const newLikedByCurrentUser = !isCurrentlyLiked;
+          let newLikesCount = p.likes || 0;
+
+          if (newLikedByCurrentUser) { // LIKING
+            newLikesCount = (p.likes || 0) + 1;
+          } else { // UNLIKING
+            newLikesCount = Math.max(0, (p.likes || 0) - 1);
           }
-          const finalLikedByCurrentUser = newLikesCount === 0 ? false : !isCurrentlyLikedOptimistic;
           return { 
             ...p, 
             likes: newLikesCount, 
-            likedByCurrentUser: finalLikedByCurrentUser
+            likedByCurrentUser: newLikedByCurrentUser 
           };
         }
         return p;
@@ -187,11 +205,14 @@ export default function MyPostsPage() {
     );
 
     try {
+      const postRef = doc(db, "posts", postId);
+      const likesCollectionRef = collection(db, "likes");
+      const likeQuery = query(likesCollectionRef, where("postId", "==", postId), where("userId", "==", currentUser.uid));
       const likeSnapshot = await getDocs(likeQuery);
       const batch = writeBatch(db);
 
       if (likeSnapshot.empty) { // User is liking the post
-        const newLikeRef = doc(likesCollectionRef); 
+        const newLikeRef = doc(likesCollectionRef); // Auto-generate ID
         batch.set(newLikeRef, {
           postId: postId,
           userId: currentUser.uid,
@@ -210,10 +231,10 @@ export default function MyPostsPage() {
       }
     } catch (error) {
       console.error("Error updating likes in Firestore:", error);
-      setUserPosts(originalPosts); // Revert optimistic update
+      setUserPosts(originalPosts); // Revert optimistic update on error
       toast({
         title: "Error Liking Post",
-        description: "Could not save your like to Firestore.",
+        description: "Could not save your like. Please try again.",
         variant: "destructive",
       });
     }
@@ -273,7 +294,7 @@ export default function MyPostsPage() {
       </div>
 
       <div className="space-y-6">
-        {userPosts.length === 0 && (
+        {userPosts.length === 0 && !isLoading && (
           <Card className="text-center p-8 shadow-lg rounded-xl">
             <CardHeader>
               <CardTitle className="text-xl mb-2">No Posts Yet!</CardTitle>
@@ -302,3 +323,4 @@ export default function MyPostsPage() {
   );
 }
 
+    
