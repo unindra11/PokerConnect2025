@@ -27,13 +27,9 @@ const createPostSchema = z.object({
 
 type CreatePostFormValues = z.infer<typeof createPostSchema>;
 
-// const USER_POSTS_STORAGE_KEY = "pokerConnectUserPosts"; // Kept for reference, but primary is Firestore
-
 export default function CreatePostPage() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  // const [imageToSaveUrl, setImageToSaveUrl] = useState<string | null>(null); // This will be the Firebase URL
-  // const [existingImageAiHint, setExistingImageAiHint] = useState<string | undefined>(undefined);
   const [isLoading, setIsLoading] = useState(false);
   const { toast } = useToast();
   const router = useRouter();
@@ -63,7 +59,7 @@ export default function CreatePostPage() {
           const postDocSnap = await getDoc(postDocRef);
 
           if (postDocSnap.exists()) {
-            const postData = postDocSnap.data() as Omit<Post, 'id'>; // Cast to ensure type safety
+            const postData = postDocSnap.data() as Omit<Post, 'id' | 'timestamp'>; 
             const fetchedPost: Post = { 
               id: postDocSnap.id,
               userId: postData.userId,
@@ -73,18 +69,17 @@ export default function CreatePostPage() {
               image: postData.image,
               imageAiHint: postData.imageAiHint,
               likes: postData.likes || 0,
+              likedByCurrentUser: postData.likedByCurrentUser || false,
               comments: postData.comments || 0,
               commentTexts: postData.commentTexts || [],
               shares: postData.shares || 0,
               createdAt: postData.createdAt,
-              // timestamp: postData.createdAt instanceof Timestamp ? postData.createdAt.toDate().toLocaleString() : new Date().toLocaleString(),
+              // timestamp is derived dynamically or not used if createdAt is a Firestore Timestamp
             };
             setPostToEdit(fetchedPost);
             form.setValue("postContent", fetchedPost.content);
             if (fetchedPost.image) {
               setPreviewUrl(fetchedPost.image); 
-              // setImageToSaveUrl(fetchedPost.image); // No longer needed for Data URI saving
-              // setExistingImageAiHint(fetchedPost.imageAiHint);
             }
           } else {
             toast({ title: "Error", description: "Post not found for editing in Firestore.", variant: "destructive" });
@@ -98,7 +93,9 @@ export default function CreatePostPage() {
         }
       }
     };
-    loadPostForEdit();
+    if (isEditMode && editPostId) { // Only call if in edit mode and ID exists
+        loadPostForEdit();
+    }
   }, [isEditMode, editPostId, form, toast, router]);
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -112,8 +109,6 @@ export default function CreatePostPage() {
         });
         if (fileInputRef.current) fileInputRef.current.value = "";
         setSelectedFile(null);
-        // For edit mode, if they had an existing image and tried to upload a too-large one,
-        // revert preview to the existing image or clear if no existing image.
         setPreviewUrl(postToEdit?.image || null); 
         return;
       }
@@ -128,10 +123,10 @@ export default function CreatePostPage() {
         setPreviewUrl(postToEdit?.image || null);
         return;
       }
-      setSelectedFile(file); // Keep the file object for upload
+      setSelectedFile(file); 
       const reader = new FileReader();
       reader.onloadend = () => {
-        setPreviewUrl(reader.result as string); // Show local preview immediately
+        setPreviewUrl(reader.result as string); 
       };
       reader.readAsDataURL(file);
     }
@@ -139,8 +134,8 @@ export default function CreatePostPage() {
 
   const clearMedia = () => {
     setSelectedFile(null);
-    setPreviewUrl(null); // Clears the preview
-    if (postToEdit) { // If in edit mode, this means we intend to remove the existing image
+    setPreviewUrl(null); 
+    if (postToEdit) { 
       setPostToEdit(prev => prev ? { ...prev, image: undefined, imageAiHint: undefined } : null);
     }
     if (fileInputRef.current) {
@@ -160,7 +155,7 @@ export default function CreatePostPage() {
         loggedInUserForPost = {
           name: parsedUser.fullName || parsedUser.username || "Anonymous",
           avatar: parsedUser.avatar || `https://placehold.co/100x100.png?text=${(parsedUser.fullName || parsedUser.username || "A").substring(0,1)}`,
-          handle: parsedUser.username ? `@${parsedUser.username}` : `@${currentUserAuth.uid}` // Fallback to UID
+          handle: parsedUser.username ? `@${parsedUser.username}` : `@${currentUserAuth.uid}`
         };
       } else { 
         loggedInUserForPost = {
@@ -180,17 +175,17 @@ export default function CreatePostPage() {
     }
 
     let finalImageUrl: string | null = null;
-    let finalImageAiHint: string | undefined = "user uploaded image"; // Default hint if an image is processed
+    let finalImageAiHint: string | null = null; // Initialize to null
 
-    if (isEditMode && postToEdit && !selectedFile && previewUrl === null) { // Image was explicitly cleared during edit
+    if (isEditMode && postToEdit && !selectedFile && previewUrl === null) { 
       finalImageUrl = null;
-      finalImageAiHint = undefined;
-    } else if (isEditMode && postToEdit && !selectedFile && postToEdit.image) { // Editing, no new file, existing image kept
+      finalImageAiHint = null;
+    } else if (isEditMode && postToEdit && !selectedFile && postToEdit.image) { 
       finalImageUrl = postToEdit.image;
-      finalImageAiHint = postToEdit.imageAiHint;
+      finalImageAiHint = postToEdit.imageAiHint || null;
     }
     
-    if (selectedFile) { // If a new file is selected (for new post or replacing in edit)
+    if (selectedFile) { 
       const storageRefPath = `posts/${currentUserAuth.uid}/${Date.now()}_${selectedFile.name}`;
       const fileStorageRef = ref(storage, storageRefPath);
       const uploadTask = uploadBytesResumable(fileStorageRef, selectedFile);
@@ -199,40 +194,38 @@ export default function CreatePostPage() {
         console.log(`CreatePostPage: Attempting to upload to Firebase Storage path: ${storageRefPath}`);
         await uploadTask;
         finalImageUrl = await getDownloadURL(uploadTask.snapshot.ref);
-        // finalImageAiHint can be made more specific later, e.g., based on content
+        finalImageAiHint = "user uploaded image"; // Default hint for newly uploaded image
         console.log("CreatePostPage: Firebase Storage upload successful. Download URL:", finalImageUrl);
       } catch (error: any) {
         console.error("CreatePostPage: Firebase Storage upload error:", error);
         toast({ title: "Upload Failed", description: `Could not upload image: ${error.message}. Post will proceed with previous or no image.`, variant: "destructive", duration: 9000 });
-        // Keep existing image if upload fails during edit, or null if new post
         if (isEditMode && postToEdit) {
           finalImageUrl = postToEdit.image || null;
-          finalImageAiHint = postToEdit.imageAiHint;
+          finalImageAiHint = postToEdit.imageAiHint || null;
         } else {
           finalImageUrl = null;
-          finalImageAiHint = undefined;
+          finalImageAiHint = null;
         }
       }
-    } else if (!isEditMode) { // New post, no file selected
+    } else if (!isEditMode) { 
         finalImageUrl = null;
-        finalImageAiHint = undefined;
+        finalImageAiHint = null;
     }
     
     const firestore = getFirestore(app, "poker");
     
-    const postDataForFirestore = {
+    const postDataForFirestore: Partial<Post> = {
       userId: currentUserAuth.uid,
-      user: loggedInUserForPost, // This object includes name, avatar, handle (username)
-      username: loggedInUserForPost.handle.replace("@", ""), // Store username without @
+      user: loggedInUserForPost, 
+      username: loggedInUserForPost.handle.replace("@", ""), 
       content: data.postContent,
-      image: finalImageUrl, // This will be the Firebase Storage URL or null
-      imageAiHint: finalImageAiHint,
+      image: finalImageUrl, 
+      imageAiHint: finalImageAiHint, // Will be null if no image
       likes: isEditMode && postToEdit ? postToEdit.likes : 0,
-      likedByCurrentUser: isEditMode && postToEdit ? postToEdit.likedByCurrentUser : false, // Default for new posts
+      likedByCurrentUser: isEditMode && postToEdit ? postToEdit.likedByCurrentUser : false,
       comments: isEditMode && postToEdit ? postToEdit.comments : 0,
       commentTexts: isEditMode && postToEdit ? postToEdit.commentTexts || [] : [],
       shares: isEditMode && postToEdit ? postToEdit.shares : 0,
-      // createdAt and updatedAt are handled by serverTimestamp or existing values
     };
     
     console.log("CreatePostPage: Attempting to save to Firestore. Is Edit Mode:", isEditMode);
@@ -243,12 +236,13 @@ export default function CreatePostPage() {
         const postDocRef = doc(firestore, "posts", editPostId);
         const dataToUpdate: Partial<Post> = {
           ...postDataForFirestore,
-          updatedAt: serverTimestamp(), // Add/update updatedAt field
-          createdAt: postToEdit.createdAt, // Preserve original createdAt
+          updatedAt: serverTimestamp(), 
+          createdAt: postToEdit.createdAt, 
         };
-        delete (dataToUpdate as any).userId; // userId should not be updated
-        delete (dataToUpdate as any).username; // username of post author should not be updated
-        delete (dataToUpdate as any).user; // user object of post author should not be updated
+        // Fields that should not be updated
+        delete (dataToUpdate as any).userId; 
+        delete (dataToUpdate as any).username; 
+        delete (dataToUpdate as any).user; 
         
         await updateDoc(postDocRef, dataToUpdate);
         console.log("CreatePostPage: Firestore post UPDATE successful for ID:", editPostId);
@@ -256,8 +250,8 @@ export default function CreatePostPage() {
       } else {
         const docRef = await addDoc(collection(firestore, "posts"), {
           ...postDataForFirestore,
-          createdAt: serverTimestamp(), // For new posts
-          updatedAt: serverTimestamp(), // For new posts
+          createdAt: serverTimestamp(), 
+          updatedAt: serverTimestamp(), 
         });
         console.log("CreatePostPage: Firestore post ADD successful. New Post ID:", docRef.id);
         toast({ title: "Post Created!", description: "Your thoughts have been shared on Firestore." });
@@ -266,8 +260,6 @@ export default function CreatePostPage() {
       form.reset();
       setSelectedFile(null);
       setPreviewUrl(null);
-      // setImageToSaveUrl(null); // Not needed
-      // setExistingImageAiHint(undefined); // Not needed
       if (fileInputRef.current) fileInputRef.current.value = "";
       router.push(isEditMode ? "/my-posts" : "/community-wall");
 
@@ -276,6 +268,8 @@ export default function CreatePostPage() {
       let firestoreErrorMessage = `Could not save post: ${error.message}`;
       if (error.message && (error.message.includes("firestore") || error.message.includes("Firestore") || error.message.includes("RPC") || (typeof error.code === 'string' && error.code.startsWith("permission-denied")) || error.code === 'unavailable' || error.code === 'unimplemented' || error.code === 'internal')) {
         firestoreErrorMessage = `Failed to save post to Firestore. Ensure Firestore is correctly set up (database instance created in 'poker', API enabled, and security rules published in Firebase Console for the 'posts' collection) and check console for details. Error: ${error.message}`;
+      } else if (error.message && error.message.includes("Unsupported field value: undefined")) {
+        firestoreErrorMessage = `Could not save post: One of the fields has an 'undefined' value which Firestore doesn't support. Please check all fields being saved. Details: ${error.message}`;
       }
       toast({ title: "Firestore Error", description: firestoreErrorMessage, variant: "destructive", duration: 15000 });
     } finally {
