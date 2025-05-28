@@ -7,7 +7,7 @@ import { Card, CardDescription, CardTitle, CardContent, CardHeader } from "@/com
 import Link from "next/link";
 import { PlusCircle, Loader2 } from "lucide-react";
 import { PostCard } from "@/components/post-card";
-import type { Post } from "@/types/post";
+import type { Post, Comment as PostComment } from "@/types/post"; // Import PostComment
 import { useToast } from "@/hooks/use-toast";
 import { 
   getFirestore, 
@@ -23,10 +23,16 @@ import {
   Timestamp,
   writeBatch,
   serverTimestamp,
-  addDoc // For creating like documents
+  addDoc 
 } from "firebase/firestore";
 import { getAuth, onAuthStateChanged, type User as FirebaseUser } from "firebase/auth";
 import { app } from "@/lib/firebase";
+
+interface LoggedInUserDetails {
+  username?: string;
+  avatar?: string;
+  fullName?: string;
+}
 
 export default function MyPostsPage() {
   const [userPosts, setUserPosts] = useState<Post[]>([]);
@@ -55,8 +61,9 @@ export default function MyPostsPage() {
         return;
       }
       setIsLoading(true);
+      const db = getFirestore(app, "poker");
+      console.log("MyPostsPage: Fetching posts for user UID:", currentUser.uid);
       try {
-        const db = getFirestore(app, "poker");
         const postsCollectionRef = collection(db, "posts");
         const q = query(
           postsCollectionRef,
@@ -65,7 +72,7 @@ export default function MyPostsPage() {
         );
         const querySnapshot = await getDocs(q);
         
-        const postsPromises = querySnapshot.docs.map(async (docSnap) => {
+        const postsPromises: Promise<Post>[] = querySnapshot.docs.map(async (docSnap) => {
           const data = docSnap.data();
           const postUser = data.user || { name: "Unknown User", avatar: `https://placehold.co/100x100.png?text=U`, handle: "@unknown" };
           
@@ -77,38 +84,48 @@ export default function MyPostsPage() {
             likedByCurrentUser = !likeSnapshot.empty;
           }
 
+          // Fetch comments for this post
+          const commentsCollectionRef = collection(db, "posts", docSnap.id, "comments");
+          const commentsQuery = query(commentsCollectionRef, orderBy("createdAt", "asc"));
+          const commentsSnapshot = await getDocs(commentsQuery);
+          const fetchedComments: PostComment[] = commentsSnapshot.docs.map(commentDoc => ({
+            id: commentDoc.id,
+            ...(commentDoc.data() as Omit<PostComment, 'id'>)
+          }));
+
           return {
             id: docSnap.id,
             userId: data.userId,
             user: {
               name: postUser.name || "Unknown User",
               avatar: postUser.avatar || `https://placehold.co/100x100.png?text=${(postUser.name || "U").substring(0,1)}`,
-              handle: postUser.handle || `@${postUser.username || 'unknown'}`,
+              handle: postUser.handle || `@${data.username || 'unknown'}`,
             },
             content: data.content,
             image: data.image,
             imageAiHint: data.imageAiHint,
             likes: data.likes || 0,
             likedByCurrentUser: likedByCurrentUser, 
-            comments: data.comments || 0,
-            commentTexts: data.commentTexts || [],
+            comments: data.comments || 0, // Denormalized count
+            fetchedComments: fetchedComments, // Actual comment objects
             shares: data.shares || 0,
             createdAt: data.createdAt,
             timestamp: data.createdAt instanceof Timestamp 
               ? data.createdAt.toDate().toLocaleString() 
               : (data.createdAt?.seconds ? new Date(data.createdAt.seconds * 1000).toLocaleString() : new Date().toLocaleString()),
-          };
+          } as Post;
         });
         const posts = await Promise.all(postsPromises);
         setUserPosts(posts);
-        if (posts.length === 0) {
+        console.log(`MyPostsPage: Fetched ${posts.length} posts from Firestore.`);
+        if (posts.length === 0 && !isLoading) {
             toast({
                 title: "No Posts Yet",
                 description: "You haven't created any posts. Share your thoughts!",
             });
         }
       } catch (error: any) {
-        console.error("Error fetching user posts from Firestore:", error);
+        console.error("MyPostsPage: Error fetching user posts from Firestore:", error);
         let firestoreErrorMessage = "Could not retrieve your posts. Please ensure Firestore is correctly set up.";
          if (error.message && error.message.includes("firestore") && error.message.includes("index")) {
             firestoreErrorMessage = `Failed to fetch posts. The query requires a Firestore index. Please check the browser console for a link to create it. Details: ${error.message}`;
@@ -145,24 +162,34 @@ export default function MyPostsPage() {
 
     try {
       const db = getFirestore(app, "poker");
+      const batch = writeBatch(db);
+      
       const postRef = doc(db, "posts", postId);
-      await deleteDoc(postRef);
+      batch.delete(postRef);
 
-      // Optional: Delete associated likes for this post
       const likesQuery = query(collection(db, "likes"), where("postId", "==", postId));
       const likesSnapshot = await getDocs(likesQuery);
       if (!likesSnapshot.empty) {
-        const batch = writeBatch(db);
         likesSnapshot.forEach(likeDoc => batch.delete(likeDoc.ref));
-        await batch.commit();
+        console.log(`MyPostsPage: Deleting ${likesSnapshot.size} likes for post ${postId}`);
+      }
+
+      // Delete comments subcollection (more involved, iterating and deleting each comment)
+      const commentsRef = collection(db, "posts", postId, "comments");
+      const commentsSnapshot = await getDocs(commentsRef);
+      if (!commentsSnapshot.empty) {
+        commentsSnapshot.forEach(commentDoc => batch.delete(commentDoc.ref));
+        console.log(`MyPostsPage: Deleting ${commentsSnapshot.size} comments for post ${postId}`);
       }
       
+      await batch.commit();
+      console.log(`MyPostsPage: Successfully deleted post ${postId} and its associated likes/comments from Firestore.`);
       toast({
         title: "Post Deleted",
-        description: "Your post has been successfully removed from Firestore.",
+        description: "Your post and its associated data have been successfully removed from Firestore.",
       });
     } catch (error) {
-      console.error("Error deleting post from Firestore:", error);
+      console.error("MyPostsPage: Error deleting post from Firestore:", error);
       setUserPosts(originalPosts); 
       toast({
         title: "Error Deleting Post",
@@ -179,21 +206,24 @@ export default function MyPostsPage() {
     }
 
     const db = getFirestore(app, "poker");
-    const originalPosts = userPosts.map(p => ({...p})); 
+    const originalPosts = userPosts.map(p => ({...p, fetchedComments: p.fetchedComments ? [...p.fetchedComments] : [] }));
     
-    // Optimistic UI Update
-    setUserPosts(prevPosts =>
-      prevPosts.map(p => {
+    console.log(`MyPostsPage: Liking post ${postId}. Current state:`, userPosts.find(p => p.id === postId));
+
+    setUserPosts(prevPosts => {
+      const updatedPosts = prevPosts.map(p => {
         if (p.id === postId) {
           const isCurrentlyLiked = !!p.likedByCurrentUser;
           const newLikedByCurrentUser = !isCurrentlyLiked;
+          
           let newLikesCount = p.likes || 0;
-
-          if (newLikedByCurrentUser) { // LIKING
-            newLikesCount = (p.likes || 0) + 1;
-          } else { // UNLIKING
+          if (newLikedByCurrentUser) { 
+            newLikesCount = Math.max(0, (p.likes || 0)) + 1;
+          } else { 
             newLikesCount = Math.max(0, (p.likes || 0) - 1);
           }
+          
+          console.log(`MyPostsPage: Post ${postId} - Optimistic update: likes=${newLikesCount}, likedByCurrentUser=${newLikedByCurrentUser}`);
           return { 
             ...p, 
             likes: newLikesCount, 
@@ -201,51 +231,110 @@ export default function MyPostsPage() {
           };
         }
         return p;
-      })
-    );
+      });
+      const postAfterUpdate = updatedPosts.find(p => p.id === postId);
+      console.log(`MyPostsPage: Post ${postId} - After optimistic update attempt (inside map):`, postAfterUpdate);
+      return updatedPosts;
+    });
 
     try {
-      const postRef = doc(db, "posts", postId);
       const likesCollectionRef = collection(db, "likes");
+      const postDocRef = doc(db, "posts", postId);
       const likeQuery = query(likesCollectionRef, where("postId", "==", postId), where("userId", "==", currentUser.uid));
       const likeSnapshot = await getDocs(likeQuery);
       const batch = writeBatch(db);
 
-      if (likeSnapshot.empty) { // User is liking the post
-        const newLikeRef = doc(likesCollectionRef); // Auto-generate ID
-        batch.set(newLikeRef, {
-          postId: postId,
-          userId: currentUser.uid,
-          createdAt: serverTimestamp()
-        });
-        batch.update(postRef, { likes: increment(1) });
+      if (likeSnapshot.empty) { 
+        console.log(`MyPostsPage: User ${currentUser.uid} is LIKING post ${postId}.`);
+        const newLikeRef = doc(likesCollectionRef); 
+        batch.set(newLikeRef, { postId: postId, userId: currentUser.uid, createdAt: serverTimestamp() });
+        batch.update(postDocRef, { likes: increment(1) });
         await batch.commit();
         toast({ title: "Post Liked!", description: "Your like has been recorded." });
-      } else { // User is unliking the post
-        likeSnapshot.forEach(doc => {
-          batch.delete(doc.ref);
-        });
-        batch.update(postRef, { likes: increment(-1) });
+      } else { 
+        console.log(`MyPostsPage: User ${currentUser.uid} is UNLIKING post ${postId}.`);
+        likeSnapshot.forEach(doc => batch.delete(doc.ref));
+        batch.update(postDocRef, { likes: increment(-1) });
         await batch.commit();
         toast({ title: "Like Removed", description: "Your like has been removed." });
       }
     } catch (error) {
-      console.error("Error updating likes in Firestore:", error);
-      setUserPosts(originalPosts); // Revert optimistic update on error
+      console.error("MyPostsPage: Error updating likes in Firestore:", error);
+      setUserPosts(originalPosts); 
       toast({
         title: "Error Liking Post",
-        description: "Could not save your like. Please try again.",
+        description: "Could not save your like to Firestore.",
         variant: "destructive",
       });
     }
   };
 
-  const handleCommentOnPost = (postId: string, commentText: string) => {
-     toast({
-      title: "Comment Action (Simulated)",
-      description: `Firestore comment '${commentText}' for post ${postId} on 'My Posts' page coming soon! Firestore interaction for comments needs to be implemented.`,
-    });
+  const handleCommentOnPost = async (postId: string, commentText: string) => {
+    if (!currentUser) {
+      toast({ title: "Authentication Error", description: "You must be logged in to comment.", variant: "destructive" });
+      return;
+    }
+    const loggedInUserString = localStorage.getItem("loggedInUser");
+    let loggedInUserDetails: LoggedInUserDetails | null = null;
+    if (loggedInUserString) {
+      try {
+        loggedInUserDetails = JSON.parse(loggedInUserString);
+      } catch (e) {
+        console.error("MyPostsPage: Error parsing loggedInUser from localStorage for comment:", e);
+      }
+    }
+    if (!loggedInUserDetails) {
+        toast({ title: "Profile Error", description: "Could not retrieve your profile details to comment.", variant: "destructive" });
+        return;
+    }
+
+    const db = getFirestore(app, "poker");
+    const postRef = doc(db, "posts", postId);
+    const commentsCollectionRef = collection(db, "posts", postId, "comments");
+
+    const newCommentData: Omit<PostComment, 'id'> = {
+      userId: currentUser.uid,
+      username: loggedInUserDetails.username || "Anonymous",
+      avatar: loggedInUserDetails.avatar || `https://placehold.co/40x40.png?text=${(loggedInUserDetails.username || "A").substring(0,1)}`,
+      text: commentText,
+      createdAt: serverTimestamp(),
+    };
+
+    console.log(`MyPostsPage: Adding comment to post ${postId}:`, newCommentData);
+
+    try {
+      const commentDocRef = await addDoc(commentsCollectionRef, newCommentData);
+      await updateDoc(postRef, { comments: increment(1) });
+
+      // Optimistic UI update
+      const newCommentForUI: PostComment = {
+        ...newCommentData,
+        id: commentDocRef.id,
+        createdAt: new Date() // For immediate display, serverTimestamp will be accurate in DB
+      };
+
+      setUserPosts(prevPosts => prevPosts.map(p => {
+        if (p.id === postId) {
+          return {
+            ...p,
+            comments: (p.comments || 0) + 1,
+            fetchedComments: [...(p.fetchedComments || []), newCommentForUI].sort((a,b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+          };
+        }
+        return p;
+      }));
+
+      toast({ title: "Comment Posted!", description: "Your comment has been added to Firestore." });
+    } catch (error) {
+      console.error("MyPostsPage: Error adding comment to Firestore:", error);
+      toast({
+        title: "Error Posting Comment",
+        description: "Could not save your comment. Please try again.",
+        variant: "destructive",
+      });
+    }
   };
+
 
   if (isLoading && !currentUser) {
     return (
@@ -311,6 +400,7 @@ export default function MyPostsPage() {
           <PostCard 
             key={post.id} 
             post={post} 
+            currentUserId={currentUser?.uid}
             showManagementControls={true} 
             onDeletePost={handleDeletePost}
             onLikePost={handleLikePost}
@@ -322,5 +412,4 @@ export default function MyPostsPage() {
     </div>
   );
 }
-
     
