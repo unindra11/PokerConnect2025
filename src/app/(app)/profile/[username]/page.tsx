@@ -6,19 +6,36 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Edit3, UserPlus, Loader2, Users, Camera, UserCheck, UploadCloud } from "lucide-react";
+import { Edit3, UserPlus, Loader2, Users, Camera, UserCheck, UploadCloud, MessageCircle, Heart, Repeat, CornerDownRight } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { PostCard } from "@/components/post-card";
 import type { Post, User as PostUser } from "@/types/post"; 
 import { useToast } from "@/hooks/use-toast";
 import { useRouter, useParams } from "next/navigation"; 
-import type { MockUserPin } from "@/app/(app)/map/page";
-import { storage } from "@/lib/firebase"; // Import Firebase storage
+import { app, auth, storage, firestore } from "@/lib/firebase"; 
 import { ref, uploadBytesResumable, getDownloadURL } from "firebase/storage";
+import { 
+  getFirestore, 
+  collection, 
+  query, 
+  where, 
+  orderBy, 
+  getDocs, 
+  doc, 
+  updateDoc, 
+  increment, 
+  deleteDoc, 
+  Timestamp,
+  serverTimestamp,
+  writeBatch,
+  addDoc
+} from "firebase/firestore";
+import type { User as FirebaseUser } from "firebase/auth";
 
-
+// This interface might need to align better with what's stored in Firestore users collection
 interface LoggedInUser { 
+  uid: string; // Added UID
   username: string;
   fullName?: string;
   email?: string;
@@ -36,8 +53,6 @@ interface StoredNotification {
   timestamp: string;
 }
 
-
-const USER_POSTS_STORAGE_KEY = "pokerConnectUserPosts";
 const MAX_AVATAR_SIZE_MB = 2;
 const MAX_AVATAR_SIZE_BYTES = MAX_AVATAR_SIZE_MB * 1024 * 1024;
 
@@ -53,8 +68,6 @@ const mockProfileConnections: Connection[] = [
   { id: "conn1", name: "Ace High Alice", avatar: "https://placehold.co/100x100.png?c=a1", username: "alicepoker", aiHint: "profile picture" },
   { id: "conn2", name: "River Rat Randy", avatar: "https://placehold.co/100x100.png?c=r2", username: "randyriver", aiHint: "profile picture" },
   { id: "conn3", name: "Bluffmaster Ben", avatar: "https://placehold.co/100x100.png?c=b3", username: "benbluffs", aiHint: "profile picture" },
-  { id: "conn4", name: "Tournament Tina", avatar: "https://placehold.co/100x100.png?c=t4", username: "tinatourney", aiHint: "profile picture" },
-  { id: "conn5", name: "Strategy Sam", avatar: "https://placehold.co/100x100.png?c=s5", username: "samsgto", aiHint: "profile picture" },
 ];
 
 
@@ -65,371 +78,322 @@ export default function UserProfilePage({ params }: { params: { username: string
   const [isCurrentUserProfile, setIsCurrentUserProfile] = useState(false);
   const [profilePosts, setProfilePosts] = useState<Post[]>([]);
   const [isLoadingPosts, setIsLoadingPosts] = useState(true);
-  const [profileUser, setProfileUser] = useState<LoggedInUser | null>(null);
+  const [profileUser, setProfileUser] = useState<LoggedInUser | null>(null); // User whose profile is being viewed
   const [profileAvatarUrl, setProfileAvatarUrl] = useState<string>("https://placehold.co/150x150.png?text=P");
   const [profileCoverImageUrl, setProfileCoverImageUrl] = useState<string>("https://placehold.co/1200x300.png?cover=1"); 
   const { toast } = useToast();
   const profileAvatarInputRef = useRef<HTMLInputElement>(null);
   const [friendRequestStatus, setFriendRequestStatus] = useState<'idle' | 'sent' | 'friends'>('idle');
-  const [currentLoggedInUser, setCurrentLoggedInUser] = useState<LoggedInUser | null>(null);
-  
+  const [currentLoggedInUserAuth, setCurrentLoggedInUserAuth] = useState<FirebaseUser | null>(null); // The viewer/visitor
+
+  // Effect to get current authenticated user (the viewer)
   useEffect(() => {
-    let userForProfile: LoggedInUser | null = null;
-    let avatarForProfile: string = `https://placehold.co/150x150.png?u=${resolvedParams.username}`; 
-    let coverForProfile: string = "https://placehold.co/1200x300.png?cover=1";
-    let loggedInUserForState: LoggedInUser | null = null;
+    const unsubscribe = auth.onAuthStateChanged(user => {
+      setCurrentLoggedInUserAuth(user);
+    });
+    return () => unsubscribe();
+  }, []);
 
-    try {
-      const loggedInUserString = localStorage.getItem("loggedInUser");
-      if (loggedInUserString) {
-        const loggedInUser: LoggedInUser = JSON.parse(loggedInUserString);
-        loggedInUserForState = loggedInUser;
-        setCurrentLoggedInUser(loggedInUser);
+  // Effect to load profile user data (user whose profile is being viewed)
+  useEffect(() => {
+    const loadProfileUserData = async () => {
+      if (!resolvedParams.username) return;
+      setIsLoadingPosts(true); // Also use this for initial profile loading indication
 
-        if (loggedInUser.username === resolvedParams.username) { 
-          setIsCurrentUserProfile(true);
-          userForProfile = loggedInUser;
-        } else { 
-          setIsCurrentUserProfile(false);
-          const allUsersString = localStorage.getItem("pokerConnectMapUsers");
-          let foundOtherUser = false;
-          if (allUsersString) {
-             const allUsers: MockUserPin[] = JSON.parse(allUsersString);
-             const otherUser = allUsers.find(u => u.username === resolvedParams.username);
-             if (otherUser) {
-                 userForProfile = { 
-                     username: otherUser.username,
-                     fullName: otherUser.name,
-                     bio: otherUser.bio || "A passionate poker player enjoying the game.",
-                     avatar: otherUser.avatar,
-                     coverImage: otherUser.coverImage || `https://placehold.co/1200x300.png?u=${otherUser.username}&cover=map`,
-                     email: "", 
-                     friendsCount: Math.floor(Math.random() * 200) 
-                 };
-                 foundOtherUser = true;
-             }
-          }
+      const db = getFirestore(app, "poker");
+      const usersCollectionRef = collection(db, "users");
+      const q = query(usersCollectionRef, where("username", "==", resolvedParams.username));
+      
+      console.log(`UserProfilePage: Attempting to fetch profile for username: @${resolvedParams.username}`);
 
-          if (!foundOtherUser) { 
-            const pokerConnectUserString = localStorage.getItem("pokerConnectUser");
-            if (pokerConnectUserString) {
-                const mainStoredUser: LoggedInUser = JSON.parse(pokerConnectUserString);
-                if (mainStoredUser.username === resolvedParams.username) {
-                    userForProfile = mainStoredUser;
-                    foundOtherUser = true;
+      try {
+        const querySnapshot = await getDocs(q);
+        if (!querySnapshot.empty) {
+          const userDoc = querySnapshot.docs[0];
+          const userData = userDoc.data() as Omit<LoggedInUser, 'id'> & { uid: string }; // Firestore data
+          const fetchedProfileUser: LoggedInUser = {
+            uid: userDoc.id, // Use document ID as UID
+            username: userData.username,
+            fullName: userData.fullName || userData.username,
+            email: userData.email,
+            avatar: userData.avatar || `https://placehold.co/150x150.png?u=${userData.username}`,
+            coverImage: userData.coverImage || `https://placehold.co/1200x300.png?u=${userData.username}&cover=firestore`,
+            bio: userData.bio || "A passionate poker player enjoying the game.",
+            // friendsCount can be fetched separately or calculated later if needed
+            friendsCount: 0, // Placeholder
+          };
+          setProfileUser(fetchedProfileUser);
+          setProfileAvatarUrl(fetchedProfileUser.avatar);
+          setProfileCoverImageUrl(fetchedProfileUser.coverImage);
+          console.log(`UserProfilePage: Profile user data loaded from Firestore for @${resolvedParams.username}:`, fetchedProfileUser);
+
+          if (currentLoggedInUserAuth && currentLoggedInUserAuth.uid === fetchedProfileUser.uid) {
+            setIsCurrentUserProfile(true);
+          } else {
+            setIsCurrentUserProfile(false);
+            // Check friend request status if not current user's profile and viewer is logged in
+            if (currentLoggedInUserAuth) {
+              // Friend request status logic (can be complex, keeping existing mock for now or simplifying)
+              // For now, we'll assume the existing localStorage check for friend request status is sufficient for prototype
+              const notificationsKey = `pokerConnectNotifications_${currentLoggedInUserAuth.uid}`; 
+              const storedNotificationsString = localStorage.getItem(notificationsKey);
+              if (storedNotificationsString) {
+                try {
+                    const existingNotifications: StoredNotification[] = JSON.parse(storedNotificationsString);
+                    const requestSent = existingNotifications.some(
+                    (notif) => notif.type === "friend_request_sent_confirmation" && notif.user?.username === fetchedProfileUser.username
+                    );
+                    if (requestSent) setFriendRequestStatus('sent');
+                } catch (e) {
+                    console.error("Error parsing notifications from localStorage", e);
                 }
+              }
             }
           }
-          
-          if (!foundOtherUser) { 
-             userForProfile = {
-                username: resolvedParams.username,
-                fullName: resolvedParams.username.charAt(0).toUpperCase() + resolvedParams.username.slice(1),
-                bio: "A passionate poker player enjoying the game.",
-                avatar: `https://placehold.co/150x150.png?u=${resolvedParams.username}`,
-                coverImage: `https://placehold.co/1200x300.png?u=${resolvedParams.username}&cover=fallback`,
-                email: "",
-                friendsCount: Math.floor(Math.random() * 100)
-            };
-          }
+        } else {
+          console.warn(`UserProfilePage: No user found in Firestore with username: @${resolvedParams.username}`);
+          toast({ title: "Profile Not Found", description: "Could not find this user's profile.", variant: "destructive" });
+          setProfileUser({ 
+            uid: "unknown",
+            username: resolvedParams.username, 
+            fullName: resolvedParams.username, 
+            bio: "User not found.", 
+            avatar: `https://placehold.co/150x150.png?text=?`,
+            coverImage: `https://placehold.co/1200x300.png?text=Error`
+          });
         }
-      } else { 
-        setIsCurrentUserProfile(false);
-        const allUsersString = localStorage.getItem("pokerConnectMapUsers");
-        let foundPublicUser = false;
-        if (allUsersString) {
-           const allUsers: MockUserPin[] = JSON.parse(allUsersString);
-           const publicUser = allUsers.find(u => u.username === resolvedParams.username);
-           if (publicUser) {
-               userForProfile = {
-                   username: publicUser.username,
-                   fullName: publicUser.name,
-                   bio: publicUser.bio || "A passionate poker player.",
-                   avatar: publicUser.avatar,
-                   coverImage: publicUser.coverImage || `https://placehold.co/1200x300.png?u=${publicUser.username}&cover=publicmap`,
-                   email: "",
-                   friendsCount: Math.floor(Math.random() * 150)
-               };
-               foundPublicUser = true;
-           }
-        }
-        if (!foundPublicUser) {
-          const pokerConnectUserString = localStorage.getItem("pokerConnectUser");
-          if (pokerConnectUserString) {
-              const mainStoredUser: LoggedInUser = JSON.parse(pokerConnectUserString);
-              if (mainStoredUser.username === resolvedParams.username) {
-                  userForProfile = mainStoredUser;
-                  foundPublicUser = true;
-              }
-          }
-        }
-        if (!foundPublicUser) { 
-           userForProfile = {
-              username: resolvedParams.username,
-              fullName: resolvedParams.username.charAt(0).toUpperCase() + resolvedParams.username.slice(1),
-              bio: "A passionate poker player.",
-              avatar: `https://placehold.co/150x150.png?u=${resolvedParams.username}`,
-              coverImage: `https://placehold.co/1200x300.png?u=${resolvedParams.username}&cover=publicfallback`,
-              email: "",
-              friendsCount: Math.floor(Math.random() * 50)
-           };
-        }
+      } catch (error) {
+        console.error("UserProfilePage: Error fetching profile user data from Firestore:", error);
+        toast({ title: "Error Loading Profile", description: "Could not retrieve user data.", variant: "destructive" });
       }
+    };
 
-      if (userForProfile) {
-          avatarForProfile = userForProfile.avatar || `https://placehold.co/150x150.png?u=${userForProfile.username}&ava=1`;
-          coverForProfile = userForProfile.coverImage || `https://placehold.co/1200x300.png?u=${userForProfile.username}&cover=1`;
-      }
-      
-      if (loggedInUserForState && userForProfile && loggedInUserForState.username !== userForProfile.username) {
-        const notificationsKey = `pokerConnectNotifications_${loggedInUserForState.username}`;
-        const storedNotificationsString = localStorage.getItem(notificationsKey);
-        if (storedNotificationsString) {
-          const existingNotifications: StoredNotification[] = JSON.parse(storedNotificationsString);
-          const requestSent = existingNotifications.some(
-            (notif) => notif.type === "friend_request_sent_confirmation" && notif.user?.username === userForProfile?.username
-          );
-          if (requestSent) {
-            setFriendRequestStatus('sent');
-          }
-        }
-      }
-
-    } catch (error) {
-      console.error("Error reading user data from localStorage for profile page:", error);
-      userForProfile = { 
-        username: resolvedParams.username,
-        fullName: resolvedParams.username.charAt(0).toUpperCase() + resolvedParams.username.slice(1),
-        bio: "Error loading profile. Please try again.",
-        avatar: `https://placehold.co/150x150.png?u=${resolvedParams.username}`,
-        coverImage: `https://placehold.co/1200x300.png?u=${resolvedParams.username}&cover=error`,
-        email: "",
-        friendsCount: 0
-      };
+    if (resolvedParams.username) { // Ensure username is available
+        loadProfileUserData();
     }
-    setProfileUser(userForProfile);
-    setProfileAvatarUrl(avatarForProfile);
-    setProfileCoverImageUrl(coverForProfile);
-    console.log(`[Profile Page for ${resolvedParams.username}] User data loaded. Profile User:`, userForProfile, "Avatar URL:", avatarForProfile, "Cover URL:", coverForProfile);
-  }, [resolvedParams.username]); 
+  }, [resolvedParams.username, currentLoggedInUserAuth, toast]);
 
 
+  // Effect to fetch posts for the profileUser from Firestore
   useEffect(() => {
-    setIsLoadingPosts(true);
-    if (!resolvedParams.username) return; 
-    try {
-      const storedPostsString = localStorage.getItem(USER_POSTS_STORAGE_KEY);
-      if (storedPostsString) {
-        const allPosts: Post[] = JSON.parse(storedPostsString);
-        const userSpecificPosts = allPosts.filter(
-          (post) => post.user.handle === `@${resolvedParams.username}`
-        );
-        setProfilePosts(userSpecificPosts.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()));
-      } else {
+    const fetchProfilePosts = async () => {
+      if (!profileUser?.uid || profileUser.uid === "unknown") {
         setProfilePosts([]);
+        setIsLoadingPosts(false);
+        return;
       }
-    } catch (error) {
-      console.error("Error loading posts from localStorage for profile:", error);
-      toast({
-        title: "Error Loading Posts",
-        description: "Could not retrieve posts for this profile.",
-        variant: "destructive",
-      });
-      setProfilePosts([]);
-    } finally {
-      setIsLoadingPosts(false);
-    }
-  }, [resolvedParams.username, toast]);
+      setIsLoadingPosts(true);
+      console.log(`UserProfilePage: Fetching posts for profile user UID: ${profileUser.uid}`);
+      const db = getFirestore(app, "poker");
+      const postsCollectionRef = collection(db, "posts");
+      const q = query(
+        postsCollectionRef,
+        where("userId", "==", profileUser.uid),
+        orderBy("createdAt", "desc")
+      );
 
-  const handleDeletePost = (postId: string) => {
-    try {
-      const updatedPosts = profilePosts.filter(post => post.id !== postId);
-      setProfilePosts(updatedPosts);
-      
-      const allStoredPostsString = localStorage.getItem(USER_POSTS_STORAGE_KEY);
-      if (allStoredPostsString) {
-          let allStoredPosts: Post[] = JSON.parse(allStoredPostsString);
-          allStoredPosts = allStoredPosts.filter(p => p.id !== postId);
-          localStorage.setItem(USER_POSTS_STORAGE_KEY, JSON.stringify(allStoredPosts));
+      try {
+        const querySnapshot = await getDocs(q);
+        const postsPromises = querySnapshot.docs.map(async (docSnap) => {
+          const data = docSnap.data();
+          let likedByCurrentUser = false;
+          if (currentLoggedInUserAuth) { // Check if viewer is logged in
+            const likesQuery = query(
+              collection(db, "likes"),
+              where("postId", "==", docSnap.id),
+              where("userId", "==", currentLoggedInUserAuth.uid)
+            );
+            const likeSnapshot = await getDocs(likesQuery);
+            likedByCurrentUser = !likeSnapshot.empty;
+          }
+          return {
+            id: docSnap.id,
+            userId: data.userId,
+            user: data.user, // This should be the author's user object from the post document
+            content: data.content,
+            image: data.image,
+            imageAiHint: data.imageAiHint,
+            likes: data.likes || 0,
+            likedByCurrentUser: likedByCurrentUser,
+            comments: data.comments || 0,
+            commentTexts: data.commentTexts || [],
+            shares: data.shares || 0,
+            createdAt: data.createdAt,
+            timestamp: data.createdAt instanceof Timestamp 
+              ? data.createdAt.toDate().toLocaleString() 
+              : (data.createdAt?.seconds ? new Date(data.createdAt.seconds * 1000).toLocaleString() : new Date().toLocaleString()),
+          } as Post;
+        });
+        const posts = await Promise.all(postsPromises);
+        setProfilePosts(posts);
+        console.log(`UserProfilePage: Fetched ${posts.length} posts for UID ${profileUser.uid}`);
+      } catch (error: any) {
+        console.error(`UserProfilePage: Error fetching posts for UID ${profileUser.uid}:`, error);
+        let firestoreErrorMessage = "Could not retrieve posts for this profile.";
+        if (error.message && error.message.includes("index")) {
+           firestoreErrorMessage = `Failed to fetch posts. The query requires a Firestore index for 'userId' and 'createdAt'. Please check the browser console for a link to create it. Details: ${error.message}`;
+        }
+        toast({
+          title: "Error Loading Posts",
+          description: firestoreErrorMessage,
+          variant: "destructive",
+          duration: 10000,
+        });
+        setProfilePosts([]);
+      } finally {
+        setIsLoadingPosts(false);
       }
-      toast({
-        title: "Post Deleted",
-        description: "The post has been removed.",
-      });
+    };
+
+    if (profileUser && profileUser.uid !== "unknown") {
+      fetchProfilePosts();
+    }
+  }, [profileUser, currentLoggedInUserAuth, toast]);
+
+
+  const handleDeletePost = async (postId: string) => {
+    if (!currentLoggedInUserAuth || !isCurrentUserProfile) {
+      toast({ title: "Error", description: "You can only delete your own posts.", variant: "destructive" });
+      return;
+    }
+    const originalPosts = [...profilePosts];
+    setProfilePosts(prevPosts => prevPosts.filter(post => post.id !== postId));
+    
+    toast({ title: "Post Deleting...", description: "Removing your post from Firestore." });
+
+    try {
+      const db = getFirestore(app, "poker");
+      const batch = writeBatch(db);
+      
+      const postRef = doc(db, "posts", postId);
+      batch.delete(postRef);
+
+      const likesQuery = query(collection(db, "likes"), where("postId", "==", postId));
+      const likesSnapshot = await getDocs(likesQuery);
+      if (!likesSnapshot.empty) {
+        likesSnapshot.forEach(likeDoc => batch.delete(likeDoc.ref));
+      }
+      // Add similar logic for comments subcollection if implemented
+      
+      await batch.commit();
+      toast({ title: "Post Deleted", description: "Your post has been removed from Firestore." });
     } catch (error) {
-      console.error("Error deleting post from localStorage:", error);
-      toast({
-        title: "Error Deleting Post",
-        description: "Could not remove the post.",
-        variant: "destructive",
-      });
+      console.error("Error deleting post from Firestore:", error);
+      setProfilePosts(originalPosts); 
+      toast({ title: "Error Deleting Post", description: "Could not remove post. Please try again.", variant: "destructive" });
     }
   };
   
- const handleLikePost = (postId: string) => {
-    let postContentForToast = "";
+ const handleLikePost = async (postId: string) => {
+    if (!currentLoggedInUserAuth) {
+      toast({ title: "Authentication Error", description: "You must be logged in to like a post.", variant: "destructive" });
+      return;
+    }
+
+    const db = getFirestore(app, "poker");
+    const originalPosts = profilePosts.map(p => ({...p})); 
+    
+    let isCurrentlyLikedOptimistic = false;
     setProfilePosts(prevPosts =>
       prevPosts.map(p => {
         if (p.id === postId) {
-          postContentForToast = p.content.substring(0, 20) + "...";
-          const alreadyLiked = !!p.likedByCurrentUser;
-          return { 
-            ...p, 
-            likes: p.likes + (alreadyLiked ? -1 : 1), 
-            likedByCurrentUser: !alreadyLiked 
-          };
+          isCurrentlyLikedOptimistic = !!p.likedByCurrentUser;
+          const newLikedByCurrentUser = !isCurrentlyLikedOptimistic;
+          let newLikesCount = p.likes || 0;
+
+          if (newLikedByCurrentUser) { 
+            newLikesCount = (p.likes || 0) + 1;
+          } else { 
+            newLikesCount = Math.max(0, (p.likes || 0) - 1);
+          }
+          console.log(`UserProfilePage: Post ${postId} - Optimistic update: likes=${newLikesCount}, likedByCurrentUser=${newLikedByCurrentUser}`);
+          return { ...p, likes: newLikesCount, likedByCurrentUser: newLikedByCurrentUser };
         }
         return p;
       })
     );
+
     try {
-      const allStoredPostsString = localStorage.getItem(USER_POSTS_STORAGE_KEY);
-      if (allStoredPostsString) {
-        let allStoredPosts: Post[] = JSON.parse(allStoredPostsString);
-        allStoredPosts = allStoredPosts.map(p => {
-          if (p.id === postId) {
-             const storedPost = allStoredPosts.find(sp => sp.id === postId);
-             const alreadyLiked = !!storedPost?.likedByCurrentUser;
-             return { 
-              ...p, 
-              likes: (storedPost?.likes || 0) + (alreadyLiked ? -1 : 1), 
-              likedByCurrentUser: !alreadyLiked 
-            };
-          }
-          return p;
-        });
-        localStorage.setItem(USER_POSTS_STORAGE_KEY, JSON.stringify(allStoredPosts));
-        toast({
-          title: allStoredPosts.find(p=>p.id === postId)?.likedByCurrentUser ? "Post Liked!" : "Like Removed",
-          description: `You reacted to "${postContentForToast}".`,
-        });
+      const postRef = doc(db, "posts", postId);
+      const likesCollectionRef = collection(db, "likes");
+      const likeQuery = query(likesCollectionRef, where("postId", "==", postId), where("userId", "==", currentLoggedInUserAuth.uid));
+      const likeSnapshot = await getDocs(likeQuery);
+      const batch = writeBatch(db);
+
+      if (likeSnapshot.empty) { // User is LIKING the post
+        const newLikeRef = doc(collection(db, "likes")); // Auto-generate ID
+        batch.set(newLikeRef, { postId: postId, userId: currentLoggedInUserAuth.uid, createdAt: serverTimestamp() });
+        batch.update(postRef, { likes: increment(1) });
+        await batch.commit();
+        toast({ title: "Post Liked!", description: "Your like has been recorded." });
+      } else { // User is UNLIKING the post
+        likeSnapshot.forEach(doc => batch.delete(doc.ref));
+        batch.update(postRef, { likes: increment(-1) });
+        await batch.commit();
+        toast({ title: "Like Removed", description: "Your like has been removed." });
       }
     } catch (error) {
-      console.error("Error updating likes in localStorage:", error);
-       toast({
-        title: "Error Liking Post",
-        description: "Could not save your like.",
-        variant: "destructive",
-      });
+      console.error("Error updating likes in Firestore on profile page:", error);
+      setProfilePosts(originalPosts); // Revert optimistic update on error
+      toast({ title: "Error Liking Post", description: "Could not save your like.", variant: "destructive" });
     }
   };
 
   const handleCommentOnPost = (postId: string, commentText: string) => {
-    setProfilePosts(prevPosts =>
-      prevPosts.map(p =>
-        p.id === postId ? { 
-          ...p, 
-          comments: (p.comments || 0) + 1,
-          commentTexts: [...(p.commentTexts || []), commentText] 
-        } : p
-      )
-    );
-    try {
-      const allStoredPostsString = localStorage.getItem(USER_POSTS_STORAGE_KEY);
-      if (allStoredPostsString) {
-        let allStoredPosts: Post[] = JSON.parse(allStoredPostsString);
-        allStoredPosts = allStoredPosts.map(p =>
-          p.id === postId ? { 
-            ...p, 
-            comments: (p.comments || 0) + 1,
-            commentTexts: [...(p.commentTexts || []), commentText] 
-          } : p
-        );
-        localStorage.setItem(USER_POSTS_STORAGE_KEY, JSON.stringify(allStoredPosts));
-        toast({
-            title: "Comment Added",
-            description: "Your comment has been saved.",
-        });
-      }
-    } catch (error) {
-      console.error("Error saving comment to localStorage:", error);
-      toast({
-        title: "Error Commenting",
-        description: "Could not save your comment.",
-        variant: "destructive",
-      });
-    }
+     toast({
+      title: "Comment Action (Simulated)",
+      description: `Firestore comment '${commentText}' for post ${postId} on profile page coming soon! Firestore interaction for comments needs to be implemented.`,
+    });
   };
 
 const handleProfileAvatarChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    if (!file || !profileUser || !isCurrentUserProfile) return;
+    if (!file || !profileUser || !isCurrentUserProfile || !currentLoggedInUserAuth) return;
 
     if (file.size > MAX_AVATAR_SIZE_BYTES) {
-        toast({
-            title: "File Too Large",
-            description: `Please select an image smaller than ${MAX_AVATAR_SIZE_MB}MB.`,
-            variant: "destructive",
-        });
+        toast({ title: "File Too Large", description: `Max ${MAX_AVATAR_SIZE_MB}MB.`, variant: "destructive" });
         if (profileAvatarInputRef.current) profileAvatarInputRef.current.value = "";
         return;
     }
     if (!file.type.startsWith("image/")) {
-        toast({
-            title: "Unsupported File Type",
-            description: "Please select an image file (e.g., PNG, JPG, GIF).",
-            variant: "destructive",
-        });
+        toast({ title: "Unsupported File Type", description: "Please select an image.", variant: "destructive" });
         if (profileAvatarInputRef.current) profileAvatarInputRef.current.value = "";
         return;
     }
 
-    // Show local preview immediately
+    const originalAvatar = profileAvatarUrl;
     const reader = new FileReader();
-    reader.onloadend = () => {
-        setProfileAvatarUrl(reader.result as string); // Temporary local preview
-    };
+    reader.onloadend = () => setProfileAvatarUrl(reader.result as string);
     reader.readAsDataURL(file);
 
-    const storageRef = ref(storage, `avatars/${profileUser.username}/avatar_${Date.now()}_${file.name}`);
-    const uploadTask = uploadBytesResumable(storageRef, file);
+    const storageRefPath = `avatars/${currentLoggedInUserAuth.uid}/avatar_${Date.now()}_${file.name}`;
+    const fileStorageRef = ref(storage, storageRefPath);
+    const uploadTask = uploadBytesResumable(fileStorageRef, file);
 
     try {
         toast({ title: "Uploading Avatar...", description: "Please wait." });
         await uploadTask;
         const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
-        setProfileAvatarUrl(downloadURL);
+        
+        const db = getFirestore(app, "poker");
+        const userDocRef = doc(db, "users", currentLoggedInUserAuth.uid);
+        await updateDoc(userDocRef, { avatar: downloadURL });
 
-        // Update localStorage for loggedInUser, pokerConnectUser, and pokerConnectMapUsers
+        setProfileAvatarUrl(downloadURL);
+        // Update localStorage for immediate reflection in sidebar
         const loggedInUserString = localStorage.getItem("loggedInUser");
         if (loggedInUserString) {
             let loggedInUser: LoggedInUser = JSON.parse(loggedInUserString);
-            if (loggedInUser.username === profileUser.username) {
+            if (loggedInUser.uid === currentLoggedInUserAuth.uid) {
                 loggedInUser.avatar = downloadURL;
                 localStorage.setItem("loggedInUser", JSON.stringify(loggedInUser));
             }
         }
-        const pokerConnectUserString = localStorage.getItem("pokerConnectUser");
-        if (pokerConnectUserString) {
-            let pokerConnectUser: LoggedInUser = JSON.parse(pokerConnectUserString);
-            if (pokerConnectUser.username === profileUser.username) {
-                pokerConnectUser.avatar = downloadURL;
-                localStorage.setItem("pokerConnectUser", JSON.stringify(pokerConnectUser));
-            }
-        }
-        const mapUsersString = localStorage.getItem("pokerConnectMapUsers");
-        if (mapUsersString) {
-            let mapUsers: MockUserPin[] = JSON.parse(mapUsersString);
-            mapUsers = mapUsers.map(mu => mu.username === profileUser.username ? {...mu, avatar: downloadURL} : mu);
-            localStorage.setItem("pokerConnectMapUsers", JSON.stringify(mapUsers));
-        }
-
-        toast({
-            title: "Profile Picture Updated!",
-            description: "Your new profile picture has been saved to Firebase Storage.",
-        });
-
+        toast({ title: "Avatar Updated!", description: "New avatar saved to Firestore." });
     } catch (error: any) {
-        console.error("Error saving avatar to Firebase Storage or localStorage from profile:", error);
-        toast({ title: "Upload Failed", description: `Could not save new avatar: ${error.message}. Reverting.`, variant: "destructive" });
-        // Revert to previous avatar
-        const loggedInUserString = localStorage.getItem("loggedInUser");
-         if (loggedInUserString) {
-            const loggedInUser = JSON.parse(loggedInUserString);
-            if (loggedInUser.username === profileUser.username) {
-                setProfileAvatarUrl(loggedInUser.avatar || `https://placehold.co/150x150.png?u=${profileUser.username}&ava=1`);
-            }
-        }
+        console.error("Error saving avatar to Firebase:", error);
+        setProfileAvatarUrl(originalAvatar); // Revert
+        toast({ title: "Upload Failed", description: `Could not save avatar: ${error.message}.`, variant: "destructive" });
     } finally {
         if (profileAvatarInputRef.current) profileAvatarInputRef.current.value = "";
     }
@@ -437,23 +401,30 @@ const handleProfileAvatarChange = async (event: React.ChangeEvent<HTMLInputEleme
 
 
   const handleSendFriendRequest = () => {
-    if (!profileUser || !currentLoggedInUser) {
+    if (!profileUser || !currentLoggedInUserAuth || profileUser.uid === "unknown") {
         toast({ title: "Error", description: "User data not loaded.", variant: "destructive" });
         return;
     }
 
-    if (currentLoggedInUser.username === profileUser.username) {
+    if (currentLoggedInUserAuth.uid === profileUser.uid) {
       toast({ title: "Info", description: "You cannot send a friend request to yourself." });
       return;
     }
     
     try {
+      const loggedInUserDetailsString = localStorage.getItem("loggedInUser");
+      if (!loggedInUserDetailsString) {
+        toast({title: "Error", description: "Logged in user details not found.", variant: "destructive"});
+        return;
+      }
+      const loggedInUserDetails: LoggedInUser = JSON.parse(loggedInUserDetailsString);
+
       const sentNotification: StoredNotification = {
         id: `notif_sent_to_${profileUser.username}_${Date.now()}`,
         type: "friend_request_sent_confirmation",
         user: { 
           name: profileUser.fullName || profileUser.username, 
-          avatar: profileAvatarUrl || `https://placehold.co/100x100.png?u=${profileUser.username}`, 
+          avatar: profileAvatarUrl, 
           handle: `@${profileUser.username}`,
           username: profileUser.username
         },
@@ -461,100 +432,97 @@ const handleProfileAvatarChange = async (event: React.ChangeEvent<HTMLInputEleme
         timestamp: new Date().toLocaleString(),
       };
 
-      const senderNotificationsKey = `pokerConnectNotifications_${currentLoggedInUser.username}`;
+      const senderNotificationsKey = `pokerConnectNotifications_${currentLoggedInUserAuth.uid}`;
       let senderExistingNotifications: StoredNotification[] = [];
       const senderStoredNotificationsString = localStorage.getItem(senderNotificationsKey);
       if (senderStoredNotificationsString) {
-        try {
-          senderExistingNotifications = JSON.parse(senderStoredNotificationsString);
-          if (!Array.isArray(senderExistingNotifications)) senderExistingNotifications = [];
-        } catch (e) { senderExistingNotifications = []; }
+        try { senderExistingNotifications = JSON.parse(senderStoredNotificationsString); if (!Array.isArray(senderExistingNotifications)) senderExistingNotifications = []; }
+        catch (e) { senderExistingNotifications = []; }
       }
       senderExistingNotifications.unshift(sentNotification); 
       localStorage.setItem(senderNotificationsKey, JSON.stringify(senderExistingNotifications));
 
       const incomingRequestNotification: StoredNotification = {
-        id: `notif_received_from_${currentLoggedInUser.username}_${Date.now()}`,
+        id: `notif_received_from_${loggedInUserDetails.username}_${Date.now()}`,
         type: "friend_request", 
         user: { 
-            name: currentLoggedInUser.fullName || currentLoggedInUser.username,
-            avatar: currentLoggedInUser.avatar || `https://placehold.co/100x100.png?u=${currentLoggedInUser.username}`,
-            handle: `@${currentLoggedInUser.username}`,
-            username: currentLoggedInUser.username
+            name: loggedInUserDetails.fullName || loggedInUserDetails.username,
+            avatar: loggedInUserDetails.avatar || `https://placehold.co/100x100.png?u=${loggedInUserDetails.username}`,
+            handle: `@${loggedInUserDetails.username}`,
+            username: loggedInUserDetails.username
         },
         message: "sent you a friend request.",
         timestamp: new Date().toLocaleString(),
       };
 
-      const recipientNotificationsKey = `pokerConnectNotifications_${profileUser.username}`;
+      const recipientNotificationsKey = `pokerConnectNotifications_${profileUser.uid}`; 
       let recipientExistingNotifications: StoredNotification[] = [];
       const recipientStoredNotificationsString = localStorage.getItem(recipientNotificationsKey);
       if (recipientStoredNotificationsString) {
-        try {
-          recipientExistingNotifications = JSON.parse(recipientStoredNotificationsString);
-          if (!Array.isArray(recipientExistingNotifications)) recipientExistingNotifications = [];
-        } catch (e) { recipientExistingNotifications = []; }
+        try { recipientExistingNotifications = JSON.parse(recipientStoredNotificationsString); if (!Array.isArray(recipientExistingNotifications)) recipientExistingNotifications = []; }
+        catch (e) { recipientExistingNotifications = []; }
       }
       recipientExistingNotifications.unshift(incomingRequestNotification);
       localStorage.setItem(recipientNotificationsKey, JSON.stringify(recipientExistingNotifications));
 
-
-      toast({
-        title: "Friend Request Sent!",
-        description: `Your friend request to ${profileUser.fullName || profileUser.username} has been sent.`,
-      });
+      toast({ title: "Friend Request Sent!", description: `Your friend request to ${profileUser.fullName || profileUser.username} has been sent.` });
       setFriendRequestStatus('sent'); 
-
     } catch (error) {
       console.error("Error sending friend request:", error);
       toast({ title: "Error", description: "Could not send friend request.", variant: "destructive" });
     }
   };
 
-
-  const mockUser = { 
-    name: profileUser?.fullName || resolvedParams.username.charAt(0).toUpperCase() + resolvedParams.username.slice(1), 
+  const userForDisplay = profileUser || { 
+    uid: "loading",
     username: resolvedParams.username,
-    avatar: profileAvatarUrl || `https://placehold.co/150x150.png?u=${resolvedParams.username}`,
-    bio: profileUser?.bio || "Passionate poker player, always learning and looking for the next big win. Specializing in Texas Hold'em tournaments.",
-    joinedDate: "Joined January 2023", 
-    friendsCount: profileUser?.friendsCount || 0, 
-    totalPosts: profilePosts.length, 
-    coverImage: profileCoverImageUrl || "https://placehold.co/1200x300.png?cover=1",
-    coverImageAiHint: "poker table background",
+    fullName: resolvedParams.username.charAt(0).toUpperCase() + resolvedParams.username.slice(1), 
+    avatar: `https://placehold.co/150x150.png?u=${resolvedParams.username}`,
+    bio: "Loading profile...",
+    friendsCount: 0, 
+    coverImage: `https://placehold.co/1200x300.png?cover=loading`,
   };
 
-  if (!profileUser) { 
+
+  if (!profileUser && isLoadingPosts) { // isLoadingPosts can double for initial profile loading
     return (
         <div className="container mx-auto max-w-4xl text-center py-10">
             <Loader2 className="h-12 w-12 animate-spin text-primary mx-auto" />
-            <p className="mt-4">Loading profile...</p>
+            <p className="mt-4">Loading profile for @{resolvedParams.username}...</p>
         </div>
     );
   }
+  
+  if (profileUser && profileUser.uid === "unknown") {
+     return (
+        <div className="container mx-auto max-w-4xl text-center py-10">
+            <Card><CardHeader><CardTitle>Profile Not Found</CardTitle></CardHeader><CardContent><p>The user @{resolvedParams.username} does not exist or their profile could not be loaded.</p></CardContent></Card>
+        </div>
+    );
+  }
+
 
   return (
     <div className="container mx-auto max-w-4xl">
       <Card className="shadow-xl rounded-xl overflow-hidden">
         <div className="relative h-48 md:h-64">
           <Image 
-            src={mockUser.coverImage} 
-            alt={`${mockUser.name}'s cover photo`} 
+            src={profileCoverImageUrl} 
+            alt={`${userForDisplay.fullName}'s cover photo`} 
             fill
             style={{objectFit: "cover"}}
-            data-ai-hint={mockUser.coverImageAiHint}
+            data-ai-hint="poker table background"
             priority 
-            key={mockUser.coverImage} 
+            key={profileCoverImageUrl} 
           />
           <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/70 to-transparent">
             <div className="flex flex-col sm:flex-row items-center sm:items-end space-x-0 sm:space-x-4">
-             
               <div className="relative group">
                 <label htmlFor={isCurrentUserProfile ? "profile-avatar-upload" : undefined} 
                        className={isCurrentUserProfile ? "cursor-pointer" : ""}>
                   <Avatar className="h-24 w-24 sm:h-32 sm:w-32 border-4 border-background -mb-12 sm:-mb-0 relative z-10">
-                    <AvatarImage src={mockUser.avatar} alt={mockUser.name} data-ai-hint="profile picture" key={mockUser.avatar} />
-                    <AvatarFallback>{mockUser.name.substring(0, 2).toUpperCase() || 'P'}</AvatarFallback>
+                    <AvatarImage src={profileAvatarUrl} alt={userForDisplay.fullName} data-ai-hint="profile picture" key={profileAvatarUrl} />
+                    <AvatarFallback>{userForDisplay.fullName?.substring(0, 2)?.toUpperCase() || 'P'}</AvatarFallback>
                   </Avatar>
                   {isCurrentUserProfile && (
                     <div className="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity rounded-full z-20 -mb-12 sm:-mb-0">
@@ -575,8 +543,8 @@ const handleProfileAvatarChange = async (event: React.ChangeEvent<HTMLInputEleme
               </div>
 
               <div className="text-center sm:text-left pt-12 sm:pt-0 sm:pb-2">
-                <h1 className="text-3xl font-bold text-white">{mockUser.name}</h1>
-                <p className="text-sm text-gray-300">@{mockUser.username}</p>
+                <h1 className="text-3xl font-bold text-white">{userForDisplay.fullName}</h1>
+                <p className="text-sm text-gray-300">@{userForDisplay.username}</p>
               </div>
                 {isCurrentUserProfile ? (
                     <Button 
@@ -592,7 +560,7 @@ const handleProfileAvatarChange = async (event: React.ChangeEvent<HTMLInputEleme
                         <UserCheck className="mr-2 h-4 w-4" /> Request Sent
                     </Button>
                 ) : (
-                    <Button variant="default" size="sm" className="mt-4 sm:mt-0 sm:ml-auto" onClick={handleSendFriendRequest}>
+                    <Button variant="default" size="sm" className="mt-4 sm:mt-0 sm:ml-auto" onClick={handleSendFriendRequest} disabled={!currentLoggedInUserAuth || !profileUser || profileUser.uid === "unknown"}>
                         <UserPlus className="mr-2 h-4 w-4" /> Add Friend
                     </Button>
                 )}
@@ -603,19 +571,18 @@ const handleProfileAvatarChange = async (event: React.ChangeEvent<HTMLInputEleme
         <CardContent className="pt-16 sm:pt-8">
           <div className="grid grid-cols-2 gap-4 text-center my-4 border-b pb-4">
             <div>
-              <p className="font-semibold text-lg">{mockUser.totalPosts}</p>
+              <p className="font-semibold text-lg">{profilePosts.length}</p>
               <p className="text-sm text-muted-foreground">Posts</p>
             </div>
             <div>
-              <p className="font-semibold text-lg">{mockUser.friendsCount}</p>
+              <p className="font-semibold text-lg">{userForDisplay.friendsCount || 0}</p>
               <p className="text-sm text-muted-foreground">Friends</p>
             </div>
           </div>
 
           <div className="mb-6">
             <h3 className="font-semibold mb-1">Bio</h3>
-            <p className="text-sm text-muted-foreground">{mockUser.bio}</p>
-            <p className="text-xs text-muted-foreground mt-2">{mockUser.joinedDate}</p>
+            <p className="text-sm text-muted-foreground">{userForDisplay.bio || "No bio provided."}</p>
           </div>
 
           <Tabs defaultValue="posts" className="w-full">
@@ -632,11 +599,11 @@ const handleProfileAvatarChange = async (event: React.ChangeEvent<HTMLInputEleme
               )}
               {!isLoadingPosts && profilePosts.length === 0 && (
                 <Card className="text-center p-8">
-                  <CardHeader>
-                    <CardTitle>No Posts Yet</CardTitle>
-                  </CardHeader>
+                  <CardHeader> <CardTitle>No Posts Yet</CardTitle> </CardHeader>
                   <CardContent>
-                    <p className="text-muted-foreground">This user hasn't shared any posts.</p>
+                    <p className="text-muted-foreground">
+                      {isCurrentUserProfile ? "You haven't shared any posts." : `${userForDisplay.fullName} hasn't shared any posts.`}
+                    </p>
                     {isCurrentUserProfile && (
                        <Link href="/create-post" passHref className="mt-4 inline-block">
                           <Button>Create Your First Post</Button>
@@ -645,14 +612,15 @@ const handleProfileAvatarChange = async (event: React.ChangeEvent<HTMLInputEleme
                   </CardContent>
                 </Card>
               )}
-              {!isLoadingPosts && profilePosts.map(post => (
+              {!isLoadingPosts && profilePosts.map((post, index) => (
                 <PostCard 
                   key={post.id} 
                   post={post} 
                   showManagementControls={isCurrentUserProfile}
                   onDeletePost={isCurrentUserProfile ? handleDeletePost : undefined}
-                  onLikePost={handleLikePost}
+                  onLikePost={handleLikePost} // Viewer (currentLoggedInUserAuth) likes/unlikes profileUser's post
                   onCommentPost={handleCommentOnPost}
+                  isLCPItem={index === 0}
                 />
               ))}
             </TabsContent>
@@ -660,7 +628,7 @@ const handleProfileAvatarChange = async (event: React.ChangeEvent<HTMLInputEleme
                <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2"><Users /> Connections</CardTitle>
-                  <CardDescription>People connected with {mockUser.name}.</CardDescription>
+                  <CardDescription>People connected with {userForDisplay.fullName}. (Mock Data)</CardDescription>
                 </CardHeader>
                 <CardContent>
                   {mockProfileConnections.length === 0 ? (
@@ -690,3 +658,5 @@ const handleProfileAvatarChange = async (event: React.ChangeEvent<HTMLInputEleme
     </div>
   );
 }
+
+    
