@@ -6,14 +6,14 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Edit3, UserPlus, Loader2, Users, Camera, UserCheck, UploadCloud, MessageCircle, Heart, Repeat, CornerDownRight } from "lucide-react";
+import { Edit3, UserPlus, Loader2, Users, Camera, UserCheck, UploadCloud } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { PostCard } from "@/components/post-card";
-import type { Post, User as PostUser } from "@/types/post"; 
+import type { Post, User as PostUser, Comment as PostComment } from "@/types/post"; 
 import { useToast } from "@/hooks/use-toast";
 import { useRouter, useParams } from "next/navigation"; 
-import { app, auth, storage, firestore } from "@/lib/firebase"; 
+import { app, auth, storage } from "@/lib/firebase"; 
 import { ref, uploadBytesResumable, getDownloadURL } from "firebase/storage";
 import { 
   getFirestore, 
@@ -29,13 +29,13 @@ import {
   Timestamp,
   serverTimestamp,
   writeBatch,
-  addDoc
+  addDoc,
+  getDoc
 } from "firebase/firestore";
 import type { User as FirebaseUser } from "firebase/auth";
 
-// This interface might need to align better with what's stored in Firestore users collection
-interface LoggedInUser { 
-  uid: string; // Added UID
+interface ProfilePageUser { 
+  uid: string;
   username: string;
   fullName?: string;
   email?: string;
@@ -43,12 +43,15 @@ interface LoggedInUser {
   bio?: string;
   coverImage?: string; 
   friendsCount?: number; 
+  location?: string;
+  locationCoords?: { lat: number; lng: number } | null;
+  createdAt?: Timestamp;
 }
 
 interface StoredNotification { 
   id: string;
   type: string; 
-  user: { name: string; avatar: string; handle: string; username?: string; }; 
+  user: { name: string; avatar: string; handle: string; username: string; }; 
   message: string;
   timestamp: string;
 }
@@ -71,22 +74,21 @@ const mockProfileConnections: Connection[] = [
 ];
 
 
-export default function UserProfilePage({ params }: { params: { username: string } }) {
-  const resolvedParams = use(params); 
+export default function UserProfilePage() {
+  const params = use(useParams<{ username: string }>());
+  const resolvedParams = params; // No need for use(params) if already destructured or passed directly
   const router = useRouter();
 
   const [isCurrentUserProfile, setIsCurrentUserProfile] = useState(false);
   const [profilePosts, setProfilePosts] = useState<Post[]>([]);
+  const [isLoadingProfile, setIsLoadingProfile] = useState(true);
   const [isLoadingPosts, setIsLoadingPosts] = useState(true);
-  const [profileUser, setProfileUser] = useState<LoggedInUser | null>(null); // User whose profile is being viewed
-  const [profileAvatarUrl, setProfileAvatarUrl] = useState<string>("https://placehold.co/150x150.png?text=P");
-  const [profileCoverImageUrl, setProfileCoverImageUrl] = useState<string>("https://placehold.co/1200x300.png?cover=1"); 
+  const [profileUser, setProfileUser] = useState<ProfilePageUser | null>(null);
   const { toast } = useToast();
   const profileAvatarInputRef = useRef<HTMLInputElement>(null);
   const [friendRequestStatus, setFriendRequestStatus] = useState<'idle' | 'sent' | 'friends'>('idle');
-  const [currentLoggedInUserAuth, setCurrentLoggedInUserAuth] = useState<FirebaseUser | null>(null); // The viewer/visitor
+  const [currentLoggedInUserAuth, setCurrentLoggedInUserAuth] = useState<FirebaseUser | null>(null);
 
-  // Effect to get current authenticated user (the viewer)
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged(user => {
       setCurrentLoggedInUserAuth(user);
@@ -94,14 +96,16 @@ export default function UserProfilePage({ params }: { params: { username: string
     return () => unsubscribe();
   }, []);
 
-  // Effect to load profile user data (user whose profile is being viewed)
   useEffect(() => {
     const loadProfileUserData = async () => {
-      if (!resolvedParams.username) return;
-      setIsLoadingPosts(true); // Also use this for initial profile loading indication
-
-      const db = getFirestore(app, "poker");
-      const usersCollectionRef = collection(db, "users");
+      if (!resolvedParams.username) {
+        setIsLoadingProfile(false);
+        toast({ title: "Error", description: "Username not provided in URL.", variant: "destructive" });
+        return;
+      }
+      setIsLoadingProfile(true);
+      const firestore = getFirestore(app, "poker");
+      const usersCollectionRef = collection(firestore, "users");
       const q = query(usersCollectionRef, where("username", "==", resolvedParams.username));
       
       console.log(`UserProfilePage: Attempting to fetch profile for username: @${resolvedParams.username}`);
@@ -110,31 +114,24 @@ export default function UserProfilePage({ params }: { params: { username: string
         const querySnapshot = await getDocs(q);
         if (!querySnapshot.empty) {
           const userDoc = querySnapshot.docs[0];
-          const userData = userDoc.data() as Omit<LoggedInUser, 'id'> & { uid: string }; // Firestore data
-          const fetchedProfileUser: LoggedInUser = {
-            uid: userDoc.id, // Use document ID as UID
-            username: userData.username,
+          const userData = userDoc.data() as Omit<ProfilePageUser, 'uid'>;
+          const fetchedProfileUser: ProfilePageUser = {
+            uid: userDoc.id,
+            ...userData,
             fullName: userData.fullName || userData.username,
-            email: userData.email,
             avatar: userData.avatar || `https://placehold.co/150x150.png?u=${userData.username}`,
             coverImage: userData.coverImage || `https://placehold.co/1200x300.png?u=${userData.username}&cover=firestore`,
             bio: userData.bio || "A passionate poker player enjoying the game.",
-            // friendsCount can be fetched separately or calculated later if needed
-            friendsCount: 0, // Placeholder
+            friendsCount: 0, // Placeholder, can be enhanced later
           };
           setProfileUser(fetchedProfileUser);
-          setProfileAvatarUrl(fetchedProfileUser.avatar);
-          setProfileCoverImageUrl(fetchedProfileUser.coverImage);
           console.log(`UserProfilePage: Profile user data loaded from Firestore for @${resolvedParams.username}:`, fetchedProfileUser);
 
           if (currentLoggedInUserAuth && currentLoggedInUserAuth.uid === fetchedProfileUser.uid) {
             setIsCurrentUserProfile(true);
           } else {
             setIsCurrentUserProfile(false);
-            // Check friend request status if not current user's profile and viewer is logged in
             if (currentLoggedInUserAuth) {
-              // Friend request status logic (can be complex, keeping existing mock for now or simplifying)
-              // For now, we'll assume the existing localStorage check for friend request status is sufficient for prototype
               const notificationsKey = `pokerConnectNotifications_${currentLoggedInUserAuth.uid}`; 
               const storedNotificationsString = localStorage.getItem(notificationsKey);
               if (storedNotificationsString) {
@@ -153,39 +150,35 @@ export default function UserProfilePage({ params }: { params: { username: string
         } else {
           console.warn(`UserProfilePage: No user found in Firestore with username: @${resolvedParams.username}`);
           toast({ title: "Profile Not Found", description: "Could not find this user's profile.", variant: "destructive" });
-          setProfileUser({ 
-            uid: "unknown",
-            username: resolvedParams.username, 
-            fullName: resolvedParams.username, 
-            bio: "User not found.", 
-            avatar: `https://placehold.co/150x150.png?text=?`,
-            coverImage: `https://placehold.co/1200x300.png?text=Error`
-          });
+          setProfileUser(null); // Set to null if not found
         }
       } catch (error) {
         console.error("UserProfilePage: Error fetching profile user data from Firestore:", error);
         toast({ title: "Error Loading Profile", description: "Could not retrieve user data.", variant: "destructive" });
+        setProfileUser(null);
+      } finally {
+        setIsLoadingProfile(false);
       }
     };
 
-    if (resolvedParams.username) { // Ensure username is available
+    if (resolvedParams.username) {
         loadProfileUserData();
     }
   }, [resolvedParams.username, currentLoggedInUserAuth, toast]);
 
 
-  // Effect to fetch posts for the profileUser from Firestore
   useEffect(() => {
     const fetchProfilePosts = async () => {
-      if (!profileUser?.uid || profileUser.uid === "unknown") {
+      if (!profileUser?.uid) {
         setProfilePosts([]);
         setIsLoadingPosts(false);
         return;
       }
       setIsLoadingPosts(true);
+      const firestore = getFirestore(app, "poker");
       console.log(`UserProfilePage: Fetching posts for profile user UID: ${profileUser.uid}`);
-      const db = getFirestore(app, "poker");
-      const postsCollectionRef = collection(db, "posts");
+      
+      const postsCollectionRef = collection(firestore, "posts");
       const q = query(
         postsCollectionRef,
         where("userId", "==", profileUser.uid),
@@ -195,30 +188,33 @@ export default function UserProfilePage({ params }: { params: { username: string
       try {
         const querySnapshot = await getDocs(q);
         const postsPromises = querySnapshot.docs.map(async (docSnap) => {
-          const data = docSnap.data();
+          const data = docSnap.data() as Omit<Post, 'id' | 'timestamp' | 'likedByCurrentUser' | 'fetchedComments'>;
           let likedByCurrentUser = false;
-          if (currentLoggedInUserAuth) { // Check if viewer is logged in
+          let fetchedComments: PostComment[] = [];
+
+          if (currentLoggedInUserAuth) {
             const likesQuery = query(
-              collection(db, "likes"),
+              collection(firestore, "likes"),
               where("postId", "==", docSnap.id),
               where("userId", "==", currentLoggedInUserAuth.uid)
             );
             const likeSnapshot = await getDocs(likesQuery);
             likedByCurrentUser = !likeSnapshot.empty;
           }
+          
+          const commentsCollectionRef = collection(firestore, "posts", docSnap.id, "comments");
+          const commentsQuery = query(commentsCollectionRef, orderBy("createdAt", "asc"));
+          const commentsSnapshot = await getDocs(commentsQuery);
+          fetchedComments = commentsSnapshot.docs.map(commentDoc => ({
+            id: commentDoc.id,
+            ...(commentDoc.data() as Omit<PostComment, 'id'>)
+          }));
+
           return {
             id: docSnap.id,
-            userId: data.userId,
-            user: data.user, // This should be the author's user object from the post document
-            content: data.content,
-            image: data.image,
-            imageAiHint: data.imageAiHint,
-            likes: data.likes || 0,
-            likedByCurrentUser: likedByCurrentUser,
-            comments: data.comments || 0,
-            commentTexts: data.commentTexts || [],
-            shares: data.shares || 0,
-            createdAt: data.createdAt,
+            ...data,
+            likedByCurrentUser,
+            fetchedComments,
             timestamp: data.createdAt instanceof Timestamp 
               ? data.createdAt.toDate().toLocaleString() 
               : (data.createdAt?.seconds ? new Date(data.createdAt.seconds * 1000).toLocaleString() : new Date().toLocaleString()),
@@ -231,7 +227,7 @@ export default function UserProfilePage({ params }: { params: { username: string
         console.error(`UserProfilePage: Error fetching posts for UID ${profileUser.uid}:`, error);
         let firestoreErrorMessage = "Could not retrieve posts for this profile.";
         if (error.message && error.message.includes("index")) {
-           firestoreErrorMessage = `Failed to fetch posts. The query requires a Firestore index for 'userId' and 'createdAt'. Please check the browser console for a link to create it. Details: ${error.message}`;
+           firestoreErrorMessage = `Failed to fetch posts. The query requires a Firestore index. Please check the browser console for a link to create it. Details: ${error.message}`;
         }
         toast({
           title: "Error Loading Posts",
@@ -252,7 +248,7 @@ export default function UserProfilePage({ params }: { params: { username: string
 
 
   const handleDeletePost = async (postId: string) => {
-    if (!currentLoggedInUserAuth || !isCurrentUserProfile) {
+    if (!currentLoggedInUserAuth || !isCurrentUserProfile || !profileUser) {
       toast({ title: "Error", description: "You can only delete your own posts.", variant: "destructive" });
       return;
     }
@@ -262,23 +258,28 @@ export default function UserProfilePage({ params }: { params: { username: string
     toast({ title: "Post Deleting...", description: "Removing your post from Firestore." });
 
     try {
-      const db = getFirestore(app, "poker");
-      const batch = writeBatch(db);
+      const firestore = getFirestore(app, "poker");
+      const batch = writeBatch(firestore);
       
-      const postRef = doc(db, "posts", postId);
+      const postRef = doc(firestore, "posts", postId);
       batch.delete(postRef);
 
-      const likesQuery = query(collection(db, "likes"), where("postId", "==", postId));
+      const likesQuery = query(collection(firestore, "likes"), where("postId", "==", postId));
       const likesSnapshot = await getDocs(likesQuery);
       if (!likesSnapshot.empty) {
         likesSnapshot.forEach(likeDoc => batch.delete(likeDoc.ref));
       }
-      // Add similar logic for comments subcollection if implemented
+      
+      const commentsRef = collection(firestore, "posts", postId, "comments");
+      const commentsSnapshot = await getDocs(commentsRef);
+      if (!commentsSnapshot.empty) {
+        commentsSnapshot.forEach(commentDoc => batch.delete(commentDoc.ref));
+      }
       
       await batch.commit();
-      toast({ title: "Post Deleted", description: "Your post has been removed from Firestore." });
+      toast({ title: "Post Deleted", description: "Your post and its associated data have been removed." });
     } catch (error) {
-      console.error("Error deleting post from Firestore:", error);
+      console.error("Error deleting post from Firestore on profile page:", error);
       setProfilePosts(originalPosts); 
       toast({ title: "Error Deleting Post", description: "Could not remove post. Please try again.", variant: "destructive" });
     }
@@ -290,8 +291,8 @@ export default function UserProfilePage({ params }: { params: { username: string
       return;
     }
 
-    const db = getFirestore(app, "poker");
-    const originalPosts = profilePosts.map(p => ({...p})); 
+    const firestore = getFirestore(app, "poker");
+    const originalPosts = profilePosts.map(p => ({ ...p, fetchedComments: p.fetchedComments ? [...p.fetchedComments] : [] }));
     
     let isCurrentlyLikedOptimistic = false;
     setProfilePosts(prevPosts =>
@@ -306,7 +307,6 @@ export default function UserProfilePage({ params }: { params: { username: string
           } else { 
             newLikesCount = Math.max(0, (p.likes || 0) - 1);
           }
-          console.log(`UserProfilePage: Post ${postId} - Optimistic update: likes=${newLikesCount}, likedByCurrentUser=${newLikedByCurrentUser}`);
           return { ...p, likes: newLikesCount, likedByCurrentUser: newLikedByCurrentUser };
         }
         return p;
@@ -314,19 +314,19 @@ export default function UserProfilePage({ params }: { params: { username: string
     );
 
     try {
-      const postRef = doc(db, "posts", postId);
-      const likesCollectionRef = collection(db, "likes");
+      const postRef = doc(firestore, "posts", postId);
+      const likesCollectionRef = collection(firestore, "likes");
       const likeQuery = query(likesCollectionRef, where("postId", "==", postId), where("userId", "==", currentLoggedInUserAuth.uid));
       const likeSnapshot = await getDocs(likeQuery);
-      const batch = writeBatch(db);
+      const batch = writeBatch(firestore);
 
-      if (likeSnapshot.empty) { // User is LIKING the post
-        const newLikeRef = doc(collection(db, "likes")); // Auto-generate ID
+      if (likeSnapshot.empty) { 
+        const newLikeRef = doc(collection(firestore, "likes")); 
         batch.set(newLikeRef, { postId: postId, userId: currentLoggedInUserAuth.uid, createdAt: serverTimestamp() });
         batch.update(postRef, { likes: increment(1) });
         await batch.commit();
         toast({ title: "Post Liked!", description: "Your like has been recorded." });
-      } else { // User is UNLIKING the post
+      } else { 
         likeSnapshot.forEach(doc => batch.delete(doc.ref));
         batch.update(postRef, { likes: increment(-1) });
         await batch.commit();
@@ -334,16 +334,59 @@ export default function UserProfilePage({ params }: { params: { username: string
       }
     } catch (error) {
       console.error("Error updating likes in Firestore on profile page:", error);
-      setProfilePosts(originalPosts); // Revert optimistic update on error
+      setProfilePosts(originalPosts); 
       toast({ title: "Error Liking Post", description: "Could not save your like.", variant: "destructive" });
     }
   };
 
-  const handleCommentOnPost = (postId: string, commentText: string) => {
-     toast({
-      title: "Comment Action (Simulated)",
-      description: `Firestore comment '${commentText}' for post ${postId} on profile page coming soon! Firestore interaction for comments needs to be implemented.`,
-    });
+  const handleCommentOnPost = async (postId: string, commentText: string) => {
+    if (!currentLoggedInUserAuth) {
+      toast({ title: "Authentication Error", description: "You must be logged in to comment.", variant: "destructive" });
+      return;
+    }
+    const loggedInUserString = localStorage.getItem("loggedInUser");
+    let viewerDetails: Partial<ProfilePageUser> = { username: "Anonymous", avatar: "" };
+    if (loggedInUserString) {
+      try { viewerDetails = JSON.parse(loggedInUserString); } catch (e) { console.error("Error parsing loggedInUser for comment", e); }
+    }
+    
+    const firestore = getFirestore(app, "poker");
+    const postRef = doc(firestore, "posts", postId);
+    const commentsCollectionRef = collection(firestore, "posts", postId, "comments");
+
+    const newCommentData: Omit<PostComment, 'id'> = {
+      userId: currentLoggedInUserAuth.uid,
+      username: viewerDetails.username || "Anonymous",
+      avatar: viewerDetails.avatar || `https://placehold.co/40x40.png?text=${(viewerDetails.username || "A").substring(0,1)}`,
+      text: commentText,
+      createdAt: serverTimestamp(),
+    };
+
+    try {
+      const commentDocRef = await addDoc(commentsCollectionRef, newCommentData);
+      await updateDoc(postRef, { comments: increment(1) });
+
+      const newCommentForUI: PostComment = {
+        ...newCommentData,
+        id: commentDocRef.id,
+        createdAt: new Date() 
+      };
+
+      setProfilePosts(prevPosts => prevPosts.map(p => {
+        if (p.id === postId) {
+          return {
+            ...p,
+            comments: (p.comments || 0) + 1,
+            fetchedComments: [...(p.fetchedComments || []), newCommentForUI].sort((a,b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+          };
+        }
+        return p;
+      }));
+      toast({ title: "Comment Posted!", description: "Your comment has been added." });
+    } catch (error) {
+      console.error("Error adding comment to Firestore on profile page:", error);
+      toast({ title: "Error Posting Comment", description: "Could not save your comment.", variant: "destructive" });
+    }
   };
 
 const handleProfileAvatarChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -361,9 +404,9 @@ const handleProfileAvatarChange = async (event: React.ChangeEvent<HTMLInputEleme
         return;
     }
 
-    const originalAvatar = profileAvatarUrl;
+    const originalAvatar = profileUser.avatar;
     const reader = new FileReader();
-    reader.onloadend = () => setProfileAvatarUrl(reader.result as string);
+    reader.onloadend = () => setProfileUser(prev => prev ? {...prev, avatar: reader.result as string} : null);
     reader.readAsDataURL(file);
 
     const storageRefPath = `avatars/${currentLoggedInUserAuth.uid}/avatar_${Date.now()}_${file.name}`;
@@ -375,15 +418,15 @@ const handleProfileAvatarChange = async (event: React.ChangeEvent<HTMLInputEleme
         await uploadTask;
         const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
         
-        const db = getFirestore(app, "poker");
-        const userDocRef = doc(db, "users", currentLoggedInUserAuth.uid);
+        const firestore = getFirestore(app, "poker");
+        const userDocRef = doc(firestore, "users", currentLoggedInUserAuth.uid);
         await updateDoc(userDocRef, { avatar: downloadURL });
 
-        setProfileAvatarUrl(downloadURL);
-        // Update localStorage for immediate reflection in sidebar
+        setProfileUser(prev => prev ? {...prev, avatar: downloadURL} : null);
+        
         const loggedInUserString = localStorage.getItem("loggedInUser");
         if (loggedInUserString) {
-            let loggedInUser: LoggedInUser = JSON.parse(loggedInUserString);
+            let loggedInUser: ProfilePageUser = JSON.parse(loggedInUserString);
             if (loggedInUser.uid === currentLoggedInUserAuth.uid) {
                 loggedInUser.avatar = downloadURL;
                 localStorage.setItem("loggedInUser", JSON.stringify(loggedInUser));
@@ -392,7 +435,7 @@ const handleProfileAvatarChange = async (event: React.ChangeEvent<HTMLInputEleme
         toast({ title: "Avatar Updated!", description: "New avatar saved to Firestore." });
     } catch (error: any) {
         console.error("Error saving avatar to Firebase:", error);
-        setProfileAvatarUrl(originalAvatar); // Revert
+        setProfileUser(prev => prev ? {...prev, avatar: originalAvatar} : null);
         toast({ title: "Upload Failed", description: `Could not save avatar: ${error.message}.`, variant: "destructive" });
     } finally {
         if (profileAvatarInputRef.current) profileAvatarInputRef.current.value = "";
@@ -405,7 +448,6 @@ const handleProfileAvatarChange = async (event: React.ChangeEvent<HTMLInputEleme
         toast({ title: "Error", description: "User data not loaded.", variant: "destructive" });
         return;
     }
-
     if (currentLoggedInUserAuth.uid === profileUser.uid) {
       toast({ title: "Info", description: "You cannot send a friend request to yourself." });
       return;
@@ -414,17 +456,17 @@ const handleProfileAvatarChange = async (event: React.ChangeEvent<HTMLInputEleme
     try {
       const loggedInUserDetailsString = localStorage.getItem("loggedInUser");
       if (!loggedInUserDetailsString) {
-        toast({title: "Error", description: "Logged in user details not found.", variant: "destructive"});
+        toast({title: "Error", description: "Logged in user details not found for notification.", variant: "destructive"});
         return;
       }
-      const loggedInUserDetails: LoggedInUser = JSON.parse(loggedInUserDetailsString);
+      const loggedInUserDetails: ProfilePageUser = JSON.parse(loggedInUserDetailsString);
 
       const sentNotification: StoredNotification = {
         id: `notif_sent_to_${profileUser.username}_${Date.now()}`,
         type: "friend_request_sent_confirmation",
         user: { 
           name: profileUser.fullName || profileUser.username, 
-          avatar: profileAvatarUrl, 
+          avatar: profileUser.avatar || `https://placehold.co/100x100.png?u=${profileUser.username}`, 
           handle: `@${profileUser.username}`,
           username: profileUser.username
         },
@@ -473,18 +515,7 @@ const handleProfileAvatarChange = async (event: React.ChangeEvent<HTMLInputEleme
     }
   };
 
-  const userForDisplay = profileUser || { 
-    uid: "loading",
-    username: resolvedParams.username,
-    fullName: resolvedParams.username.charAt(0).toUpperCase() + resolvedParams.username.slice(1), 
-    avatar: `https://placehold.co/150x150.png?u=${resolvedParams.username}`,
-    bio: "Loading profile...",
-    friendsCount: 0, 
-    coverImage: `https://placehold.co/1200x300.png?cover=loading`,
-  };
-
-
-  if (!profileUser && isLoadingPosts) { // isLoadingPosts can double for initial profile loading
+  if (isLoadingProfile) {
     return (
         <div className="container mx-auto max-w-4xl text-center py-10">
             <Loader2 className="h-12 w-12 animate-spin text-primary mx-auto" />
@@ -493,7 +524,7 @@ const handleProfileAvatarChange = async (event: React.ChangeEvent<HTMLInputEleme
     );
   }
   
-  if (profileUser && profileUser.uid === "unknown") {
+  if (!profileUser) { // If profileUser is null after loading attempt
      return (
         <div className="container mx-auto max-w-4xl text-center py-10">
             <Card><CardHeader><CardTitle>Profile Not Found</CardTitle></CardHeader><CardContent><p>The user @{resolvedParams.username} does not exist or their profile could not be loaded.</p></CardContent></Card>
@@ -501,19 +532,18 @@ const handleProfileAvatarChange = async (event: React.ChangeEvent<HTMLInputEleme
     );
   }
 
-
   return (
     <div className="container mx-auto max-w-4xl">
       <Card className="shadow-xl rounded-xl overflow-hidden">
         <div className="relative h-48 md:h-64">
           <Image 
-            src={profileCoverImageUrl} 
-            alt={`${userForDisplay.fullName}'s cover photo`} 
+            src={profileUser.coverImage || `https://placehold.co/1200x300.png?text=${profileUser.username}&cover=1`} 
+            alt={`${profileUser.fullName}'s cover photo`} 
             fill
             style={{objectFit: "cover"}}
             data-ai-hint="poker table background"
             priority 
-            key={profileCoverImageUrl} 
+            key={profileUser.coverImage} 
           />
           <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/70 to-transparent">
             <div className="flex flex-col sm:flex-row items-center sm:items-end space-x-0 sm:space-x-4">
@@ -521,8 +551,8 @@ const handleProfileAvatarChange = async (event: React.ChangeEvent<HTMLInputEleme
                 <label htmlFor={isCurrentUserProfile ? "profile-avatar-upload" : undefined} 
                        className={isCurrentUserProfile ? "cursor-pointer" : ""}>
                   <Avatar className="h-24 w-24 sm:h-32 sm:w-32 border-4 border-background -mb-12 sm:-mb-0 relative z-10">
-                    <AvatarImage src={profileAvatarUrl} alt={userForDisplay.fullName} data-ai-hint="profile picture" key={profileAvatarUrl} />
-                    <AvatarFallback>{userForDisplay.fullName?.substring(0, 2)?.toUpperCase() || 'P'}</AvatarFallback>
+                    <AvatarImage src={profileUser.avatar || `https://placehold.co/150x150.png?u=${profileUser.username}`} alt={profileUser.fullName} data-ai-hint="profile picture" key={profileUser.avatar} />
+                    <AvatarFallback>{profileUser.fullName?.substring(0, 2)?.toUpperCase() || 'P'}</AvatarFallback>
                   </Avatar>
                   {isCurrentUserProfile && (
                     <div className="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity rounded-full z-20 -mb-12 sm:-mb-0">
@@ -543,8 +573,8 @@ const handleProfileAvatarChange = async (event: React.ChangeEvent<HTMLInputEleme
               </div>
 
               <div className="text-center sm:text-left pt-12 sm:pt-0 sm:pb-2">
-                <h1 className="text-3xl font-bold text-white">{userForDisplay.fullName}</h1>
-                <p className="text-sm text-gray-300">@{userForDisplay.username}</p>
+                <h1 className="text-3xl font-bold text-white">{profileUser.fullName}</h1>
+                <p className="text-sm text-gray-300">@{profileUser.username}</p>
               </div>
                 {isCurrentUserProfile ? (
                     <Button 
@@ -560,7 +590,7 @@ const handleProfileAvatarChange = async (event: React.ChangeEvent<HTMLInputEleme
                         <UserCheck className="mr-2 h-4 w-4" /> Request Sent
                     </Button>
                 ) : (
-                    <Button variant="default" size="sm" className="mt-4 sm:mt-0 sm:ml-auto" onClick={handleSendFriendRequest} disabled={!currentLoggedInUserAuth || !profileUser || profileUser.uid === "unknown"}>
+                    <Button variant="default" size="sm" className="mt-4 sm:mt-0 sm:ml-auto" onClick={handleSendFriendRequest} disabled={!currentLoggedInUserAuth || !profileUser}>
                         <UserPlus className="mr-2 h-4 w-4" /> Add Friend
                     </Button>
                 )}
@@ -575,14 +605,14 @@ const handleProfileAvatarChange = async (event: React.ChangeEvent<HTMLInputEleme
               <p className="text-sm text-muted-foreground">Posts</p>
             </div>
             <div>
-              <p className="font-semibold text-lg">{userForDisplay.friendsCount || 0}</p>
+              <p className="font-semibold text-lg">{profileUser.friendsCount || 0}</p>
               <p className="text-sm text-muted-foreground">Friends</p>
             </div>
           </div>
 
           <div className="mb-6">
             <h3 className="font-semibold mb-1">Bio</h3>
-            <p className="text-sm text-muted-foreground">{userForDisplay.bio || "No bio provided."}</p>
+            <p className="text-sm text-muted-foreground">{profileUser.bio || "No bio provided."}</p>
           </div>
 
           <Tabs defaultValue="posts" className="w-full">
@@ -602,7 +632,7 @@ const handleProfileAvatarChange = async (event: React.ChangeEvent<HTMLInputEleme
                   <CardHeader> <CardTitle>No Posts Yet</CardTitle> </CardHeader>
                   <CardContent>
                     <p className="text-muted-foreground">
-                      {isCurrentUserProfile ? "You haven't shared any posts." : `${userForDisplay.fullName} hasn't shared any posts.`}
+                      {isCurrentUserProfile ? "You haven't shared any posts." : `${profileUser.fullName} hasn't shared any posts.`}
                     </p>
                     {isCurrentUserProfile && (
                        <Link href="/create-post" passHref className="mt-4 inline-block">
@@ -616,9 +646,10 @@ const handleProfileAvatarChange = async (event: React.ChangeEvent<HTMLInputEleme
                 <PostCard 
                   key={post.id} 
                   post={post} 
+                  currentUserId={currentLoggedInUserAuth?.uid}
                   showManagementControls={isCurrentUserProfile}
                   onDeletePost={isCurrentUserProfile ? handleDeletePost : undefined}
-                  onLikePost={handleLikePost} // Viewer (currentLoggedInUserAuth) likes/unlikes profileUser's post
+                  onLikePost={handleLikePost} 
                   onCommentPost={handleCommentOnPost}
                   isLCPItem={index === 0}
                 />
@@ -628,7 +659,7 @@ const handleProfileAvatarChange = async (event: React.ChangeEvent<HTMLInputEleme
                <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2"><Users /> Connections</CardTitle>
-                  <CardDescription>People connected with {userForDisplay.fullName}. (Mock Data)</CardDescription>
+                  <CardDescription>People connected with {profileUser.fullName}. (Mock Data)</CardDescription>
                 </CardHeader>
                 <CardContent>
                   {mockProfileConnections.length === 0 ? (
