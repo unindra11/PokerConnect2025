@@ -6,6 +6,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label"; // Added import
 import { UserPlus, MessageSquare, UserMinus, UserX, Flag, Loader2, Users } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { app, auth } from "@/lib/firebase";
@@ -28,14 +29,11 @@ import type { User as FirebaseUser } from "firebase/auth";
 import Link from "next/link";
 
 interface Friend {
-  id: string; // This will be the friendUserId
-  name: string;
-  username: string;
-  avatar: string;
+  id: string; // This will be the friendUserId (UID of the friend)
+  name: string; // fullName of the friend
+  username: string; // username of the friend
+  avatar: string; // avatar URL of the friend
   since?: any; // Firestore Timestamp or Date
-  // For mock display, these might not be relevant if fetching real friends
-  online?: boolean;
-  mutualFriends?: number;
 }
 
 interface LoggedInUserDetails {
@@ -65,7 +63,8 @@ export default function FriendsPage() {
             if (parsedUser.uid === user.uid) {
               setLoggedInUserDetails(parsedUser);
             } else {
-              localStorage.removeItem("loggedInUser"); // Mismatch
+              console.warn("FriendsPage: localStorage user UID mismatch with auth UID. Clearing local.")
+              localStorage.removeItem("loggedInUser");
               setLoggedInUserDetails(null);
             }
           } catch (e) {
@@ -93,19 +92,26 @@ export default function FriendsPage() {
       const db = getFirestore(app, "poker");
       try {
         const friendsCollectionRef = collection(db, "users", currentUserAuth.uid, "friends");
-        const q = query(friendsCollectionRef, orderBy("name", "asc")); // Order by name
+        // Order by username for consistency, or 'since' for recency
+        const q = query(friendsCollectionRef, orderBy("username", "asc")); 
         const querySnapshot = await getDocs(q);
-        const fetchedFriends: Friend[] = querySnapshot.docs.map(docSnap => ({
-          id: docSnap.id, // friendUserId
-          ...(docSnap.data() as Omit<Friend, 'id'>)
-        }));
+        const fetchedFriends: Friend[] = querySnapshot.docs.map(docSnap => {
+          const data = docSnap.data();
+          return {
+            id: docSnap.id, // This is friendUserId
+            name: data.name || "Unknown Friend",
+            username: data.username || "unknown_friend",
+            avatar: data.avatar || `https://placehold.co/100x100.png?text=${(data.name || "F").substring(0,1)}`,
+            since: data.since,
+          } as Friend;
+        });
         setFriends(fetchedFriends);
-        console.log(`FriendsPage: Fetched ${fetchedFriends.length} friends from Firestore.`);
+        console.log(`FriendsPage: Fetched ${fetchedFriends.length} friends from Firestore for user ${currentUserAuth.uid}.`);
       } catch (error) {
         console.error("FriendsPage: Error fetching friends from Firestore:", error);
         toast({
           title: "Error Loading Friends",
-          description: "Could not retrieve your friends list from Firestore.",
+          description: "Could not retrieve your friends list from Firestore. Check console and rules.",
           variant: "destructive",
         });
       } finally {
@@ -124,11 +130,12 @@ export default function FriendsPage() {
       return;
     }
     if (!currentUserAuth || !loggedInUserDetails) {
-      toast({ title: "Authentication Error", description: "You must be logged in.", variant: "destructive" });
+      toast({ title: "Authentication Error", description: "You must be logged in to add friends.", variant: "destructive" });
       return;
     }
     setIsAddingFriend(true);
     const db = getFirestore(app, "poker");
+    const currentUserId = currentUserAuth.uid;
     
     try {
       // Try finding by username first
@@ -136,15 +143,15 @@ export default function FriendsPage() {
       let querySnapshot = await getDocs(userQuery);
       let targetUserDoc = querySnapshot.docs[0];
 
-      // If not found by username, try by email
-      if (!targetUserDoc) {
+      // If not found by username, try by email (if query looks like an email)
+      if (!targetUserDoc && newFriendQuery.includes('@')) {
         userQuery = query(collection(db, "users"), where("email", "==", newFriendQuery.trim()), limit(1));
         querySnapshot = await getDocs(userQuery);
         targetUserDoc = querySnapshot.docs[0];
       }
 
       if (!targetUserDoc) {
-        toast({ title: "User Not Found", description: `No user found with username/email: ${newFriendQuery}.`, variant: "destructive" });
+        toast({ title: "User Not Found", description: `No user found with username or email: ${newFriendQuery}.`, variant: "destructive" });
         setIsAddingFriend(false);
         return;
       }
@@ -152,14 +159,14 @@ export default function FriendsPage() {
       const targetUserData = targetUserDoc.data();
       const targetUserId = targetUserDoc.id;
 
-      if (targetUserId === currentUserAuth.uid) {
+      if (targetUserId === currentUserId) {
         toast({ title: "Cannot Add Self", description: "You cannot send a friend request to yourself.", variant: "default" });
         setIsAddingFriend(false);
         return;
       }
 
       // Check if already friends
-      const friendDocRef = doc(db, "users", currentUserAuth.uid, "friends", targetUserId);
+      const friendDocRef = doc(db, "users", currentUserId, "friends", targetUserId);
       const friendDocSnap = await getDoc(friendDocRef);
       if (friendDocSnap.exists()) {
         toast({ title: "Already Friends", description: `You are already friends with ${targetUserData.username}.`, variant: "default" });
@@ -168,20 +175,20 @@ export default function FriendsPage() {
       }
 
       // Check for existing pending request (either way)
-      const requestQuery1 = query(collection(db, "friendRequests"), 
-        where("senderId", "==", currentUserAuth.uid), 
+      const requestQuerySent = query(collection(db, "friendRequests"), 
+        where("senderId", "==", currentUserId), 
         where("receiverId", "==", targetUserId),
         where("status", "==", "pending")
       );
-      const requestQuery2 = query(collection(db, "friendRequests"), 
+      const requestQueryReceived = query(collection(db, "friendRequests"), 
         where("senderId", "==", targetUserId), 
-        where("receiverId", "==", currentUserAuth.uid),
+        where("receiverId", "==", currentUserId),
         where("status", "==", "pending")
       );
       
-      const [requestSnapshot1, requestSnapshot2] = await Promise.all([getDocs(requestQuery1), getDocs(requestQuery2)]);
+      const [requestSnapshotSent, requestSnapshotReceived] = await Promise.all([getDocs(requestQuerySent), getDocs(requestQueryReceived)]);
 
-      if (!requestSnapshot1.empty || !requestSnapshot2.empty) {
+      if (!requestSnapshotSent.empty || !requestSnapshotReceived.empty) {
         toast({ title: "Request Already Exists", description: "A friend request is already pending between you and this user.", variant: "default" });
         setIsAddingFriend(false);
         return;
@@ -189,61 +196,65 @@ export default function FriendsPage() {
 
       // Create new friend request
       const friendRequestData = {
-        senderId: currentUserAuth.uid,
+        senderId: currentUserId,
         senderUsername: loggedInUserDetails.username,
-        senderAvatar: loggedInUserDetails.avatar || "",
+        senderAvatar: loggedInUserDetails.avatar || `https://placehold.co/40x40.png?text=${(loggedInUserDetails.username || "S").substring(0,1)}`,
         receiverId: targetUserId,
         receiverUsername: targetUserData.username,
-        receiverAvatar: targetUserData.avatar || "",
+        receiverAvatar: targetUserData.avatar || `https://placehold.co/40x40.png?text=${(targetUserData.username || "R").substring(0,1)}`,
         status: "pending",
         createdAt: serverTimestamp(),
       };
       await addDoc(collection(db, "friendRequests"), friendRequestData);
-      toast({ title: "Friend Request Sent!", description: `Friend request sent to ${targetUserData.username}.` });
+      toast({ title: "Friend Request Sent!", description: `Friend request sent to ${targetUserData.username}. They will see it in their notifications.` });
       setNewFriendQuery("");
     } catch (error) {
-      console.error("FriendsPage: Error sending friend request:", error);
-      toast({ title: "Error", description: "Could not send friend request.", variant: "destructive" });
+      console.error("FriendsPage: Error sending friend request to Firestore:", error);
+      toast({ title: "Error", description: "Could not send friend request. Check Firestore rules and console.", variant: "destructive" });
     } finally {
       setIsAddingFriend(false);
     }
   };
 
   const handleMessage = (name: string) => {
-    toast({ title: "Message", description: `Opening chat with ${name} (simulated).` });
+    toast({ title: "Message (Simulated)", description: `Opening chat with ${name}. Full chat functionality coming soon!` });
   };
 
   const handleUnfriend = async (friendId: string, friendName: string) => {
-    if (!currentUserAuth?.uid) return;
+    if (!currentUserAuth?.uid) {
+      toast({ title: "Authentication Error", description: "You must be logged in.", variant: "destructive"});
+      return;
+    }
     const originalFriends = [...friends];
     setFriends(prevFriends => prevFriends.filter(friend => friend.id !== friendId));
     toast({ title: "Unfriending...", description: `Removing ${friendName} from your friends list.` });
 
     const db = getFirestore(app, "poker");
     const batch = writeBatch(db);
+    const currentUserId = currentUserAuth.uid;
 
-    const currentUserFriendRef = doc(db, "users", currentUserAuth.uid, "friends", friendId);
+    const currentUserFriendRef = doc(db, "users", currentUserId, "friends", friendId);
     batch.delete(currentUserFriendRef);
 
-    const otherUserFriendRef = doc(db, "users", friendId, "friends", currentUserAuth.uid);
+    const otherUserFriendRef = doc(db, "users", friendId, "friends", currentUserId);
     batch.delete(otherUserFriendRef);
 
     try {
       await batch.commit();
       toast({ title: "Unfriended", description: `${friendName} has been removed from your friends.`, variant: "destructive" });
     } catch (error) {
-      console.error("FriendsPage: Error unfriending user:", error);
+      console.error("FriendsPage: Error unfriending user in Firestore:", error);
       setFriends(originalFriends);
-      toast({ title: "Error", description: "Could not unfriend user.", variant: "destructive" });
+      toast({ title: "Error Unfriending", description: "Could not unfriend user from Firestore. Check rules and console.", variant: "destructive" });
     }
   };
 
   const handleBlock = (name: string) => {
-    toast({ title: "User Blocked", description: `${name} has been blocked (simulated).`, variant: "destructive" });
+    toast({ title: "User Blocked (Simulated)", description: `${name} has been blocked. Full block functionality coming soon.`, variant: "destructive" });
   };
 
   const handleReport = (name: string) => {
-    toast({ title: "User Reported", description: `A report for ${name} has been submitted (simulated).` });
+    toast({ title: "User Reported (Simulated)", description: `A report for ${name} has been submitted. Moderation features coming soon.` });
   };
 
   return (
@@ -254,7 +265,7 @@ export default function FriendsPage() {
             <Users className="h-6 w-6 text-primary" />
             <CardTitle className="text-xl">Manage Friends</CardTitle>
           </div>
-          <CardDescription>Connect with other players and manage your friend list.</CardDescription>
+          <CardDescription>Connect with other players, manage your friend list, and send new requests (Firestore backed).</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="mb-6 p-4 border rounded-lg shadow-sm">
@@ -268,12 +279,12 @@ export default function FriendsPage() {
                 value={newFriendQuery}
                 onChange={(e) => setNewFriendQuery(e.target.value)}
               />
-              <Button onClick={handleAddFriend} className="w-full sm:w-auto" disabled={isAddingFriend}>
+              <Button onClick={handleAddFriend} className="w-full sm:w-auto" disabled={isAddingFriend || !loggedInUserDetails}>
                 {isAddingFriend ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <UserPlus className="mr-2 h-5 w-5" />}
                 {isAddingFriend ? "Sending..." : "Send Request"}
               </Button>
             </div>
-             <p className="text-xs text-muted-foreground mt-2">Friend requests will be saved to Firestore.</p>
+             <p className="text-xs text-muted-foreground mt-2">Searches users in Firestore and creates a 'friendRequest' document.</p>
           </div>
           
           <div>
