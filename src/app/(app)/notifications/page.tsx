@@ -18,7 +18,8 @@ import {
   updateDoc, 
   serverTimestamp,
   writeBatch,
-  Timestamp 
+  Timestamp,
+  orderBy // Added orderBy
 } from "firebase/firestore";
 import type { User as FirebaseUser } from "firebase/auth";
 import { formatDistanceToNow } from 'date-fns';
@@ -27,19 +28,23 @@ interface NotificationUser {
   name: string;
   avatar?: string;
   username: string; 
-  uid?: string; // Added UID for Firestore interactions
+  uid?: string; 
 }
 
 interface AppNotification {
-  id: string; // Firestore document ID for dynamic notifications
+  id: string; 
   type: string; 
   user: NotificationUser | null; 
   message: string;
-  timestamp: string | Timestamp | Date; // Can be string for static, Timestamp/Date for Firestore
+  timestamp: string | Timestamp | Date; 
   read?: boolean;
-  senderId?: string; // For friend requests from Firestore
+  senderId?: string; 
   senderUsername?: string;
   senderAvatar?: string;
+  // For accepted/declined requests to be processed by the sender
+  receiverId?: string;
+  receiverUsername?: string;
+  receiverAvatar?: string;
 }
 
 interface LoggedInUserFromStorage {
@@ -49,7 +54,7 @@ interface LoggedInUserFromStorage {
   avatar?: string;
 }
 
-// Kept for variety if no dynamic notifications exist initially
+
 const staticNotifications: AppNotification[] = [
   {
     id: "static2",
@@ -95,7 +100,7 @@ export default function NotificationsPage() {
             } else {
               localStorage.removeItem("loggedInUser");
               setLoggedInUser(null);
-              setDisplayedNotifications(staticNotifications); // Reset to static if user mismatch
+              setDisplayedNotifications(staticNotifications); 
             }
           } catch (e) {
             console.error("NotificationsPage: Error parsing loggedInUser from localStorage", e);
@@ -104,12 +109,12 @@ export default function NotificationsPage() {
             setDisplayedNotifications(staticNotifications);
           }
         } else {
-          setLoggedInUser(null); // No user in localStorage
+          setLoggedInUser(null); 
           setDisplayedNotifications(staticNotifications);
         }
       } else {
         setLoggedInUser(null);
-        setDisplayedNotifications(staticNotifications); // No auth user
+        setDisplayedNotifications(staticNotifications); 
       }
       setIsLoading(false);
     });
@@ -131,7 +136,7 @@ export default function NotificationsPage() {
         return {
           id: docSnap.id,
           type: "friend_request_firestore",
-          user: { // This is the SENDER
+          user: { 
             name: data.senderUsername || "Unknown User",
             avatar: data.senderAvatar || `https://placehold.co/100x100.png?text=${(data.senderUsername || "U").substring(0,1)}`,
             username: data.senderUsername || "unknown",
@@ -146,17 +151,17 @@ export default function NotificationsPage() {
       });
       
       console.log("NotificationsPage: Fetched friend requests from Firestore:", fetchedRequests);
-      // Combine with static notifications, ensuring dynamic ones are on top or replace them
-      setDisplayedNotifications([...fetchedRequests, ...staticNotifications.filter(n => n.type !== "friend_request")].sort((a,b) => {
-        const dateA = a.timestamp instanceof Timestamp ? a.timestamp.toDate() : (typeof a.timestamp === 'string' ? new Date() : a.timestamp); // Fallback for string dates
-        const dateB = b.timestamp instanceof Timestamp ? b.timestamp.toDate() : (typeof b.timestamp === 'string' ? new Date() : b.timestamp);
+      
+      setDisplayedNotifications([...fetchedRequests, ...staticNotifications.filter(n => n.type !== "friend_request" && n.type !== "friend_request_firestore")].sort((a,b) => {
+        const dateA = a.timestamp instanceof Timestamp ? a.timestamp.toDate() : (typeof a.timestamp === 'string' ? new Date(a.timestamp) : (a.timestamp instanceof Date ? a.timestamp : new Date()));
+        const dateB = b.timestamp instanceof Timestamp ? b.timestamp.toDate() : (typeof b.timestamp === 'string' ? new Date(b.timestamp) : (b.timestamp instanceof Date ? b.timestamp : new Date()));
         return dateB.getTime() - dateA.getTime();
       }));
 
     } catch (error) {
       console.error("NotificationsPage: Error fetching friend requests from Firestore:", error);
       toast({ title: "Error Loading Notifications", description: "Could not retrieve friend requests.", variant: "destructive" });
-      setDisplayedNotifications(staticNotifications); // Fallback to static
+      setDisplayedNotifications(staticNotifications); 
     } finally {
       setIsLoading(false);
     }
@@ -185,37 +190,31 @@ export default function NotificationsPage() {
 
     const db = getFirestore(app, "poker");
     const batch = writeBatch(db);
-
-    // 1. Update friendRequest status
     const requestRef = doc(db, "friendRequests", notification.id);
     batch.update(requestRef, { status: "accepted", updatedAt: serverTimestamp() });
 
-    // 2. Add to receiver's friends list (current logged-in user)
-    const receiverFriendsRef = doc(db, "users", loggedInUser.uid, "friends", notification.user.uid);
-    batch.set(receiverFriendsRef, {
+    const currentUserFriendsRef = doc(db, "users", loggedInUser.uid, "friends", notification.user.uid);
+    batch.set(currentUserFriendsRef, {
       friendUserId: notification.user.uid,
       username: notification.user.username,
       name: notification.user.name,
-      avatar: notification.user.avatar || "",
+      avatar: notification.user.avatar || `https://placehold.co/40x40.png?text=${(notification.user.name || "F").substring(0,1)}`,
       since: serverTimestamp()
     });
 
-    // 3. Add to sender's friends list
     const senderFriendsRef = doc(db, "users", notification.user.uid, "friends", loggedInUser.uid);
     batch.set(senderFriendsRef, {
       friendUserId: loggedInUser.uid,
       username: loggedInUser.username,
       name: loggedInUser.fullName || loggedInUser.username,
-      avatar: loggedInUser.avatar || "",
+      avatar: loggedInUser.avatar || `https://placehold.co/40x40.png?text=${(loggedInUser.fullName || "U").substring(0,1)}`,
       since: serverTimestamp()
     });
 
     try {
       await batch.commit();
       toast({ title: "Friend Request Accepted!", description: `You are now friends with ${notification.user.name}.` });
-      // Optimistically update UI or re-fetch notifications
       setDisplayedNotifications(prev => prev.filter(n => n.id !== notification.id));
-      // Optionally, add a local "You are now friends with..." notification
     } catch (error) {
       console.error("Error accepting friend request in Firestore:", error);
       toast({ title: "Error", description: "Could not accept friend request.", variant: "destructive" });
@@ -227,11 +226,7 @@ export default function NotificationsPage() {
     const db = getFirestore(app, "poker");
     const requestRef = doc(db, "friendRequests", notificationId);
     try {
-      // Option 1: Update status to "declined"
       await updateDoc(requestRef, { status: "declined", updatedAt: serverTimestamp() });
-      // Option 2: Delete the request (simpler for UI)
-      // await deleteDoc(requestRef); 
-      
       toast({ title: "Friend Request Declined", variant: "destructive" });
       setDisplayedNotifications(prev => prev.filter(n => n.id !== notificationId));
     } catch (error) {
@@ -267,8 +262,7 @@ export default function NotificationsPage() {
 
 
   const handleMarkAllAsRead = () => {
-    // This would typically involve updating 'read' status in Firestore for dynamic notifications
-    // For prototype, let's just clear the dynamic ones from view
+    
     setDisplayedNotifications(staticNotifications.sort((a,b) => new Date(b.timestamp as string).getTime() - new Date(a.timestamp as string).getTime() ));
     toast({ title: "Notifications Cleared", description: "All dynamic notifications have been cleared from view." });
   };
