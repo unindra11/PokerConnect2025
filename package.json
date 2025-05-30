@@ -3,6 +3,7 @@
   "name": "nextn",
   "version": "0.1.0",
   "private": true,
+  "description": "Next.js application for PokerConnect, built with Firebase Studio.",
   "scripts": {
     "dev": "next dev --turbopack -p 9003",
     "genkit:dev": "genkit start -- tsx src/ai/dev.ts",
@@ -43,7 +44,7 @@
     "clsx": "^2.1.1",
     "date-fns": "^3.6.0",
     "dotenv": "^16.5.0",
-    "firebase": "^11.8.0",
+    "firebase": "^11.8.1",
     "geist": "^1.3.1",
     "genkit": "^1.8.0",
     "lucide-react": "^0.475.0",
