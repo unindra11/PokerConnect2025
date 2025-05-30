@@ -5,45 +5,63 @@ import { useState, useEffect } from "react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { BellRing, CircleUserRound, MessageSquareText, ThumbsUp, Share2, UserCheck, UserPlus, Users, CheckCircle, XCircle } from "lucide-react";
+import { BellRing, UserPlus, MessageSquareText, ThumbsUp, Share2, UserCheck, CheckCircle, XCircle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { app, auth } from "@/lib/firebase";
+import { 
+  getFirestore, 
+  collection, 
+  query, 
+  where, 
+  getDocs, 
+  doc, 
+  updateDoc, 
+  serverTimestamp,
+  writeBatch,
+  Timestamp 
+} from "firebase/firestore";
+import type { User as FirebaseUser } from "firebase/auth";
+import { formatDistanceToNow } from 'date-fns';
 
-// Define a common structure for notifications
 interface NotificationUser {
   name: string;
-  avatar: string;
-  handle: string; 
-  username: string; // Made username mandatory for targeting localStorage keys
+  avatar?: string;
+  username: string; 
+  uid?: string; // Added UID for Firestore interactions
 }
 
 interface AppNotification {
-  id: string;
+  id: string; // Firestore document ID for dynamic notifications
   type: string; 
   user: NotificationUser | null; 
   message: string;
-  timestamp: string;
-  read?: boolean; // For Mark all as read functionality
+  timestamp: string | Timestamp | Date; // Can be string for static, Timestamp/Date for Firestore
+  read?: boolean;
+  senderId?: string; // For friend requests from Firestore
+  senderUsername?: string;
+  senderAvatar?: string;
 }
 
+interface LoggedInUserFromStorage {
+  uid: string;
+  username: string;
+  fullName?: string;
+  avatar?: string;
+}
+
+// Kept for variety if no dynamic notifications exist initially
 const staticNotifications: AppNotification[] = [
-  {
-    id: "static1",
-    type: "friend_request",
-    user: { name: "RoyalFlushRoy", avatar: "https://placehold.co/100x100.png?n=1", handle: "@royflush", username: "royflush" },
-    message: "sent you a friend request.",
-    timestamp: "15m ago",
-  },
   {
     id: "static2",
     type: "comment",
-    user: { name: "StraightSue", avatar: "https://placehold.co/100x100.png?n=2", handle: "@sue_straight", username: "sue_straight" },
+    user: { name: "StraightSue", avatar: "https://placehold.co/100x100.png?n=2", username: "sue_straight" },
     message: "commented on your post: \"Great analysis on that river bet!\"",
     timestamp: "1h ago",
   },
   {
     id: "static3",
     type: "like",
-    user: { name: "FullHouseFred", avatar: "https://placehold.co/100x100.png?n=3", handle: "@fred_full", username: "fred_full" },
+    user: { name: "FullHouseFred", avatar: "https://placehold.co/100x100.png?n=3", username: "fred_full" },
     message: "liked your post about your tournament win.",
     timestamp: "3h ago",
   },
@@ -56,131 +74,229 @@ const staticNotifications: AppNotification[] = [
   },
 ];
 
-interface LoggedInUserFromStorage {
-  username: string;
-  fullName?: string;
-  avatar?: string;
-}
-
 
 export default function NotificationsPage() {
-  const [displayedNotifications, setDisplayedNotifications] = useState<AppNotification[]>([]);
+  const [displayedNotifications, setDisplayedNotifications] = useState<AppNotification[]>(staticNotifications);
   const [loggedInUser, setLoggedInUser] = useState<LoggedInUserFromStorage | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
   const { toast } = useToast();
 
   useEffect(() => {
-    try {
-      const loggedInUserString = localStorage.getItem("loggedInUser");
-      if (loggedInUserString) {
-        const user: LoggedInUserFromStorage = JSON.parse(loggedInUserString);
-        setLoggedInUser(user);
-        
-        const notificationsKey = `pokerConnectNotifications_${user.username}`;
-        const storedNotificationsString = localStorage.getItem(notificationsKey);
-        let dynamicNotifications: AppNotification[] = [];
-        if (storedNotificationsString) {
-          dynamicNotifications = JSON.parse(storedNotificationsString);
+    const unsubscribe = auth.onAuthStateChanged(async (user) => {
+      if (user) {
+        const storedUserString = localStorage.getItem("loggedInUser");
+        if (storedUserString) {
+          try {
+            const parsedUser: LoggedInUserFromStorage = JSON.parse(storedUserString);
+            if (parsedUser.uid === user.uid) {
+              setLoggedInUser(parsedUser);
+              console.log("NotificationsPage: Logged in user:", parsedUser);
+              await fetchFriendRequests(parsedUser.uid);
+            } else {
+              localStorage.removeItem("loggedInUser");
+              setLoggedInUser(null);
+              setDisplayedNotifications(staticNotifications); // Reset to static if user mismatch
+            }
+          } catch (e) {
+            console.error("NotificationsPage: Error parsing loggedInUser from localStorage", e);
+            localStorage.removeItem("loggedInUser");
+            setLoggedInUser(null);
+            setDisplayedNotifications(staticNotifications);
+          }
+        } else {
+          setLoggedInUser(null); // No user in localStorage
+          setDisplayedNotifications(staticNotifications);
         }
-        // Prepend dynamic notifications to static ones, ensuring newest are first overall
-        setDisplayedNotifications([...dynamicNotifications, ...staticNotifications].sort((a,b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime() ));
       } else {
-         setDisplayedNotifications([...staticNotifications].sort((a,b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime() ));
+        setLoggedInUser(null);
+        setDisplayedNotifications(staticNotifications); // No auth user
       }
+      setIsLoading(false);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const fetchFriendRequests = async (currentUserId: string) => {
+    setIsLoading(true);
+    const db = getFirestore(app, "poker");
+    try {
+      console.log(`NotificationsPage: Fetching friend requests for receiverId: ${currentUserId}`);
+      const requestsRef = collection(db, "friendRequests");
+      const q = query(requestsRef, where("receiverId", "==", currentUserId), where("status", "==", "pending"), orderBy("createdAt", "desc"));
+      const querySnapshot = await getDocs(q);
+      
+      const fetchedRequests: AppNotification[] = querySnapshot.docs.map(docSnap => {
+        const data = docSnap.data();
+        console.log("NotificationsPage: Fetched request data:", data);
+        return {
+          id: docSnap.id,
+          type: "friend_request_firestore",
+          user: { // This is the SENDER
+            name: data.senderUsername || "Unknown User",
+            avatar: data.senderAvatar || `https://placehold.co/100x100.png?text=${(data.senderUsername || "U").substring(0,1)}`,
+            username: data.senderUsername || "unknown",
+            uid: data.senderId 
+          },
+          message: "sent you a friend request.",
+          timestamp: data.createdAt,
+          senderId: data.senderId,
+          senderUsername: data.senderUsername,
+          senderAvatar: data.senderAvatar,
+        };
+      });
+      
+      console.log("NotificationsPage: Fetched friend requests from Firestore:", fetchedRequests);
+      // Combine with static notifications, ensuring dynamic ones are on top or replace them
+      setDisplayedNotifications([...fetchedRequests, ...staticNotifications.filter(n => n.type !== "friend_request")].sort((a,b) => {
+        const dateA = a.timestamp instanceof Timestamp ? a.timestamp.toDate() : (typeof a.timestamp === 'string' ? new Date() : a.timestamp); // Fallback for string dates
+        const dateB = b.timestamp instanceof Timestamp ? b.timestamp.toDate() : (typeof b.timestamp === 'string' ? new Date() : b.timestamp);
+        return dateB.getTime() - dateA.getTime();
+      }));
+
     } catch (error) {
-      console.error("Error loading notifications:", error);
-      setDisplayedNotifications([...staticNotifications].sort((a,b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime() ));
+      console.error("NotificationsPage: Error fetching friend requests from Firestore:", error);
+      toast({ title: "Error Loading Notifications", description: "Could not retrieve friend requests.", variant: "destructive" });
+      setDisplayedNotifications(staticNotifications); // Fallback to static
+    } finally {
+      setIsLoading(false);
     }
-  }, [toast]); // Re-run if toast changes (or on initial load)
+  };
 
   const getNotificationIcon = (type: string) => {
     switch (type) {
       case "friend_request": return <UserPlus className="h-5 w-5 text-primary" />;
+      case "friend_request_firestore": return <UserPlus className="h-5 w-5 text-primary" />;
       case "comment": return <MessageSquareText className="h-5 w-5 text-accent" />;
       case "like": return <ThumbsUp className="h-5 w-5 text-red-500" />;
       case "share": return <Share2 className="h-5 w-5 text-green-500" />;
-      case "friend_accept": return <UserCheck className="h-5 w-5 text-blue-500" />; // For notification to sender
-      case "friend_accept_confirmation": return <CheckCircle className="h-5 w-5 text-green-500" />; // For current user
+      case "friend_accept": return <UserCheck className="h-5 w-5 text-blue-500" />;
+      case "friend_accept_confirmation": return <CheckCircle className="h-5 w-5 text-green-500" />;
       case "friend_request_sent_confirmation": return <UserPlus className="h-5 w-5 text-blue-500" />;
       case "system": return <BellRing className="h-5 w-5 text-yellow-500" />;
       default: return <BellRing className="h-5 w-5 text-muted-foreground" />;
     }
   };
 
-  const updateNotificationsInStorage = (username: string, updatedNotifications: AppNotification[]) => {
+  const handleAcceptFirestoreRequest = async (notification: AppNotification) => {
+    if (!loggedInUser || !notification.user?.uid || !notification.user.username || !notification.user.name) {
+      toast({ title: "Error", description: "Missing user data for action.", variant: "destructive" });
+      return;
+    }
+
+    const db = getFirestore(app, "poker");
+    const batch = writeBatch(db);
+
+    // 1. Update friendRequest status
+    const requestRef = doc(db, "friendRequests", notification.id);
+    batch.update(requestRef, { status: "accepted", updatedAt: serverTimestamp() });
+
+    // 2. Add to receiver's friends list (current logged-in user)
+    const receiverFriendsRef = doc(db, "users", loggedInUser.uid, "friends", notification.user.uid);
+    batch.set(receiverFriendsRef, {
+      friendUserId: notification.user.uid,
+      username: notification.user.username,
+      name: notification.user.name,
+      avatar: notification.user.avatar || "",
+      since: serverTimestamp()
+    });
+
+    // 3. Add to sender's friends list
+    const senderFriendsRef = doc(db, "users", notification.user.uid, "friends", loggedInUser.uid);
+    batch.set(senderFriendsRef, {
+      friendUserId: loggedInUser.uid,
+      username: loggedInUser.username,
+      name: loggedInUser.fullName || loggedInUser.username,
+      avatar: loggedInUser.avatar || "",
+      since: serverTimestamp()
+    });
+
     try {
-      localStorage.setItem(`pokerConnectNotifications_${username}`, JSON.stringify(updatedNotifications));
+      await batch.commit();
+      toast({ title: "Friend Request Accepted!", description: `You are now friends with ${notification.user.name}.` });
+      // Optimistically update UI or re-fetch notifications
+      setDisplayedNotifications(prev => prev.filter(n => n.id !== notification.id));
+      // Optionally, add a local "You are now friends with..." notification
     } catch (error) {
-      console.error(`Error updating notifications in localStorage for ${username}:`, error);
-      toast({ title: "Storage Error", description: "Could not save notification changes.", variant: "destructive" });
+      console.error("Error accepting friend request in Firestore:", error);
+      toast({ title: "Error", description: "Could not accept friend request.", variant: "destructive" });
     }
   };
 
-  const handleAcceptFriendRequest = (notificationId: string, requestingUser: NotificationUser) => {
-    if (!loggedInUser) return;
-
-    // 1. Update current user's notifications
-    const newCurrentUserNotifications = displayedNotifications.filter(n => n.id !== notificationId);
-    const acceptanceConfirmation: AppNotification = {
-      id: `accepted_${requestingUser.username}_${Date.now()}`,
-      type: "friend_accept_confirmation",
-      user: requestingUser,
-      message: `You are now friends with ${requestingUser.name}.`,
-      timestamp: new Date().toLocaleString(),
-    };
-    const updatedCurrentUserNotifs = [acceptanceConfirmation, ...newCurrentUserNotifications.filter(n=> staticNotifications.every(sn => sn.id !== n.id))];
-    updateNotificationsInStorage(loggedInUser.username, updatedCurrentUserNotifs);
-
-    // 2. Update requesting user's notifications
-    const requesterNotificationsKey = `pokerConnectNotifications_${requestingUser.username}`;
-    let requesterNotifications: AppNotification[] = [];
-    const requesterStoredString = localStorage.getItem(requesterNotificationsKey);
-    if (requesterStoredString) {
-      try { requesterNotifications = JSON.parse(requesterStoredString); } catch (e) { console.error(e); }
+  const handleDeclineFirestoreRequest = async (notificationId: string) => {
+     if (!loggedInUser) return;
+    const db = getFirestore(app, "poker");
+    const requestRef = doc(db, "friendRequests", notificationId);
+    try {
+      // Option 1: Update status to "declined"
+      await updateDoc(requestRef, { status: "declined", updatedAt: serverTimestamp() });
+      // Option 2: Delete the request (simpler for UI)
+      // await deleteDoc(requestRef); 
+      
+      toast({ title: "Friend Request Declined", variant: "destructive" });
+      setDisplayedNotifications(prev => prev.filter(n => n.id !== notificationId));
+    } catch (error) {
+       console.error("Error declining friend request in Firestore:", error);
+       toast({ title: "Error", description: "Could not decline friend request.", variant: "destructive" });
     }
-    const friendAcceptedNotif: AppNotification = {
-      id: `request_accepted_by_${loggedInUser.username}_${Date.now()}`,
-      type: "friend_accept",
-      user: { name: loggedInUser.fullName || loggedInUser.username, avatar: loggedInUser.avatar || "", handle: `@${loggedInUser.username}`, username: loggedInUser.username },
-      message: `accepted your friend request.`,
-      timestamp: new Date().toLocaleString(),
-    };
-    const updatedRequesterNotifs = [friendAcceptedNotif, ...requesterNotifications];
-    updateNotificationsInStorage(requestingUser.username, updatedRequesterNotifs);
-
-    // 3. Update UI
-    setDisplayedNotifications([acceptanceConfirmation, ...newCurrentUserNotifications].sort((a,b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime() ));
-    toast({ title: "Friend Request Accepted!", description: `You are now friends with ${requestingUser.name}.` });
   };
 
-  const handleDeclineFriendRequest = (notificationId: string, requestingUser: NotificationUser) => {
-    if (!loggedInUser) return;
-    const updatedNotifications = displayedNotifications.filter(n => n.id !== notificationId);
-    const dynamicOnly = updatedNotifications.filter(n=> staticNotifications.every(sn => sn.id !== n.id));
-    updateNotificationsInStorage(loggedInUser.username, dynamicOnly);
+  const getTimestampString = (timestamp: AppNotification['timestamp']): string => {
+    if (!timestamp) return 'Just now';
+    let date: Date | null = null;
+    if (timestamp instanceof Timestamp) { 
+      date = timestamp.toDate();
+    } else if (typeof timestamp === 'string') {
+      const parsedDate = new Date(timestamp);
+      if (!isNaN(parsedDate.getTime())) {
+        date = parsedDate;
+      }
+    } else if (timestamp instanceof Date) {
+      date = timestamp;
+    }
     
-    setDisplayedNotifications(updatedNotifications.sort((a,b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime() ));
-    toast({ title: "Friend Request Declined", description: `You declined the request from ${requestingUser.name}.`, variant: "destructive" });
+    if (date) {
+      try {
+        return formatDistanceToNow(date, { addSuffix: true });
+      } catch (e) {
+        console.warn("Error formatting date:", e, "Timestamp was:", timestamp);
+        return new Date(timestamp as any).toLocaleString(); 
+      }
+    }
+    return new Date().toLocaleString(); 
   };
 
 
   const handleMarkAllAsRead = () => {
-    if (loggedInUser) {
-      // For prototype: Clear dynamic notifications, keep static ones
-      localStorage.removeItem(`pokerConnectNotifications_${loggedInUser.username}`);
-      setDisplayedNotifications([...staticNotifications].sort((a,b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime() ));
-      toast({ title: "Notifications Cleared", description: "All dynamic notifications have been marked as read and cleared." });
-    } else {
-      // Fallback if loggedInUser is not set, though unlikely if page is viewed
-      setDisplayedNotifications(staticNotifications.map(n => ({ ...n, read: true })).sort((a,b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime() ));
-    }
+    // This would typically involve updating 'read' status in Firestore for dynamic notifications
+    // For prototype, let's just clear the dynamic ones from view
+    setDisplayedNotifications(staticNotifications.sort((a,b) => new Date(b.timestamp as string).getTime() - new Date(a.timestamp as string).getTime() ));
+    toast({ title: "Notifications Cleared", description: "All dynamic notifications have been cleared from view." });
   };
+
+  if (isLoading && loggedInUser === null) {
+    return (
+      <div className="container mx-auto max-w-2xl text-center py-10">
+          <p>Loading user session...</p>
+      </div>
+    );
+  }
+  
+  if (isLoading) {
+     return (
+      <div className="container mx-auto max-w-2xl text-center py-10">
+          <p>Loading notifications...</p>
+      </div>
+    );
+  }
 
 
   return (
     <div className="container mx-auto max-w-2xl">
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-3xl font-bold">Notifications</h1>
-        <Button variant="outline" size="sm" onClick={handleMarkAllAsRead}>Mark all as read</Button>
+        {displayedNotifications.some(n => n.type === "friend_request_firestore") && (
+          <Button variant="outline" size="sm" onClick={handleMarkAllAsRead}>Clear Dynamic Notifications</Button>
+        )}
       </div>
 
       {displayedNotifications.length === 0 && (
@@ -201,8 +317,8 @@ export default function NotificationsPage() {
               <div className="flex-shrink-0 mt-1">
                 {notification.user && notification.type !== "system" ? (
                   <Avatar className="h-10 w-10">
-                    <AvatarImage src={notification.user.avatar} alt={notification.user.name} data-ai-hint="profile picture" />
-                    <AvatarFallback>{notification.user.name.substring(0,1)}</AvatarFallback>
+                    <AvatarImage src={notification.user.avatar || `https://placehold.co/40x40.png?text=${(notification.user.name || "U").substring(0,1)}`} alt={notification.user.name} data-ai-hint="profile picture" />
+                    <AvatarFallback>{notification.user.name.substring(0,1).toUpperCase()}</AvatarFallback>
                   </Avatar>
                 ) : (
                   <div className="h-10 w-10 flex items-center justify-center rounded-full bg-muted">
@@ -218,12 +334,12 @@ export default function NotificationsPage() {
                   {' '}
                   {notification.message}
                 </p>
-                <p className="text-xs text-muted-foreground">{notification.timestamp}</p>
+                <p className="text-xs text-muted-foreground">{getTimestampString(notification.timestamp)}</p>
               </div>
-              {notification.type === "friend_request" && notification.user && (
+              {notification.type === "friend_request_firestore" && notification.user && (
                 <div className="flex gap-2 ml-auto">
-                  <Button size="sm" onClick={() => handleAcceptFriendRequest(notification.id, notification.user!)}>Accept</Button>
-                  <Button variant="outline" size="sm" onClick={() => handleDeclineFriendRequest(notification.id, notification.user!)}>Decline</Button>
+                  <Button size="sm" onClick={() => handleAcceptFirestoreRequest(notification)}>Accept</Button>
+                  <Button variant="outline" size="sm" onClick={() => handleDeclineFirestoreRequest(notification.id)}>Decline</Button>
                 </div>
               )}
             </CardContent>
@@ -233,5 +349,4 @@ export default function NotificationsPage() {
     </div>
   );
 }
-
     

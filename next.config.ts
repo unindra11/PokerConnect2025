@@ -1,6 +1,7 @@
-import type {NextConfig} from 'next';
+import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
+  
   typescript: {
     ignoreBuildErrors: true,
   },
@@ -17,7 +18,7 @@ const nextConfig: NextConfig = {
       },
       {
         protocol: 'https',
-        hostname: 'firebasestorage.googleapis.com', // Added for Firebase Storage
+        hostname: 'firebasestorage.googleapis.com',
         port: '',
         pathname: '/**',
       }
