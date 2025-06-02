@@ -1,7 +1,7 @@
 
 "use client"; 
 
-import { useState, useEffect, use, useRef } from "react";
+import { useState, useEffect,useRef } from "react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
@@ -75,7 +75,7 @@ const mockProfileConnections: Connection[] = [
 
 
 export default function UserProfilePage() {
-  const params = use(useParams<{ username: string }>());
+  const params = useParams<{ username: string }>();
   const resolvedParams = params; // No need for use(params) if already destructured or passed directly
   const router = useRouter();
 
