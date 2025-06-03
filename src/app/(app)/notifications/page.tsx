@@ -60,21 +60,21 @@ const staticNotifications: AppNotification[] = [
     type: "comment",
     user: { name: "StraightSue", avatar: "https://placehold.co/100x100.png?n=2", username: "sue_straight" },
     message: "commented on your post: \"Great analysis on that river bet!\"",
-    timestamp: "1h ago",
+    timestamp: new Date("2025-06-03T13:55:00+05:30"), // 1 hour ago from 02:55 PM IST
   },
   {
     id: "static3",
     type: "like",
     user: { name: "FullHouseFred", avatar: "https://placehold.co/100x100.png?n=3", username: "fred_full" },
     message: "liked your post about your tournament win.",
-    timestamp: "3h ago",
+    timestamp: new Date("2025-06-03T11:55:00+05:30"), // 3 hours ago from 02:55 PM IST
   },
   {
     id: "static4",
     type: "system",
     user: null,
     message: "Welcome to PokerConnect! Complete your profile for better suggestions.",
-    timestamp: "1d ago",
+    timestamp: new Date("2025-06-02T14:55:00+05:30"), // 1 day ago from 02:55 PM IST
   },
 ];
 
@@ -121,27 +121,23 @@ export default function NotificationsPage() {
       }
       // Only set isLoading to false once after the initial auth state is determined.
       // Further loading for friend requests is handled by fetchFriendRequests.
-      if (isLoading) setIsLoading(false); 
+      setIsLoading(false); 
     });
     return () => unsubscribe();
-  }, [isLoading]); // Dependency on isLoading to ensure it only sets it to false once.
+  }, []); // Dependency on isLoading to ensure it only sets it to false once.
 
   useEffect(() => {
     if (loggedInUser && loggedInUser.uid) {
       console.log("NotificationsPage (Effect): loggedInUser is available, calling fetchFriendRequests for UID:", loggedInUser.uid);
       fetchFriendRequests(loggedInUser.uid);
-    } else if (currentUserAuth === null && !isLoading) { 
-        console.log("NotificationsPage (Effect): No authenticated user to fetch requests for. Displaying static notifications.");
-        setDisplayedNotifications(staticNotifications);
-        // setIsLoading(false); // isLoading might already be false from the auth listener
-    } else if (!isLoading) { // Only log if not in initial loading phase
-        console.log("NotificationsPage (Effect): loggedInUser or UID not yet available for fetching requests. Current auth state:", currentUserAuth ? currentUserAuth.uid : "No auth user", "Logged in user from state:", loggedInUser);
-        if (currentUserAuth && !loggedInUser) {
-            console.log("NotificationsPage (Effect): Auth user exists, but profile details (loggedInUser) might still be loading from AppLayout or missing from localStorage.");
-            setDisplayedNotifications(staticNotifications); // Fallback to static if profile details aren't resolved
-        }
+    } else if (currentUserAuth === null) {
+      console.log("NotificationsPage (Effect): No authenticated user to fetch requests for. Displaying static notifications.");
+      setDisplayedNotifications(staticNotifications);
+    } else if (currentUserAuth && !loggedInUser) {
+      console.log("NotificationsPage (Effect): Auth user exists, but profile details (loggedInUser) might still be loading from AppLayout or missing from localStorage.");
+      setDisplayedNotifications(staticNotifications);
     }
-  }, [loggedInUser, currentUserAuth, isLoading]);
+  }, [loggedInUser, currentUserAuth]);
 
   const fetchFriendRequests = async (currentUserId: string) => {
     setIsLoading(true); // Set loading true specifically for this fetch operation
@@ -183,13 +179,29 @@ export default function NotificationsPage() {
       
       console.log("NotificationsPage (fetchFriendRequests): Parsed fetchedRequests from Firestore:", fetchedRequests.map(r => ({id: r.id, sender: r.user?.username, timestamp: r.timestamp })));
       
-      setDisplayedNotifications([...fetchedRequests, ...staticNotifications.filter(n => n.type !== "friend_request" && n.type !== "friend_request_firestore")].sort((a,b) => {
-        const dateA = a.timestamp instanceof Timestamp ? a.timestamp.toDate() : (typeof a.timestamp === 'string' ? new Date(a.timestamp) : (a.timestamp instanceof Date ? a.timestamp : new Date()));
-        const dateB = b.timestamp instanceof Timestamp ? b.timestamp.toDate() : (typeof b.timestamp === 'string' ? new Date(b.timestamp) : (b.timestamp instanceof Date ? b.timestamp : new Date()));
-        if (isNaN(dateA.getTime()) || isNaN(dateB.getTime())) {
-            console.warn("NotificationsPage: Invalid date encountered during sort. A:", a.timestamp, "B:", b.timestamp);
-            return 0; 
+      setDisplayedNotifications([...fetchedRequests, ...staticNotifications.filter(n => n.type !== "friend_request" && n.type !== "friend_request_firestore")].sort((a, b) => {
+        let dateA: Date, dateB: Date;
+      
+        // Handle Firestore Timestamp or Date for 'a'
+        if (a.timestamp instanceof Timestamp) {
+          dateA = a.timestamp.toDate();
+        } else if (a.timestamp instanceof Date) {
+          dateA = a.timestamp;
+        } else {
+          console.warn("NotificationsPage: Invalid timestamp for 'a':", a.timestamp);
+          dateA = new Date(); // Fallback to current date
         }
+      
+        // Handle Firestore Timestamp or Date for 'b'
+        if (b.timestamp instanceof Timestamp) {
+          dateB = b.timestamp.toDate();
+        } else if (b.timestamp instanceof Date) {
+          dateB = b.timestamp;
+        } else {
+          console.warn("NotificationsPage: Invalid timestamp for 'b':", b.timestamp);
+          dateB = new Date(); // Fallback to current date
+        }
+      
         return dateB.getTime() - dateA.getTime();
       }));
 
@@ -299,11 +311,28 @@ export default function NotificationsPage() {
 
 
   const handleMarkAllAsRead = () => {
-    setDisplayedNotifications(staticNotifications.sort((a,b) => {
-        const dateA = new Date(a.timestamp as string); // Assuming static timestamps are parsable
-        const dateB = new Date(b.timestamp as string);
-        if (isNaN(dateA.getTime()) || isNaN(dateB.getTime())) return 0;
-        return dateB.getTime() - dateA.getTime();
+    setDisplayedNotifications(staticNotifications.sort((a, b) => {
+      let dateA: Date, dateB: Date;
+  
+      if (a.timestamp instanceof Date) {
+        dateA = a.timestamp;
+      } else if (a.timestamp instanceof Timestamp) {
+        dateA = a.timestamp.toDate();
+      } else {
+        console.warn("NotificationsPage: Invalid timestamp for 'a' in handleMarkAllAsRead:", a.timestamp);
+        dateA = new Date(); // Fallback
+      }
+  
+      if (b.timestamp instanceof Date) {
+        dateB = b.timestamp;
+      } else if (b.timestamp instanceof Timestamp) {
+        dateB = b.timestamp.toDate();
+      } else {
+        console.warn("NotificationsPage: Invalid timestamp for 'b' in handleMarkAllAsRead:", b.timestamp);
+        dateB = new Date(); // Fallback
+      }
+  
+      return dateB.getTime() - dateA.getTime();
     }));
     toast({ title: "Notifications Cleared", description: "All dynamic notifications have been cleared from view." });
   };
