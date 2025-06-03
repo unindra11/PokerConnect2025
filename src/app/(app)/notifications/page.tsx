@@ -60,33 +60,34 @@ const staticNotifications: AppNotification[] = [
     type: "comment",
     user: { name: "StraightSue", avatar: "https://placehold.co/100x100.png?n=2", username: "sue_straight" },
     message: "commented on your post: \"Great analysis on that river bet!\"",
-    timestamp: new Date("2025-06-03T13:55:00+05:30"), // 1 hour ago from 02:55 PM IST
+    timestamp: new Date("2025-06-03T13:55:00+05:30"), 
   },
   {
     id: "static3",
     type: "like",
     user: { name: "FullHouseFred", avatar: "https://placehold.co/100x100.png?n=3", username: "fred_full" },
     message: "liked your post about your tournament win.",
-    timestamp: new Date("2025-06-03T11:55:00+05:30"), // 3 hours ago from 02:55 PM IST
+    timestamp: new Date("2025-06-03T11:55:00+05:30"), 
   },
   {
     id: "static4",
     type: "system",
     user: null,
     message: "Welcome to PokerConnect! Complete your profile for better suggestions.",
-    timestamp: new Date("2025-06-02T14:55:00+05:30"), // 1 day ago from 02:55 PM IST
+    timestamp: new Date("2025-06-02T14:55:00+05:30"), 
   },
 ];
 
 
 export default function NotificationsPage() {
-  const [displayedNotifications, setDisplayedNotifications] = useState<AppNotification[]>(staticNotifications);
+  const [displayedNotifications, setDisplayedNotifications] = useState<AppNotification[]>([]);
   const [loggedInUser, setLoggedInUser] = useState<LoggedInUserFromStorage | null>(null);
   const [currentUserAuth, setCurrentUserAuth] = useState<FirebaseUser | null>(null); 
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(true); // Start with loading true
   const { toast } = useToast();
 
   useEffect(() => {
+    setIsLoading(true); // Set loading true when auth check starts
     const unsubscribe = auth.onAuthStateChanged(async (user) => {
       setCurrentUserAuth(user); 
       if (user) {
@@ -114,8 +115,10 @@ export default function NotificationsPage() {
       } else {
         console.log("NotificationsPage (Auth Effect): No Firebase auth user found (user is null).");
         setLoggedInUser(null);
+        setDisplayedNotifications(staticNotifications.sort((a,b) => getEpochMillis(b.timestamp) - getEpochMillis(a.timestamp))); // Show static if no user
+        setIsLoading(false); // Not loading if no user
       }
-      setIsLoading(false); 
+      // isLoading will be set to false in the data fetching effect or if no user
     });
     return () => unsubscribe();
   }, []);
@@ -124,17 +127,34 @@ export default function NotificationsPage() {
     if (loggedInUser && loggedInUser.uid) {
       console.log("NotificationsPage (Data Fetch Effect): loggedInUser is available, calling fetchFriendRequests for UID:", loggedInUser.uid);
       fetchFriendRequests(loggedInUser.uid);
-    } else if (!isLoading && !currentUserAuth) { // Only if initial auth check is done and no user
-      console.log("NotificationsPage (Data Fetch Effect): No authenticated user to fetch requests for. Displaying static notifications.");
-      setDisplayedNotifications(staticNotifications);
-    } else if (!isLoading && currentUserAuth && !loggedInUser) {
-        console.log("NotificationsPage (Data Fetch Effect): Auth user exists, but profile details (loggedInUser) still loading or missing. Displaying static for now.");
-        setDisplayedNotifications(staticNotifications);
+    } else if (!currentUserAuth && !isLoading) { // Only if auth check is done and no user (isLoading was already false)
+        console.log("NotificationsPage (Data Fetch Effect): No authenticated user to fetch requests for. Displaying static notifications only.");
+        // Static notifications already set if no user from previous effect.
+    } else if (currentUserAuth && !loggedInUser && !isLoading) { // Auth user exists, but profile still loading or missing
+        console.log("NotificationsPage (Data Fetch Effect): Auth user exists, profile details not fully loaded. Displaying static for now.");
+        setDisplayedNotifications(staticNotifications.sort((a,b) => getEpochMillis(b.timestamp) - getEpochMillis(a.timestamp)));
+        setIsLoading(false);
     }
-  }, [loggedInUser, currentUserAuth, isLoading]);
+  }, [loggedInUser, currentUserAuth]); // Removed isLoading from here
+
+
+  const getEpochMillis = (timestamp: AppNotification['timestamp']): number => {
+    if (timestamp instanceof Timestamp) {
+      return timestamp.toMillis();
+    } else if (timestamp instanceof Date) {
+      return timestamp.getTime();
+    } else if (typeof timestamp === 'string') {
+      const date = new Date(timestamp);
+      if (!isNaN(date.getTime())) {
+        return date.getTime();
+      }
+    }
+    console.warn("NotificationsPage (getEpochMillis): Could not parse timestamp, returning 0:", timestamp);
+    return 0; // Fallback for unparseable timestamps
+  };
 
   const fetchFriendRequests = async (currentUserId: string) => {
-    setIsLoading(true); 
+    if (!isLoading) setIsLoading(true); // Set loading true if not already, when fetch starts
     const db = getFirestore(app, "poker");
     try {
       console.log(`NotificationsPage (fetchFriendRequests): CALLED for receiverId: ${currentUserId}`);
@@ -164,7 +184,7 @@ export default function NotificationsPage() {
             uid: data.senderId 
           },
           message: "sent you a friend request.",
-          timestamp: data.createdAt,
+          timestamp: data.createdAt, // Firestore Timestamp
           senderId: data.senderId,
           senderUsername: data.senderUsername,
           senderAvatar: data.senderAvatar,
@@ -173,34 +193,20 @@ export default function NotificationsPage() {
       
       console.log("NotificationsPage (fetchFriendRequests): Parsed fetchedRequests from Firestore:", fetchedRequests.map(r => ({id: r.id, sender: r.user?.username, timestamp: r.timestamp })));
       
-      setDisplayedNotifications([...fetchedRequests, ...staticNotifications.filter(n => n.type !== "friend_request" && n.type !== "friend_request_firestore")].sort((a, b) => {
-        let dateA: Date, dateB: Date;
+      const combinedNotifications = [...fetchedRequests, ...staticNotifications.filter(n => n.type !== "friend_request" && n.type !== "friend_request_firestore")];
       
-        if (a.timestamp instanceof Timestamp) {
-          dateA = a.timestamp.toDate();
-        } else if (a.timestamp instanceof Date) {
-          dateA = a.timestamp;
-        } else {
-          console.warn("NotificationsPage: Invalid timestamp for 'a':", a.timestamp);
-          dateA = new Date(0); 
-        }
+      combinedNotifications.sort((a, b) => {
+        const timeA = getEpochMillis(a.timestamp);
+        const timeB = getEpochMillis(b.timestamp);
+        return timeB - timeA; // Sort descending (newest first)
+      });
       
-        if (b.timestamp instanceof Timestamp) {
-          dateB = b.timestamp.toDate();
-        } else if (b.timestamp instanceof Date) {
-          dateB = b.timestamp;
-        } else {
-          console.warn("NotificationsPage: Invalid timestamp for 'b':", b.timestamp);
-          dateB = new Date(0); 
-        }
-      
-        return dateB.getTime() - dateA.getTime();
-      }));
+      setDisplayedNotifications(combinedNotifications);
 
     } catch (error) {
       console.error("NotificationsPage (fetchFriendRequests): Error fetching friend requests from Firestore:", error);
       toast({ title: "Error Loading Notifications", description: `Could not retrieve friend requests. Error: ${error instanceof Error ? error.message : String(error)}`, variant: "destructive" });
-      setDisplayedNotifications(staticNotifications); 
+      setDisplayedNotifications(staticNotifications.sort((a,b) => getEpochMillis(b.timestamp) - getEpochMillis(a.timestamp))); 
     } finally {
       setIsLoading(false);
     }
@@ -236,16 +242,14 @@ export default function NotificationsPage() {
     const db = getFirestore(app, "poker");
     const batch = writeBatch(db);
 
-    // 1. Update friendRequests document
     const requestRef = doc(db, "friendRequests", notification.id);
     const requestUpdateData = { status: "accepted", updatedAt: serverTimestamp() };
     console.log(`NotificationsPage (handleAccept): Batching update for path: ${requestRef.path}, Data:`, requestUpdateData);
     batch.update(requestRef, requestUpdateData);
 
-    // 2. Add sender to acceptor's friends list
     const acceptorFriendsRef = doc(db, "users", acceptorUid, "friends", senderUid);
     const acceptorFriendData = {
-      friendUserId: senderUid, // Storing the UID of the friend
+      friendUserId: senderUid, 
       username: notification.user.username,
       name: notification.user.name,
       avatar: notification.user.avatar || `https://placehold.co/40x40.png?text=${(notification.user.name || "F").substring(0,1)}`,
@@ -254,10 +258,9 @@ export default function NotificationsPage() {
     console.log(`NotificationsPage (handleAccept): Batching set for path: ${acceptorFriendsRef.path}, Data:`, acceptorFriendData);
     batch.set(acceptorFriendsRef, acceptorFriendData);
 
-    // 3. Add acceptor to sender's friends list
     const senderFriendsRef = doc(db, "users", senderUid, "friends", acceptorUid);
     const senderFriendData = {
-      friendUserId: acceptorUid, // Storing the UID of the friend
+      friendUserId: acceptorUid, 
       username: loggedInUser.username,
       name: loggedInUser.fullName || loggedInUser.username,
       avatar: loggedInUser.avatar || `https://placehold.co/40x40.png?text=${(loggedInUser.fullName || "U").substring(0,1)}`,
@@ -303,70 +306,29 @@ export default function NotificationsPage() {
     }
   };
 
-  const getTimestampString = (timestamp: AppNotification['timestamp']): string => {
-    if (!timestamp) return 'Just now';
-    let date: Date | null = null;
-    if (timestamp instanceof Timestamp) { 
-      date = timestamp.toDate();
-    } else if (typeof timestamp === 'string') {
-      const parsedDate = new Date(timestamp);
-      if (!isNaN(parsedDate.getTime())) {
-        date = parsedDate;
-      } else { 
-          return timestamp; 
-      }
-    } else if (timestamp instanceof Date) {
-      date = timestamp;
+  const getTimestampString = (timestampInput: AppNotification['timestamp']): string => {
+    const epochMillis = getEpochMillis(timestampInput);
+    if (epochMillis === 0 && timestampInput) { // If getEpochMillis returned fallback for a non-null input
+        console.warn("NotificationsPage (getTimestampString): Fallback for invalid timestamp:", timestampInput);
+        return "Invalid date";
     }
-    
-    if (date) {
-      try {
-        return formatDistanceToNow(date, { addSuffix: true });
-      } catch (e) {
-        console.warn("Error formatting date:", e, "Timestamp was:", timestamp);
-        return new Date(timestamp as any).toLocaleString(); 
-      }
+    if (epochMillis === 0) return 'Just now'; // If timestamp was actually null/undefined
+
+    try {
+      return formatDistanceToNow(new Date(epochMillis), { addSuffix: true });
+    } catch (e) {
+      console.error("NotificationsPage (getTimestampString): Error formatting date with formatDistanceToNow:", e, "Epoch was:", epochMillis);
+      return new Date(epochMillis).toLocaleString(); // Fallback to basic locale string
     }
-    return typeof timestamp === 'string' ? timestamp : new Date().toLocaleString(); 
   };
 
 
   const handleMarkAllAsRead = () => {
-    // This function currently only removes dynamic (Firestore) friend requests from view
-    // and resets to static. This can be expanded to actually mark Firestore docs as read.
-    setDisplayedNotifications(staticNotifications.sort((a, b) => {
-      let dateA: Date, dateB: Date;
-  
-      if (a.timestamp instanceof Date) {
-        dateA = a.timestamp;
-      } else if (a.timestamp instanceof Timestamp) {
-        dateA = a.timestamp.toDate();
-      } else {
-        dateA = new Date(0); 
-      }
-  
-      if (b.timestamp instanceof Date) {
-        dateB = b.timestamp;
-      } else if (b.timestamp instanceof Timestamp) {
-        dateB = b.timestamp.toDate();
-      } else {
-        dateB = new Date(0);
-      }
-  
-      return dateB.getTime() - dateA.getTime();
-    }));
+    setDisplayedNotifications(staticNotifications.sort((a, b) => getEpochMillis(b.timestamp) - getEpochMillis(a.timestamp)));
     toast({ title: "Notifications Cleared", description: "All dynamic friend request notifications have been cleared from view." });
   };
 
-  if (isLoading && !loggedInUser && !currentUserAuth) { 
-    return (
-      <div className="container mx-auto max-w-2xl text-center py-10">
-          <Loader2 className="h-8 w-8 animate-spin text-primary" />
-          <p className="mt-2">Loading user session...</p>
-      </div>
-    );
-  }
-  
+
   if (isLoading) { 
      return (
       <div className="container mx-auto max-w-2xl text-center py-10">
@@ -386,7 +348,7 @@ export default function NotificationsPage() {
         )}
       </div>
 
-      {displayedNotifications.length === 0 && (
+      {displayedNotifications.length === 0 && !isLoading && ( // Added !isLoading here
         <Card className="text-center p-8 shadow-lg rounded-xl">
           <CardHeader>
              <CardTitle className="text-xl mb-2">No New Notifications</CardTitle>
@@ -436,4 +398,6 @@ export default function NotificationsPage() {
     </div>
   );
 }
+    
+
     
