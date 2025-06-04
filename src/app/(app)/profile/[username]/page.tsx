@@ -75,8 +75,9 @@ const mockProfileConnections: Connection[] = [
 
 
 export default function UserProfilePage() {
+  console.log("UserProfilePage: Component rendering or re-rendering."); // Added console log
   const params = useParams<{ username: string }>();
-  const resolvedParams = params; // No need for use(params) if already destructured or passed directly
+  const resolvedParams = params; 
   const router = useRouter();
 
   const [isCurrentUserProfile, setIsCurrentUserProfile] = useState(false);
