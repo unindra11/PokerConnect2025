@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { UserCircle, BellDot, Palette, ShieldAlert, Image as ImageIcon, Save, Upload } from "lucide-react"; // Added Upload
+import { UserCircle, BellDot, Palette, ShieldAlert, Save, Upload, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -23,14 +23,19 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { app, auth, firestore, storage } from "@/lib/firebase"; // Import Firestore and Storage
+import { doc, updateDoc, getDoc } from "firebase/firestore"; // Firestore functions
+import { ref, uploadBytesResumable, getDownloadURL } from "firebase/storage"; // Storage functions
+import type { User as FirebaseUser } from "firebase/auth"; // For current Firebase Auth user
 
 interface LoggedInUserDetails {
+  uid: string; // Ensure UID is part of this
   fullName: string;
   username: string;
   email: string;
   bio?: string;
   avatar?: string;
-  coverImage?: string; // Added coverImage
+  coverImage?: string;
 }
 
 const MAX_COVER_IMAGE_SIZE_MB = 5;
@@ -39,9 +44,14 @@ const MAX_COVER_IMAGE_SIZE_BYTES = MAX_COVER_IMAGE_SIZE_MB * 1024 * 1024;
 export default function SettingsPage() {
   const { toast } = useToast();
   const router = useRouter();
-  const [currentUser, setCurrentUser] = useState<LoggedInUserDetails | null>(null);
+  const [firebaseAuthUser, setFirebaseAuthUser] = useState<FirebaseUser | null>(null);
+  const [currentUserDetails, setCurrentUserDetails] = useState<LoggedInUserDetails | null>(null);
+  
   const [editableFullName, setEditableFullName] = useState("");
   const [editableBio, setEditableBio] = useState("");
+  const [currentCoverImage, setCurrentCoverImage] = useState<string | undefined>(undefined);
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
+  const [isUploadingCover, setIsUploadingCover] = useState(false);
 
   const [notificationsLikes, setNotificationsLikes] = useState(true);
   const [notificationsComments, setNotificationsComments] = useState(true);
@@ -51,112 +61,174 @@ export default function SettingsPage() {
   const coverImageInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    try {
-      const loggedInUserString = localStorage.getItem("loggedInUser");
-      if (loggedInUserString) {
-        const userDetails: LoggedInUserDetails = JSON.parse(loggedInUserString);
-        setCurrentUser(userDetails);
-        setEditableFullName(userDetails.fullName || "");
-        setEditableBio(userDetails.bio || "");
-        // coverImage is handled directly via its upload function
+    const unsubscribe = auth.onAuthStateChanged(async (user) => {
+      if (user) {
+        setFirebaseAuthUser(user);
+        const loggedInUserString = localStorage.getItem("loggedInUser");
+        if (loggedInUserString) {
+          try {
+            const userDetails: LoggedInUserDetails = JSON.parse(loggedInUserString);
+            if (userDetails.uid === user.uid) { // Ensure consistency
+              setCurrentUserDetails(userDetails);
+              setEditableFullName(userDetails.fullName || "");
+              setEditableBio(userDetails.bio || "");
+              setCurrentCoverImage(userDetails.coverImage);
+            } else { // Mismatch, clear and fetch
+              localStorage.removeItem("loggedInUser");
+              fetchUserDetailsFromFirestore(user.uid);
+            }
+          } catch (e) {
+            console.error("Error parsing user from localStorage:", e);
+            fetchUserDetailsFromFirestore(user.uid); // Fetch if parsing fails
+          }
+        } else {
+           fetchUserDetailsFromFirestore(user.uid); // Fetch if not in localStorage
+        }
       } else {
-        setCurrentUser({ fullName: "Player One", username: "playerone", email: "player@example.com", bio: "" });
-        setEditableFullName("Player One");
-        setEditableBio("");
+        router.push("/login"); // Redirect if not authenticated
+      }
+    });
+    return () => unsubscribe();
+  }, [router]);
+
+  const fetchUserDetailsFromFirestore = async (uid: string) => {
+    try {
+      const userDocRef = doc(firestore, "users", uid);
+      const userDocSnap = await getDoc(userDocRef);
+      if (userDocSnap.exists()) {
+        const data = userDocSnap.data() as Omit<LoggedInUserDetails, 'uid'>; // Assuming Firestore doc doesn't store UID inside
+        const userDetails: LoggedInUserDetails = { 
+          uid, 
+          ...data,
+          fullName: data.fullName || "",
+          username: data.username || "",
+          email: data.email || "",
+        };
+        setCurrentUserDetails(userDetails);
+        setEditableFullName(userDetails.fullName);
+        setEditableBio(userDetails.bio || "");
+        setCurrentCoverImage(userDetails.coverImage);
+        localStorage.setItem("loggedInUser", JSON.stringify(userDetails));
+      } else {
+        toast({ title: "Error", description: "User profile not found in database.", variant: "destructive" });
       }
     } catch (error) {
-      console.error("Error loading user from localStorage for settings:", error);
-      setCurrentUser({ fullName: "Player One", username: "playerone", email: "player@example.com", bio: "" });
-      setEditableFullName("Player One");
-      setEditableBio("");
-    }
-  }, []);
-
-  const handleSaveChanges = () => {
-    if (!currentUser) {
-      toast({ title: "Error", description: "User data not loaded.", variant: "destructive" });
-      return;
-    }
-    try {
-      const updatedUser = {
-        ...currentUser,
-        fullName: editableFullName,
-        bio: editableBio,
-        // coverImage is saved separately
-      };
-      localStorage.setItem("loggedInUser", JSON.stringify(updatedUser));
-      setCurrentUser(updatedUser);
-      toast({
-        title: "Settings Saved!",
-        description: "Your profile information has been updated.",
-      });
-      router.push(`/profile/${currentUser.username}`);
-    } catch (error) {
-      console.error("Error saving user to localStorage:", error);
-      toast({ title: "Error", description: "Could not save settings.", variant: "destructive"});
+      console.error("Error fetching user details from Firestore:", error);
+      toast({ title: "Error", description: "Could not load profile details from database.", variant: "destructive"});
     }
   };
 
-  const handleCoverImageChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+
+  const handleSaveChanges = async () => {
+    if (!currentUserDetails || !firebaseAuthUser) {
+      toast({ title: "Error", description: "User data not fully loaded or not authenticated.", variant: "destructive" });
+      return;
+    }
+    setIsSavingProfile(true);
+    try {
+      const userDocRef = doc(firestore, "users", firebaseAuthUser.uid);
+      await updateDoc(userDocRef, {
+        fullName: editableFullName,
+        bio: editableBio,
+      });
+
+      const updatedUserDetails = {
+        ...currentUserDetails,
+        fullName: editableFullName,
+        bio: editableBio,
+      };
+      localStorage.setItem("loggedInUser", JSON.stringify(updatedUserDetails));
+      setCurrentUserDetails(updatedUserDetails); // Update local state
+
+      toast({
+        title: "Profile Saved!",
+        description: "Your profile information has been updated in Firestore.",
+      });
+      // Optionally, navigate or give other feedback
+      // router.push(`/profile/${currentUserDetails.username}`);
+    } catch (error) {
+      console.error("Error saving profile to Firestore:", error);
+      toast({ title: "Firestore Error", description: "Could not save profile changes to database.", variant: "destructive"});
+    } finally {
+      setIsSavingProfile(false);
+    }
+  };
+
+  const handleCoverImageChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    if (file) {
-      if (file.size > MAX_COVER_IMAGE_SIZE_BYTES) {
-        toast({
-          title: "File Too Large",
-          description: `Please select an image smaller than ${MAX_COVER_IMAGE_SIZE_MB}MB for the cover image.`,
-          variant: "destructive",
-        });
-        if (coverImageInputRef.current) coverImageInputRef.current.value = "";
-        return;
-      }
-      if (!file.type.startsWith("image/")) {
-        toast({
-          title: "Unsupported File Type",
-          description: "Please select an image file (e.g., PNG, JPG, GIF).",
-          variant: "destructive",
-        });
-        if (coverImageInputRef.current) coverImageInputRef.current.value = "";
-        return;
+    if (!file || !firebaseAuthUser) {
+      toast({ title: "Error", description: "No file selected or user not authenticated.", variant: "destructive"});
+      if (coverImageInputRef.current) coverImageInputRef.current.value = "";
+      return;
+    }
+
+    if (file.size > MAX_COVER_IMAGE_SIZE_BYTES) {
+      toast({
+        title: "File Too Large",
+        description: `Image too large (max ${MAX_COVER_IMAGE_SIZE_MB}MB).`,
+        variant: "destructive",
+      });
+      if (coverImageInputRef.current) coverImageInputRef.current.value = "";
+      return;
+    }
+    if (!file.type.startsWith("image/")) {
+      toast({ title: "Unsupported File Type", description: "Please select an image.", variant: "destructive" });
+      if (coverImageInputRef.current) coverImageInputRef.current.value = "";
+      return;
+    }
+
+    setIsUploadingCover(true);
+    const storageRefPath = `cover_images/${firebaseAuthUser.uid}/${Date.now()}_${file.name}`;
+    const coverImageStorageRef = ref(storage, storageRefPath);
+    
+    try {
+      const uploadTask = uploadBytesResumable(coverImageStorageRef, file);
+      await uploadTask;
+      const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
+
+      const userDocRef = doc(firestore, "users", firebaseAuthUser.uid);
+      await updateDoc(userDocRef, { coverImage: downloadURL });
+
+      if (currentUserDetails) {
+        const updatedUserDetails = { ...currentUserDetails, coverImage: downloadURL };
+        localStorage.setItem("loggedInUser", JSON.stringify(updatedUserDetails));
+        setCurrentUserDetails(updatedUserDetails); // Update local state
+        setCurrentCoverImage(downloadURL); // Update displayed cover image preview if any
       }
 
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        const newCoverImageDataUrl = reader.result as string;
-        try {
-          const loggedInUserString = localStorage.getItem("loggedInUser");
-          if (loggedInUserString && currentUser) {
-            const loggedInUser: LoggedInUserDetails = JSON.parse(loggedInUserString);
-            const updatedUser = { ...loggedInUser, coverImage: newCoverImageDataUrl };
-            localStorage.setItem("loggedInUser", JSON.stringify(updatedUser));
-            setCurrentUser(updatedUser); // Update local state to reflect change if needed elsewhere on this page
-            toast({
-              title: "Cover Image Updated!",
-              description: "Your new cover image has been saved. It will be visible on your profile.",
-            });
-          }
-        } catch (error) {
-          console.error("Error saving cover image to localStorage:", error);
-          toast({ title: "Storage Error", description: "Could not save new cover image.", variant: "destructive" });
-        }
-      };
-      reader.onerror = () => {
-        toast({ title: "Error", description: "Could not read selected file.", variant: "destructive" });
-      };
-      reader.readAsDataURL(file);
+      toast({
+        title: "Cover Image Updated!",
+        description: "New cover image uploaded to Firebase Storage and URL saved to Firestore.",
+      });
+    } catch (error: any) {
+      console.error("Error uploading/saving cover image:", error);
+      toast({ title: "Upload Failed", description: `Could not save cover image: ${error.message}.`, variant: "destructive" });
+    } finally {
+      setIsUploadingCover(false);
+      if (coverImageInputRef.current) coverImageInputRef.current.value = "";
     }
-    if (coverImageInputRef.current) coverImageInputRef.current.value = "";
   };
 
   const handleDeleteAccount = () => {
+    // This should ideally trigger a Firebase function for proper data deletion.
+    // For now, it's simulated.
     toast({
       title: "Account Deletion (Simulated)",
-      description: "Your account deletion process has started.",
+      description: "Account deletion process would start here, involving backend operations.",
       variant: "destructive"
     });
-    // In a real app: clear localStorage, redirect to login/signup
     // localStorage.removeItem("loggedInUser");
-    // router.push('/login');
+    // firebaseSignOut(auth).then(() => router.push('/login'));
   };
+  
+  if (!currentUserDetails) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <Loader2 className="h-12 w-12 animate-spin text-primary" />
+        <p className="ml-4 text-lg">Loading settings...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="container mx-auto max-w-2xl space-y-8">
@@ -171,7 +243,7 @@ export default function SettingsPage() {
             <UserCircle className="h-6 w-6 text-primary" />
             <CardTitle className="text-xl">Profile Information</CardTitle>
           </div>
-          <CardDescription>Update your public profile details. Username and email cannot be changed here.</CardDescription>
+          <CardDescription>Update your public profile details. Username and email are managed by Firebase Auth.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div>
@@ -182,13 +254,14 @@ export default function SettingsPage() {
               onChange={(e) => setEditableFullName(e.target.value)}
               className="mt-1"
               placeholder="Your full name"
+              disabled={isSavingProfile}
             />
           </div>
           <div>
             <Label htmlFor="username">Username</Label>
             <Input
               id="username"
-              value={currentUser?.username || ""}
+              value={currentUserDetails?.username || ""}
               disabled
               className="mt-1 bg-muted/50"
             />
@@ -197,7 +270,7 @@ export default function SettingsPage() {
             <Label htmlFor="email">Email</Label>
             <Input
               id="email"
-              value={currentUser?.email || ""}
+              value={currentUserDetails?.email || ""}
               disabled
               className="mt-1 bg-muted/50"
             />
@@ -210,10 +283,11 @@ export default function SettingsPage() {
               onChange={(e) => setEditableBio(e.target.value)}
               className="mt-1 min-h-[100px]"
               placeholder="Tell us a bit about yourself..."
+              disabled={isSavingProfile}
             />
           </div>
-           {currentUser && (
-            <Link href={`/profile/${currentUser.username}`} passHref>
+           {currentUserDetails && currentUserDetails.username && (
+            <Link href={`/profile/${currentUserDetails.username}`} passHref>
               <Button variant="outline" className="w-full">
                 View Full Profile Page
               </Button>
@@ -225,8 +299,10 @@ export default function SettingsPage() {
                 variant="outline"
                 className="w-full mt-1"
                 onClick={() => coverImageInputRef.current?.click()}
+                disabled={isUploadingCover}
             >
-                <Upload className="mr-2 h-4 w-4" /> Change Cover Image
+                {isUploadingCover ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}
+                {isUploadingCover ? "Uploading..." : "Change Cover Image"}
             </Button>
             <input
               id="cover-image-upload-settings"
@@ -236,6 +312,12 @@ export default function SettingsPage() {
               onChange={handleCoverImageChange}
               ref={coverImageInputRef}
             />
+            {currentCoverImage && (
+              <div className="mt-2 text-center">
+                <p className="text-sm text-muted-foreground">Current Cover Image:</p>
+                <img src={currentCoverImage} alt="Current cover" className="mt-1 rounded-md max-h-40 mx-auto border" data-ai-hint="cover image preview"/>
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -245,9 +327,9 @@ export default function SettingsPage() {
         <CardHeader>
           <div className="flex items-center gap-3">
             <BellDot className="h-6 w-6 text-primary" />
-            <CardTitle className="text-xl">Notification Preferences</CardTitle>
+            <CardTitle className="text-xl">Notification Preferences (Simulated)</CardTitle>
           </div>
-          <CardDescription>Choose what you want to be notified about.</CardDescription>
+          <CardDescription>Choose what you want to be notified about. (These settings are local).</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex items-center justify-between p-3 rounded-md border hover:bg-muted/50">
@@ -282,9 +364,9 @@ export default function SettingsPage() {
         <CardHeader>
           <div className="flex items-center gap-3">
             <Palette className="h-6 w-6 text-primary" />
-            <CardTitle className="text-xl">Appearance</CardTitle>
+            <CardTitle className="text-xl">Appearance (Simulated)</CardTitle>
           </div>
-          <CardDescription>Customize the look and feel of the app.</CardDescription>
+          <CardDescription>Customize the look and feel of the app. (Dark mode is default).</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="flex items-center justify-between p-3 rounded-md border hover:bg-muted/50">
@@ -293,7 +375,7 @@ export default function SettingsPage() {
               id="dark-mode"
               checked={isDarkMode}
               onCheckedChange={setIsDarkMode}
-              disabled
+              disabled 
             />
           </div>
           <p className="text-xs text-muted-foreground mt-2 text-center">App is currently in Dark Mode by default.</p>
@@ -310,7 +392,7 @@ export default function SettingsPage() {
           <CardDescription>Manage your account settings and data.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-            <Button variant="outline" className="w-full" onClick={() => toast({title: "Change Password (Simulated)", description: "Password change flow would start here."})}>
+            <Button variant="outline" className="w-full" onClick={() => toast({title: "Change Password (Simulated)", description: "Password change flow would start here. This needs Firebase Auth functions."})}>
               Change Password
             </Button>
             <AlertDialog>
@@ -321,8 +403,8 @@ export default function SettingsPage() {
                 <AlertDialogHeader>
                   <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
                   <AlertDialogDescription>
-                    This action cannot be undone. This will permanently delete your
-                    account and remove your data from our servers (simulated).
+                    This action cannot be undone. This will (simulate) permanently deleting your
+                    account and remove your data from our servers.
                   </AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>
@@ -337,10 +419,13 @@ export default function SettingsPage() {
       </Card>
 
       <div className="flex justify-end pt-4">
-        <Button onClick={handleSaveChanges} size="lg">
-          <Save className="mr-2 h-5 w-5" /> Save Changes
+        <Button onClick={handleSaveChanges} size="lg" disabled={isSavingProfile || isUploadingCover}>
+          {isSavingProfile ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-5 w-5" />}
+          {isSavingProfile ? "Saving Profile..." : "Save Profile Changes"}
         </Button>
       </div>
     </div>
   );
 }
+
+    
