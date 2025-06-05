@@ -17,8 +17,8 @@ body {
     --popover: 0 0% 100%;
     --popover-foreground: 200 14% 10%;
 
-    --primary: 36 100% 50%; /* Vibrant Orange #FF9800 */
-    --primary-foreground: 20 100% 5%; /* Dark text on orange */
+    --primary: 231 48% 48%; /* Deep Blue #3F51B5 */
+    --primary-foreground: 0 0% 100%; /* White text on deep blue */
 
     --secondary: 0 0% 90%;
     --secondary-foreground: 200 14% 20%;
@@ -26,15 +26,15 @@ body {
     --muted: 0 0% 90%;
     --muted-foreground: 200 14% 40%;
 
-    --accent: 231 48% 48%; /* Deep Blue #3F51B5 */
-    --accent-foreground: 0 0% 100%; /* White text on deep blue */
+    --accent: 36 100% 50%; /* Vibrant Orange #FF9800 */
+    --accent-foreground: 20 100% 5%; /* Dark text on orange */
 
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 0 0% 98%;
 
     --border: 0 0% 85%;
     --input: 0 0% 92%;
-    --ring: 36 100% 50%; /* Orange for focus rings */
+    --ring: hsl(var(--accent)); /* Orange for focus rings, now from accent */
 
     --radius: 0.75rem;
 
@@ -47,16 +47,16 @@ body {
     /* Sidebar Light Theme Colors */
     --sidebar-background: 0 0% 98%;
     --sidebar-foreground: 200 14% 20%;
-    --sidebar-primary: 36 100% 50%; /* Orange */
-    --sidebar-primary-foreground: 20 100% 5%;
-    --sidebar-accent: 231 48% 48%; /* Deep Blue */
-    --sidebar-accent-foreground: 0 0% 100%;
+    --sidebar-primary: hsl(var(--primary));
+    --sidebar-primary-foreground: hsl(var(--primary-foreground));
+    --sidebar-accent: hsl(var(--accent));
+    --sidebar-accent-foreground: hsl(var(--accent-foreground));
     --sidebar-border: 0 0% 90%;
-    --sidebar-ring: 36 100% 50%;
+    --sidebar-ring: hsl(var(--accent));
   }
 
   .dark {
-    --background: 200 14% 18%; /* Dark Blue-Gray #263238 */
+    --background: 200 14% 18%; /* Dark Blue-Gray #263238 (Matches PRD) */
     --foreground: 210 40% 98%; /* Light Gray/White */
 
     --card: 200 14% 22%; /* Slightly lighter than background */
@@ -65,8 +65,8 @@ body {
     --popover: 200 14% 20%;
     --popover-foreground: 210 40% 98%;
 
-    --primary: 36 100% 50%; /* Vibrant Orange #FF9800 */
-    --primary-foreground: 20 100% 5%; /* Dark text on orange */
+    --primary: 231 48% 48%; /* Deep Blue #3F51B5 */
+    --primary-foreground: 210 40% 98%; /* Light Gray/White text on deep blue */
     
     --secondary: 200 14% 25%;
     --secondary-foreground: 210 40% 90%;
@@ -74,15 +74,15 @@ body {
     --muted: 200 14% 25%;
     --muted-foreground: 210 40% 60%;
 
-    --accent: 231 48% 48%; /* Deep Blue #3F51B5 */
-    --accent-foreground: 210 40% 98%; /* White text on deep blue */
+    --accent: 36 100% 50%; /* Vibrant Orange #FF9800 */
+    --accent-foreground: 20 100% 5%; /* Dark text on orange */
 
     --destructive: 0 70% 50%;
     --destructive-foreground: 0 0% 100%;
 
     --border: 200 14% 30%;
     --input: 200 14% 25%;
-    --ring: 36 100% 50%; /* Orange for focus rings */
+    --ring: hsl(var(--accent)); /* Orange for focus rings, now from accent */
 
     --chart-1: 220 70% 50%;
     --chart-2: 160 60% 45%;
@@ -93,12 +93,12 @@ body {
     /* Sidebar Dark Theme Colors */
     --sidebar-background: 200 14% 15%; /* Darker than main bg */
     --sidebar-foreground: 210 40% 90%;
-    --sidebar-primary: 36 100% 50%; /* Orange */
-    --sidebar-primary-foreground: 20 100% 5%;
-    --sidebar-accent: 231 48% 48%; /* Deep Blue */
-    --sidebar-accent-foreground: 210 40% 98%;
+    --sidebar-primary: hsl(var(--primary));
+    --sidebar-primary-foreground: hsl(var(--primary-foreground));
+    --sidebar-accent: hsl(var(--accent));
+    --sidebar-accent-foreground: hsl(var(--accent-foreground));
     --sidebar-border: 200 14% 25%;
-    --sidebar-ring: 36 100% 50%;
+    --sidebar-ring: hsl(var(--accent));
   }
 }
 
