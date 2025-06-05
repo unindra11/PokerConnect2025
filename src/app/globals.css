@@ -17,7 +17,7 @@ body {
     --popover: 0 0% 100%;
     --popover-foreground: 200 14% 10%;
 
-    --primary: 231 48% 48%; /* Deep Blue #3F51B5 */
+    --primary: 231 48% 48%; /* Deep Blue #3F51B5 - Corrected */
     --primary-foreground: 0 0% 100%; /* White text on deep blue */
 
     --secondary: 0 0% 90%;
@@ -26,7 +26,7 @@ body {
     --muted: 0 0% 90%;
     --muted-foreground: 200 14% 40%;
 
-    --accent: 36 100% 50%; /* Vibrant Orange #FF9800 */
+    --accent: 36 100% 50%; /* Vibrant Orange #FF9800 - Corrected */
     --accent-foreground: 20 100% 5%; /* Dark text on orange */
 
     --destructive: 0 84.2% 60.2%;
@@ -34,7 +34,7 @@ body {
 
     --border: 0 0% 85%;
     --input: 0 0% 92%;
-    --ring: hsl(var(--accent)); /* Orange for focus rings, now from accent */
+    --ring: hsl(var(--primary)); /* Ring uses primary color */
 
     --radius: 0.75rem;
 
@@ -52,7 +52,7 @@ body {
     --sidebar-accent: hsl(var(--accent));
     --sidebar-accent-foreground: hsl(var(--accent-foreground));
     --sidebar-border: 0 0% 90%;
-    --sidebar-ring: hsl(var(--accent));
+    --sidebar-ring: hsl(var(--primary)); /* Sidebar ring uses primary */
   }
 
   .dark {
@@ -65,7 +65,7 @@ body {
     --popover: 200 14% 20%;
     --popover-foreground: 210 40% 98%;
 
-    --primary: 231 48% 48%; /* Deep Blue #3F51B5 */
+    --primary: 231 48% 48%; /* Deep Blue #3F51B5 - Corrected */
     --primary-foreground: 210 40% 98%; /* Light Gray/White text on deep blue */
     
     --secondary: 200 14% 25%;
@@ -74,7 +74,7 @@ body {
     --muted: 200 14% 25%;
     --muted-foreground: 210 40% 60%;
 
-    --accent: 36 100% 50%; /* Vibrant Orange #FF9800 */
+    --accent: 36 100% 50%; /* Vibrant Orange #FF9800 - Corrected */
     --accent-foreground: 20 100% 5%; /* Dark text on orange */
 
     --destructive: 0 70% 50%;
@@ -82,7 +82,7 @@ body {
 
     --border: 200 14% 30%;
     --input: 200 14% 25%;
-    --ring: hsl(var(--accent)); /* Orange for focus rings, now from accent */
+    --ring: hsl(var(--primary)); /* Ring uses primary color */
 
     --chart-1: 220 70% 50%;
     --chart-2: 160 60% 45%;
@@ -98,7 +98,7 @@ body {
     --sidebar-accent: hsl(var(--accent));
     --sidebar-accent-foreground: hsl(var(--accent-foreground));
     --sidebar-border: 200 14% 25%;
-    --sidebar-ring: hsl(var(--accent));
+    --sidebar-ring: hsl(var(--primary)); /* Sidebar ring uses primary */
   }
 }
 
