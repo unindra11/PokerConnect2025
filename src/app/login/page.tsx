@@ -1,5 +1,3 @@
-
-// src/app/login/page.tsx
 "use client";
 
 import { useState } from "react";
@@ -9,19 +7,22 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import Link from "next/link";
 import { LogInIcon, Eye, EyeOff, Loader2 } from "lucide-react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation"; // Add useSearchParams
 import { useToast } from "@/hooks/use-toast";
-import { app, auth } from "@/lib/firebase"; // Import app for getting specific DB instance
-import { signInWithEmailAndPassword } from "firebase/auth";
-import { getFirestore, doc, getDoc } from "firebase/firestore"; // Import getFirestore
+import { app } from "@/lib/firebase";
+import { signInWithEmailAndPassword, getAuth } from "firebase/auth";
+import { getFirestore, doc, getDoc } from "firebase/firestore";
 
 export default function LoginPage() {
   const router = useRouter();
   const { toast } = useToast();
+  const searchParams = useSearchParams(); // Add searchParams support
   const [emailOrUsername, setEmailOrUsername] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+
+  const auth = getAuth(app); // Initialize auth here to ensure consistency
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -78,9 +79,9 @@ export default function LoginPage() {
         router.push("/home");
       }
     } catch (error: any) {
-      console.error("Error logging in:", error);
+      console.error("Error logging in:", error?.message || error?.code || error);
       let errorMessage = "An error occurred during login. Please try again.";
-      if (error.code) {
+      if (error?.code) {
         switch (error.code) {
           case "auth/user-not-found":
           case "auth/wrong-password":
@@ -92,13 +93,15 @@ export default function LoginPage() {
             break;
           default:
             if (error.message && (error.message.includes("firestore") || error.message.includes("Firestore") || error.message.includes("RPC"))) {
-                errorMessage = `Login successful, but failed to fetch profile. Ensure Firestore is set up (DB created, API enabled, Rules published). Details: ${error.message}`;
+              errorMessage = `Login successful, but failed to fetch profile. Ensure Firestore is set up (DB 'poker' exists, API enabled, Rules published). Details: ${error.message}`;
             } else {
-                errorMessage = `Login error. Code: ${error.code}, Message: ${error.message || 'Unknown error'}`;
+              errorMessage = `Login error. Code: ${error.code}, Message: ${error.message || 'Unknown error'}`;
             }
         }
-      } else if (error.message) {
+      } else if (error?.message) {
         errorMessage = `An unexpected error occurred: ${error.message}`;
+      } else {
+        errorMessage = "An unexpected error occurred during login. Please try again.";
       }
       toast({
         title: "Login Failed",
@@ -114,6 +117,17 @@ export default function LoginPage() {
   const togglePasswordVisibility = () => {
     setShowPassword(!showPassword);
   };
+
+  // Check for error in searchParams (e.g., ?error=invalid_credentials)
+  const errorFromRedirect = searchParams.get("error");
+  if (errorFromRedirect && !isLoading) {
+    toast({
+      title: "Login Error",
+      description: errorFromRedirect === "invalid_credentials" ? "Invalid email or password." : errorFromRedirect,
+      variant: "destructive",
+      duration: 9000,
+    });
+  }
 
   return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-br from-background to-muted/50 p-4">

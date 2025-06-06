@@ -1,116 +1,56 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { useRouter, useParams } from 'next/navigation';
-import { getFirestore, collection, query, where, getDoc, doc, setDoc, onSnapshot, serverTimestamp, getDocs, writeBatch, updateDoc, orderBy, limit } from 'firebase/firestore';
-import { getAuth, onAuthStateChanged } from 'firebase/auth';
-import { app } from '@/lib/firebase';
-import { Button } from '@/components/ui/button';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Card, CardHeader, CardContent, CardTitle, CardDescription } from '@/components/ui/card';
-import { Users, MessageSquare, UserMinus, Loader2 } from 'lucide-react';
-import { useToast } from '@/hooks/use-toast';
-import { formatDistanceToNow } from 'date-fns';
-
-const firestore = getFirestore(app, 'poker');
-const auth = getAuth(app);
-
-interface User {
-  uid: string;
-  username: string;
-  fullName: string;
-  email: string;
-  displayName: string;
-  avatar?: string;
-  bio?: string;
-}
-
-interface LoggedInUserDetails {
-  uid: string;
-  username: string;
-  fullName?: string;
-  avatar?: string;
-}
-
-interface Post {
-  id: string;
-  content: string;
-  createdAt: any;
-  userId: string;
-}
-
-interface Friend {
-  friendUserId: string;
-  username: string;
-  avatar?: string;
-}
+import { useEffect, useState } from "react";
+import { useParams, useRouter } from "next/navigation";
+import { doc, collection, query, where, getDocs, onSnapshot, writeBatch, serverTimestamp, getDoc } from "firebase/firestore";
+import { onAuthStateChanged } from "firebase/auth";
+import { firestore, auth } from "@/lib/firebase";
+import { User } from "@/lib/types";
+import { useToast } from "@/hooks/use-toast";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { MapPin, Users, MessageCircle, UserMinus, UserPlus, Check, X } from "lucide-react";
+import { PostCard } from "@/components/post-card";
+import { Separator } from "@/components/ui/separator";
 
 export default function UserProfilePage() {
-  const [profileUser, setProfileUser] = useState<User | null>(null);
-  const [currentLoggedInUserAuth, setCurrentLoggedInUserAuth] = useState<LoggedInUserDetails | null>(null);
-  const [relationshipStatus, setRelationshipStatus] = useState<'not_friends' | 'friends' | 'pending_sent' | 'pending_received'>('not_friends');
-  const [isSendingRequest, setIsSendingRequest] = useState(false);
-  const [isProcessingAction, setIsProcessingAction] = useState(false);
-  const [isLoadingAuth, setIsLoadingAuth] = useState(true);
-  const [posts, setPosts] = useState<Post[]>([]);
-  const [friendsCount, setFriendsCount] = useState<number>(0);
-  const [mutualFriends, setMutualFriends] = useState<Friend[]>([]);
+  const params = useParams();
   const router = useRouter();
   const { toast } = useToast();
-  
-  const params = useParams();
   const username = params?.username as string;
 
-  // Check authentication state and fetch logged-in user details from Firestore
+  const [currentLoggedInUserAuth, setCurrentLoggedInUserAuth] = useState<any>(null);
+  const [profileUser, setProfileUser] = useState<User | null>(null);
+  const [relationshipStatus, setRelationshipStatus] = useState<"not_friends" | "friends" | "pending_sent" | "pending_received">("not_friends");
+  const [posts, setPosts] = useState<any[]>([]);
+  const [friends, setFriends] = useState<any[]>([]);
+  const [isProcessingAction, setIsProcessingAction] = useState(false);
+
+  // Check authentication state
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      if (firebaseUser) {
-        try {
-          const userDocRef = doc(firestore, 'users', firebaseUser.uid);
-          const userDocSnap = await getDoc(userDocRef);
-          
-          if (userDocSnap.exists()) {
-            const userData = userDocSnap.data() as User;
-            const loggedInUser: LoggedInUserDetails = {
-              uid: firebaseUser.uid,
-              username: userData.username,
-              fullName: userData.fullName,
-              avatar: userData.avatar,
-            };
-            setCurrentLoggedInUserAuth(loggedInUser);
-          } else {
-            console.error('UserProfilePage: Logged-in user not found in Firestore:', firebaseUser.uid);
-            toast({ title: "Error", description: "User data not found.", variant: "destructive" });
-            router.push('/login');
-          }
-        } catch (error) {
-          console.error('UserProfilePage: Error fetching logged-in user from Firestore:', error);
-          toast({ title: "Error", description: "Could not load user data.", variant: "destructive" });
-          router.push('/login');
-        }
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        setCurrentLoggedInUserAuth(user);
       } else {
         setCurrentLoggedInUserAuth(null);
-        router.push('/login');
+        router.push("/login");
       }
-      setIsLoadingAuth(false);
-    }, (error) => {
-      console.error('UserProfilePage: Error checking auth state:', error);
-      toast({ title: "Authentication Error", description: "Could not verify login status.", variant: "destructive" });
-      setIsLoadingAuth(false);
-      router.push('/login');
     });
 
     return () => unsubscribe();
-  }, [router, toast]);
+  }, [router]);
 
   // Fetch the profile user data based on username
   useEffect(() => {
     async function fetchProfileUser() {
       if (!username) return;
+      console.log('Fetching profile for username:', username);
       try {
         const usersQuery = query(
           collection(firestore, 'users'),
-          where('username', '==', username)
+          where('username', '==', username.toLowerCase())
         );
         const querySnapshot = await getDocs(usersQuery);
         if (!querySnapshot.empty) {
@@ -130,29 +70,21 @@ export default function UserProfilePage() {
     fetchProfileUser();
   }, [username, router, toast]);
 
-  // Fetch posts for the profile user from top-level /posts collection
+  // Fetch user's posts
   useEffect(() => {
     if (!profileUser) return;
 
     const postsQuery = query(
       collection(firestore, 'posts'),
-      where('userId', '==', profileUser.uid),
-      orderBy('createdAt', 'desc'),
-      limit(5)
+      where('userId', '==', profileUser.uid)
     );
 
     const unsubscribe = onSnapshot(postsQuery, (snapshot) => {
-      const fetchedPosts: Post[] = [];
-      snapshot.forEach((doc) => {
-        const data = doc.data();
-        fetchedPosts.push({
-          id: doc.id,
-          content: data.content,
-          createdAt: data.createdAt,
-          userId: data.userId,
-        });
-      });
-      setPosts(fetchedPosts);
+      const postsData = snapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+      }));
+      setPosts(postsData);
     }, (error) => {
       console.error('UserProfilePage: Error fetching posts:', error);
       toast({ title: "Error", description: "Could not load posts.", variant: "destructive" });
@@ -161,100 +93,81 @@ export default function UserProfilePage() {
     return () => unsubscribe();
   }, [profileUser, toast]);
 
-  // Fetch friends count and mutual friends
+  // Fetch user's friends
   useEffect(() => {
-    if (!profileUser || !currentLoggedInUserAuth) return;
+    if (!profileUser) return;
 
-    const fetchFriendsData = async () => {
-      try {
-        // Get profile user's friends
-        const profileFriendsQuery = query(
-          collection(firestore, 'users', profileUser.uid, 'friends')
-        );
-        const profileFriendsSnapshot = await getDocs(profileFriendsQuery);
-        setFriendsCount(profileFriendsSnapshot.size);
+    const friendsCollection = collection(firestore, 'users', profileUser.uid, 'friends');
+    const unsubscribe = onSnapshot(friendsCollection, (snapshot) => {
+      const friendsData = snapshot.docs.map((doc) => doc.data());
+      setFriends(friendsData);
+    }, (error) => {
+      console.error('UserProfilePage: Permission denied accessing friends:', error);
+      toast({ title: "Error", description: "Could not load friends list.", variant: "destructive" });
+    });
 
-        // Get logged-in user's friends
-        const loggedInFriendsQuery = query(
-          collection(firestore, 'users', currentLoggedInUserAuth.uid, 'friends')
-        );
-        const loggedInFriendsSnapshot = await getDocs(loggedInFriendsQuery);
+    return () => unsubscribe();
+  }, [profileUser, toast]);
 
-        // Find mutual friends
-        const profileFriendsIds = new Set(profileFriendsSnapshot.docs.map(doc => doc.data().friendUserId));
-        const mutual: Friend[] = [];
-        loggedInFriendsSnapshot.forEach((doc) => {
-          const friendData = doc.data() as Friend;
-          if (profileFriendsIds.has(friendData.friendUserId)) {
-            mutual.push(friendData);
-          }
-        });
-        setMutualFriends(mutual);
-      } catch (error) {
-        console.error('UserProfilePage: Error fetching friends data:', error);
-        toast({ title: "Error", description: "Could not load connections.", variant: "destructive" });
-      }
-    };
-
-    fetchFriendsData();
-  }, [profileUser, currentLoggedInUserAuth, toast]);
-
-  // Check relationship status in real-time
+  // Check relationship status between current user and profile user
   useEffect(() => {
     if (!currentLoggedInUserAuth || !profileUser) return;
 
     const checkRelationship = () => {
+      console.log('Checking relationship between', currentLoggedInUserAuth.uid, 'and', profileUser.uid);
       const friendsQuery = query(
         collection(firestore, 'users', currentLoggedInUserAuth.uid, 'friends'),
-        where('uid', '==', profileUser.uid)
+        where('friendUserId', '==', profileUser.uid)
       );
 
       const unsubscribeFriends = onSnapshot(friendsQuery, (snapshot) => {
         console.log(
-          `UserProfilePage: Checking if users are friends. Viewer UID: ${currentLoggedInUserAuth.uid}, Profile UID: ${profileUser.uid}`
+          `Friends query snapshot for ${currentLoggedInUserAuth.uid}:`,
+          snapshot.docs.map(doc => doc.data())
         );
         if (!snapshot.empty) {
-          console.log(
-            `UserProfilePage: Users are friends. Viewer UID: ${currentLoggedInUserAuth.uid}, Profile UID: ${profileUser.uid}`
-          );
+          console.log('Users are friends. Setting relationshipStatus to "friends"');
           setRelationshipStatus('friends');
           return;
         }
 
-        const sentRequestQuery = query(
-          collection(firestore, 'friendRequests'),
-          where('senderId', '==', currentLoggedInUserAuth.uid),
-          where('receiverId', '==', profileUser.uid), // Changed recipientId to receiverId
-          where('status', '==', 'pending')
-        );
-
-        const receivedRequestQuery = query(
-          collection(firestore, 'friendRequests'),
-          where('senderId', '==', profileUser.uid),
-          where('receiverId', '==', currentLoggedInUserAuth.uid), // Changed recipientId to receiverId
-          where('status', '==', 'pending')
-        );
-
-        const unsubscribeSent = onSnapshot(sentRequestQuery, (sentSnapshot) => {
-          if (!sentSnapshot.empty) {
-            console.log('UserProfilePage: Found a pending friend request sent by the viewer.');
+        console.log('No friendship found. Checking for pending friend requests...');
+        // Check sent request (current user -> profile user)
+        const sentRequestId = `${currentLoggedInUserAuth.uid}_${profileUser.uid}`;
+        const sentRequestRef = doc(firestore, 'friendRequests', sentRequestId);
+        const unsubscribeSent = onSnapshot(sentRequestRef, (docSnapshot) => {
+          if (docSnapshot.exists() && docSnapshot.data().status === 'pending') {
+            console.log('Found a pending sent request:', docSnapshot.data());
             setRelationshipStatus('pending_sent');
           } else {
             if (relationshipStatus !== 'friends' && relationshipStatus !== 'pending_received') {
+              console.log('No sent request found.');
               setRelationshipStatus('not_friends');
             }
           }
+        }, (error) => {
+          console.error('Error checking sent friend request:', error);
+          toast({ title: "Error", description: "Could not load relationship status.", variant: "destructive" });
+          setRelationshipStatus('not_friends');
         });
 
-        const unsubscribeReceived = onSnapshot(receivedRequestQuery, (receivedSnapshot) => {
-          if (!receivedSnapshot.empty) {
-            console.log('UserProfilePage: Found a pending friend request received by the viewer.');
+        // Check received request (profile user -> current user)
+        const receivedRequestId = `${profileUser.uid}_${currentLoggedInUserAuth.uid}`;
+        const receivedRequestRef = doc(firestore, 'friendRequests', receivedRequestId);
+        const unsubscribeReceived = onSnapshot(receivedRequestRef, (docSnapshot) => {
+          if (docSnapshot.exists() && docSnapshot.data().status === 'pending') {
+            console.log('Found a pending received request:', docSnapshot.data());
             setRelationshipStatus('pending_received');
           } else {
             if (relationshipStatus !== 'friends' && relationshipStatus !== 'pending_sent') {
+              console.log('No received request found.');
               setRelationshipStatus('not_friends');
             }
           }
+        }, (error) => {
+          console.error('Error checking received friend request:', error);
+          toast({ title: "Error", description: "Could not load relationship status.", variant: "destructive" });
+          setRelationshipStatus('not_friends');
         });
 
         return () => {
@@ -263,7 +176,7 @@ export default function UserProfilePage() {
           unsubscribeReceived();
         };
       }, (error) => {
-        console.error('UserProfilePage: Permission denied accessing friends or friendRequests:', error);
+        console.error('Error checking friends:', error);
         toast({ title: "Error", description: "Could not load relationship status.", variant: "destructive" });
         setRelationshipStatus('not_friends');
       });
@@ -273,74 +186,88 @@ export default function UserProfilePage() {
     return () => unsubscribe && unsubscribe();
   }, [currentLoggedInUserAuth, profileUser, toast]);
 
-  // Handle sending a friend request
   const handleAddFriend = async () => {
     if (!currentLoggedInUserAuth || !profileUser) {
-      toast({ title: "Authentication Error", description: "You must be logged in to add friends.", variant: "destructive" });
+      toast({ title: "Authentication Error", description: "You must be logged in to send requests.", variant: "destructive" });
       return;
     }
 
-    setIsSendingRequest(true);
+    setIsProcessingAction(true);
 
     try {
-      if (currentLoggedInUserAuth.uid === profileUser.uid) {
-        toast({ title: "Cannot Add Self", description: "You cannot send a friend request to yourself.", variant: "default" });
-        return;
-      }
-
-      const friendDocRef = doc(firestore, 'users', currentLoggedInUserAuth.uid, 'friends', profileUser.uid);
-      const friendDocSnap = await getDoc(friendDocRef);
-      if (friendDocSnap.exists()) {
-        toast({ title: "Already Friends", description: `You are already friends with ${profileUser.username}.`, variant: "default" });
-        return;
-      }
-
-      const requestQuerySent = query(
-        collection(firestore, 'friendRequests'),
-        where('senderId', '==', currentLoggedInUserAuth.uid),
-        where('receiverId', '==', profileUser.uid), // Changed recipientId to receiverId
-        where('status', '==', 'pending')
-      );
-      const requestQueryReceived = query(
-        collection(firestore, 'friendRequests'),
-        where('senderId', '==', profileUser.uid),
-        where('receiverId', '==', currentLoggedInUserAuth.uid), // Changed recipientId to receiverId
-        where('status', '==', 'pending')
-      );
-
-      const [requestSnapshotSent, requestSnapshotReceived] = await Promise.all([
-        getDocs(requestQuerySent),
-        getDocs(requestQueryReceived)
-      ]);
-
-      if (!requestSnapshotSent.empty || !requestSnapshotReceived.empty) {
-        toast({ title: "Request Already Exists", description: "A friend request is already pending between you and this user.", variant: "default" });
-        return;
-      }
-
       const friendRequestId = `${currentLoggedInUserAuth.uid}_${profileUser.uid}`;
-      const friendRequestRef = doc(firestore, 'friendRequests', friendRequestId);
-      await setDoc(friendRequestRef, {
+      const requestRef = doc(firestore, "friendRequests", friendRequestId);
+      const requestData = {
         senderId: currentLoggedInUserAuth.uid,
-        senderUsername: currentLoggedInUserAuth.username,
-        senderAvatar: currentLoggedInUserAuth.avatar || `https://placehold.co/40x40.png?text=${(currentLoggedInUserAuth.username || "S").substring(0,1)}`,
-        receiverId: profileUser.uid, // Changed recipientId to receiverId
-        receiverUsername: profileUser.username, // Changed recipientUsername to receiverUsername
-        receiverAvatar: profileUser.avatar || `https://placehold.co/40x40.png?text=${(profileUser.username || "R").substring(0,1)}`, // Changed recipientAvatar to receiverAvatar
-        status: 'pending',
+        receiverId: profileUser.uid,
+        status: "pending",
         createdAt: serverTimestamp(),
-      });
+        updatedAt: serverTimestamp(),
+      };
 
-      toast({ title: "Friend Request Sent!", description: `Friend request sent to ${profileUser.username}. They will see it in their notifications.` });
+      const notificationRef = doc(collection(firestore, "users", profileUser.uid, "notifications"));
+      const notificationData = {
+        type: "friend_request",
+        senderId: currentLoggedInUserAuth.uid,
+        senderUsername: currentLoggedInUserAuth.username || currentLoggedInUserAuth.email.split('@')[0],
+        senderAvatar: currentLoggedInUserAuth.avatar || `https://placehold.co/40x40.png?text=${(currentLoggedInUserAuth.username || "U").substring(0,1)}`,
+        createdAt: serverTimestamp(),
+        read: false,
+      };
+
+      const batch = writeBatch(firestore);
+      batch.set(requestRef, requestData);
+      batch.set(notificationRef, notificationData);
+      await batch.commit();
+
+      toast({ title: "Friend Request Sent!", description: `Request sent to ${profileUser.username}.` });
     } catch (error) {
-      console.error('UserProfilePage: Error sending friend request:', error);
-      toast({ title: "Error", description: "Could not send friend request. Check Firestore rules and console.", variant: "destructive" });
+      console.error("UserProfilePage (handleAddFriend): Error sending friend request:", error);
+      toast({ title: "Error", description: "Could not send friend request.", variant: "destructive" });
     } finally {
-      setIsSendingRequest(false);
+      setIsProcessingAction(false);
     }
   };
 
-  // Handle accepting a friend request
+  const handleCancelFriendRequest = async () => {
+    if (!currentLoggedInUserAuth || !profileUser) {
+      toast({ title: "Authentication Error", description: "You must be logged in to cancel requests.", variant: "destructive" });
+      return;
+    }
+
+    setIsProcessingAction(true);
+
+    try {
+      const friendRequestId = `${currentLoggedInUserAuth.uid}_${profileUser.uid}`; // Since this is a sent request
+      const requestRef = doc(firestore, "friendRequests", friendRequestId);
+      await getDoc(requestRef).then((doc) => {
+        if (doc.exists()) {
+          const batch = writeBatch(firestore);
+          batch.delete(requestRef);
+          const notificationsQuery = query(
+            collection(firestore, "users", profileUser.uid, "notifications"),
+            where("senderId", "==", currentLoggedInUserAuth.uid),
+            where("type", "==", "friend_request")
+          );
+          getDocs(notificationsQuery).then((notificationsSnapshot) => {
+            notificationsSnapshot.forEach((notificationDoc) => {
+              batch.delete(notificationDoc.ref);
+            });
+            batch.commit();
+          });
+        }
+      });
+
+      toast({ title: "Friend Request Cancelled", description: `Request to ${profileUser.username} has been cancelled.` });
+      setRelationshipStatus("not_friends");
+    } catch (error) {
+      console.error("UserProfilePage (handleCancelFriendRequest): Error cancelling friend request:", error);
+      toast({ title: "Error", description: "Could not cancel friend request.", variant: "destructive" });
+    } finally {
+      setIsProcessingAction(false);
+    }
+  };
+
   const handleAcceptFriendRequest = async () => {
     if (!currentLoggedInUserAuth || !profileUser) {
       toast({ title: "Authentication Error", description: "You must be logged in to accept requests.", variant: "destructive" });
@@ -377,6 +304,16 @@ export default function UserProfilePage() {
       };
       batch.set(senderFriendsRef, senderFriendData);
 
+      const notificationsQuery = query(
+        collection(firestore, "users", currentLoggedInUserAuth.uid, "notifications"),
+        where("senderId", "==", profileUser.uid),
+        where("type", "==", "friend_request")
+      );
+      const notificationsSnapshot = await getDocs(notificationsQuery);
+      notificationsSnapshot.forEach((notificationDoc) => {
+        batch.delete(notificationDoc.ref);
+      });
+
       await batch.commit();
       toast({ title: "Friend Request Accepted!", description: `You are now friends with ${profileUser.username}.` });
     } catch (error) {
@@ -387,10 +324,46 @@ export default function UserProfilePage() {
     }
   };
 
-  // Handle unfriending
+  const handleDeclineFriendRequest = async () => {
+    if (!currentLoggedInUserAuth || !profileUser) {
+      toast({ title: "Authentication Error", description: "You must be logged in to decline requests.", variant: "destructive" });
+      return;
+    }
+
+    setIsProcessingAction(true);
+
+    try {
+      const friendRequestId = `${profileUser.uid}_${currentLoggedInUserAuth.uid}`; // Since this is a received request
+      const requestRef = doc(firestore, "friendRequests", friendRequestId);
+      const batch = writeBatch(firestore);
+
+      const requestUpdateData = { status: "declined", updatedAt: serverTimestamp() };
+      batch.update(requestRef, requestUpdateData);
+
+      const notificationsQuery = query(
+        collection(firestore, "users", currentLoggedInUserAuth.uid, "notifications"),
+        where("senderId", "==", profileUser.uid),
+        where("type", "==", "friend_request")
+      );
+      const notificationsSnapshot = await getDocs(notificationsQuery);
+      notificationsSnapshot.forEach((notificationDoc) => {
+        batch.delete(notificationDoc.ref);
+      });
+
+      await batch.commit();
+      toast({ title: "Friend Request Declined", description: `You have declined the request from ${profileUser.username}.` });
+      setRelationshipStatus("not_friends");
+    } catch (error) {
+      console.error("UserProfilePage (handleDeclineFriendRequest): Error declining friend request:", error);
+      toast({ title: "Error", description: "Could not decline friend request.", variant: "destructive" });
+    } finally {
+      setIsProcessingAction(false);
+    }
+  };
+
   const handleUnfriend = async () => {
     if (!currentLoggedInUserAuth || !profileUser) {
-      toast({ title: "Authentication Error", description: "You must be logged in.", variant: "destructive" });
+      toast({ title: "Authentication Error", description: "You must be logged in to unfriend users.", variant: "destructive" });
       return;
     }
 
@@ -398,14 +371,31 @@ export default function UserProfilePage() {
 
     try {
       const batch = writeBatch(firestore);
+
       const currentUserFriendRef = doc(firestore, "users", currentLoggedInUserAuth.uid, "friends", profileUser.uid);
-      const otherUserFriendRef = doc(firestore, "users", profileUser.uid, "friends", currentLoggedInUserAuth.uid);
+      const profileUserFriendRef = doc(firestore, "users", profileUser.uid, "friends", currentLoggedInUserAuth.uid);
 
       batch.delete(currentUserFriendRef);
-      batch.delete(otherUserFriendRef);
+      batch.delete(profileUserFriendRef);
+
+      const friendRequestId = `${currentLoggedInUserAuth.uid}_${profileUser.uid}`;
+      const reverseFriendRequestId = `${profileUser.uid}_${currentLoggedInUserAuth.uid}`;
+      const friendRequestRef = doc(firestore, "friendRequests", friendRequestId);
+      const reverseFriendRequestRef = doc(firestore, "friendRequests", reverseFriendRequestId);
+
+      const friendRequestDoc = await getDoc(friendRequestRef);
+      if (friendRequestDoc.exists()) {
+        batch.delete(friendRequestRef);
+      }
+
+      const reverseFriendRequestDoc = await getDoc(reverseFriendRequestRef);
+      if (reverseFriendRequestDoc.exists()) {
+        batch.delete(reverseFriendRequestRef);
+      }
 
       await batch.commit();
-      toast({ title: "Unfriended", description: `${profileUser.username} has been removed from your friends.`, variant: "destructive" });
+      toast({ title: "Unfriended", description: `You are no longer friends with ${profileUser.username}.` });
+      setRelationshipStatus("not_friends");
     } catch (error) {
       console.error("UserProfilePage (handleUnfriend): Error unfriending user:", error);
       toast({ title: "Error", description: "Could not unfriend user.", variant: "destructive" });
@@ -414,137 +404,151 @@ export default function UserProfilePage() {
     }
   };
 
-  // Handle messaging (simulated)
   const handleMessage = () => {
-    toast({ title: "Message (Simulated)", description: `Opening chat with ${profileUser.username}. Full chat functionality coming soon!` });
+    if (!currentLoggedInUserAuth || !profileUser) {
+      toast({ title: "Authentication Error", description: "You must be logged in to send messages.", variant: "destructive" });
+      return;
+    }
+    router.push(`/messages/${profileUser.uid}`);
   };
 
-  if (isLoadingAuth) {
-    return <div className="container mx-auto text-center py-10">
-      <Loader2 className="h-8 w-8 animate-spin text-primary mx-auto" />
-      <p className="mt-2">Checking authentication...</p>
-    </div>;
+  if (!profileUser) {
+    return <div>Loading...</div>;
   }
 
-  if (!profileUser || !currentLoggedInUserAuth) {
-    return <div className="container mx-auto text-center py-10">
-      <Loader2 className="h-8 w-8 animate-spin text-primary mx-auto" />
-      <p className="mt-2">Loading profile...</p>
-    </div>;
-  }
+  const isOwnProfile = currentLoggedInUserAuth?.uid === profileUser.uid;
 
   return (
-    <div className="container mx-auto max-w-2xl">
-      {/* Profile Card */}
-      <Card className="mb-8 shadow-lg rounded-xl">
-        <CardHeader className="p-4 flex flex-row items-center space-x-4 bg-card">
-          <Avatar className="h-16 w-16 border-2 border-primary">
-            <AvatarImage src={profileUser.avatar || `https://placehold.co/100x100.png?text=${(profileUser.fullName || "U").substring(0,1)}`} alt={profileUser.fullName} />
-            <AvatarFallback>{profileUser.fullName.substring(0, 1).toUpperCase()}</AvatarFallback>
-          </Avatar>
-          <div className="flex-1">
-            <CardTitle className="text-xl">{profileUser.fullName}</CardTitle>
-            <CardDescription className="text-sm">@{profileUser.username}</CardDescription>
-          </div>
-        </CardHeader>
-        <CardContent className="p-4">
-          {/* Bio Section */}
-          <p className="text-sm text-muted-foreground mb-4">
-            {profileUser.bio || "No bio available."}
-          </p>
-          {/* Action Buttons */}
-          <div className="flex gap-2 mb-4">
-            {relationshipStatus === 'friends' ? (
-              <>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="bg-green-100 text-green-700 border-green-300"
-                  disabled
-                >
-                  <Users className="mr-2 h-4 w-4" /> Friends
-                </Button>
-                <Button variant="outline" size="sm" onClick={handleMessage} disabled={isProcessingAction}>
-                  <MessageSquare className="mr-2 h-4 w-4" /> Message
-                </Button>
-                <Button
-                  variant="destructive"
-                  size="sm"
-                  onClick={handleUnfriend}
-                  disabled={isProcessingAction}
-                >
-                  <UserMinus className="mr-2 h-3 w-4" /> Unfriend
-                </Button>
-              </>
-            ) : relationshipStatus === 'pending_sent' ? (
-              <Button variant="outline" size="sm" className="text-gray-600" disabled>
-                <Users className="mr-2 h-4 w-4" /> Pending
-              </Button>
-            ) : relationshipStatus === 'pending_received' ? (
-              <Button
-                variant="outline"
-                size="sm"
-                className="text-blue-100 border-blue-500"
-                onClick={handleAcceptFriendRequest}
-                disabled={isProcessingAction || !currentLoggedInUserAuth}
-              >
-                <Users className="mr-2 h-4 w-4" /> {isProcessingAction ? "Accepting..." : "Accept Friend Request"}
-              </Button>
-            ) : (
-              <Button
-                variant="outline"
-                size="sm"
-                className="text-blue-500"
-                onClick={handleAddFriend}
-                disabled={isSendingRequest || !currentLoggedInUserAuth}
-              >
-                <Users className="mr-2 h-4 w-4" /> {isSendingRequest ? "Sending..." : "Add Friend"}
-              </Button>
-            )}
-          </div>
-          {/* Connections Section */}
-          <div className="mb-4">
-            <h3 className="text-sm font-semibold text-foreground mb-2">Connections</h3>
-            <p className="text-sm text-muted-foreground">
-              {friendsCount} {friendsCount === 1 ? 'friend' : 'friends'}
-            </p>
-            {mutualFriends.length > 0 && (
-              <div className="mt-2">
-                <p className="text-sm text-muted-foreground">Mutual Friends:</p>
-                <div className="flex flex-wrap gap-2 mt-1">
-                  {mutualFriends.slice(0, 3).map((friend) => (
-                    <div key={friend.friendUserId} className="flex items-center space-x-2">
-                      <Avatar className="h-8 w-8">
-                        <AvatarImage src={friend.avatar || `https://placehold.co/40x40.png?text=${friend.username.substring(0,1)}`} alt={friend.username} />
-                        <AvatarFallback>{friend.username.substring(0, 1).toUpperCase()}</AvatarFallback>
-                      </Avatar>
-                      <span className="text-sm">{friend.username}</span>
-                    </div>
-                  ))}
-                </div>
+    <div className="container mx-auto px-4 py-8">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        {/* Profile Card */}
+        <Card className="md:col-span-1">
+          <CardHeader className="relative">
+            <div className="h-32 bg-gradient-to-r from-blue-500 to-purple-500 rounded-t-lg"></div>
+            <div className="absolute -bottom-12 left-1/2 transform -translate-x-1/2">
+              <Avatar className="h-24 w-24 border-4 border-white">
+                <AvatarImage src={profileUser.avatar} alt={profileUser.username} />
+                <AvatarFallback>{profileUser.username?.charAt(0).toUpperCase()}</AvatarFallback>
+              </Avatar>
+            </div>
+          </CardHeader>
+          <CardContent className="pt-16 text-center">
+            <CardTitle className="text-xl">{profileUser.fullName || profileUser.username}</CardTitle>
+            <p className="text-muted-foreground">@{profileUser.username}</p>
+            <div className="mt-4 flex items-center justify-center text-muted-foreground">
+              <MapPin className="h-4 w-4 mr-1" />
+              <span>{profileUser.location || "Unknown location"}</span>
+            </div>
+            <p className="mt-2 text-sm">{profileUser.bio || "No bio yet."}</p>
+
+            {!isOwnProfile && (
+              <div className="mt-4 flex flex-col sm:flex-row justify-center gap-2">
+                {relationshipStatus === "not_friends" && (
+                  <Button onClick={handleAddFriend} disabled={isProcessingAction}>
+                    <UserPlus className="mr-2 h-4 w-4" /> Add Friend
+                  </Button>
+                )}
+                {relationshipStatus === "pending_sent" && (
+                  <Button
+                    variant="outline"
+                    onClick={handleCancelFriendRequest}
+                    disabled={isProcessingAction}
+                  >
+                    <X className="mr-2 h-4 w-4" /> Cancel Request
+                  </Button>
+                )}
+                {relationshipStatus === "pending_received" && (
+                  <>
+                    <Button onClick={handleAcceptFriendRequest} disabled={isProcessingAction}>
+                      <Check className="mr-2 h-4 w-4" /> Accept
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={handleDeclineFriendRequest}
+                      disabled={isProcessingAction}
+                    >
+                      <X className="mr-2 h-4 w-4" /> Decline
+                    </Button>
+                  </>
+                )}
+                {relationshipStatus === "friends" && (
+                  <>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="bg-green-100 text-green-700 border-green-300"
+                      disabled
+                    >
+                      <Users className="mr-2 h-4 w-4" /> Friends
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={handleMessage}>
+                      <MessageCircle className="mr-2 h-4 w-4" /> Message
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={handleUnfriend}>
+                      <UserMinus className="mr-2 h-4 w-4" /> Unfriend
+                    </Button>
+                  </>
+                )}
               </div>
             )}
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
 
-      {/* Posts Section */}
-      <div>
-        <h2 className="text-lg font-semibold text-foreground mb-4">Recent Posts</h2>
-        {posts.length > 0 ? (
-          posts.map((post) => (
-            <Card key={post.id} className="mb-4 shadow-md rounded-lg">
-              <CardContent className="p-4">
-                <p className="text-sm text-foreground mb-2">{post.content}</p>
-                <p className="text-xs text-muted-foreground">
-                  {post.createdAt ? formatDistanceToNow(post.createdAt.toDate(), { addSuffix: true }) : 'Unknown time'}
-                </p>
-              </CardContent>
-            </Card>
-          ))
-        ) : (
-          <p className="text-sm text-muted-foreground">No posts yet.</p>
-        )}
+        {/* Tabs Section */}
+        <div className="md:col-span-2">
+          <Tabs defaultValue="posts" className="w-full">
+            <TabsList className="grid w-full grid-cols-2">
+              <TabsTrigger value="posts">Posts</TabsTrigger>
+              <TabsTrigger value="connections">Connections</TabsTrigger>
+            </TabsList>
+            <TabsContent value="posts">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Posts</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {posts.length > 0 ? (
+                    posts.map((post) => (
+                      <div key={post.id}>
+                        <PostCard post={post} />
+                        <Separator className="my-4" />
+                      </div>
+                    ))
+                  ) : (
+                    <p className="text-muted-foreground">No posts yet.</p>
+                  )}
+                </CardContent>
+              </Card>
+            </TabsContent>
+            <TabsContent value="connections">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Connections</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {friends.length > 0 ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      {friends.map((friend, index) => (
+                        <div key={index} className="flex items-center space-x-4">
+                          <Avatar>
+                            <AvatarImage src={friend.avatar} alt={friend.username} />
+                            <AvatarFallback>{friend.username?.charAt(0).toUpperCase()}</AvatarFallback>
+                          </Avatar>
+                          <div>
+                            <p className="font-medium">{friend.name}</p>
+                            <p className="text-sm text-muted-foreground">@{friend.username}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-muted-foreground">No connections yet.</p>
+                  )}
+                </CardContent>
+              </Card>
+            </TabsContent>
+          </Tabs>
+        </div>
       </div>
     </div>
   );

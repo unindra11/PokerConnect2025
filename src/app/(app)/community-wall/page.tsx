@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useState, useEffect } from "react";
@@ -6,40 +5,28 @@ import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { PlusCircle, Loader2 } from "lucide-react";
 import { PostCard } from "@/components/post-card";
-import type { Post, Comment as PostComment } from "@/types/post"; // Import Comment as PostComment
+import type { Post, Comment as PostComment } from "@/types/post";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
-import { 
-  getFirestore, 
-  collection, 
-  query, 
-  orderBy, 
-  getDocs, 
-  Timestamp, 
-  doc, 
-  updateDoc, 
-  increment,
-  addDoc,
-  where,
-  writeBatch,
-  deleteDoc,
-  serverTimestamp
-} from "firebase/firestore";
-import { app, auth } from "@/lib/firebase"; 
-import type { User as FirebaseUser } from "firebase/auth";
+import { getFirestore, collection, query, orderBy, getDocs, Timestamp, where } from "firebase/firestore";
+import { app } from "@/lib/firebase"; 
+import { getAuth, type User as FirebaseUser } from "firebase/auth";
+import { handleLikePost } from "@/utils/handleLikePost"; // Import shared utility
+import { handleCommentOnPost } from "@/utils/handleCommentOnPost"; // Import shared utility
 
 export default function CommunityWallPage() {
   const [communityPosts, setCommunityPosts] = useState<Post[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
   const { toast } = useToast();
+  const auth = getAuth(app);
 
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged(user => {
       setCurrentUser(user);
     });
     return () => unsubscribe();
-  }, []);
+  }, [auth]);
 
   useEffect(() => {
     const fetchPosts = async () => {
@@ -116,123 +103,21 @@ export default function CommunityWallPage() {
     };
 
     if (currentUser !== undefined) { // Ensure currentUser state is resolved
-        fetchPosts();
+      fetchPosts();
     }
   }, [currentUser, toast]);
 
-  const handleLikePost = async (postId: string) => {
-    if (!currentUser) {
-      toast({ title: "Authentication Error", description: "You must be logged in to like a post.", variant: "destructive" });
-      return;
-    }
-
-    const db = getFirestore(app, "poker");
-    const originalPosts = communityPosts.map(p => ({...p, fetchedComments: p.fetchedComments ? [...p.fetchedComments] : [] })); // Deep copy comments if they exist
-    let isCurrentlyLikedOptimistic = false;
-
-    setCommunityPosts(prevPosts =>
-      prevPosts.map(p => {
-        if (p.id === postId) {
-          isCurrentlyLikedOptimistic = !!p.likedByCurrentUser;
-          const newLikedByCurrentUser = !isCurrentlyLikedOptimistic;
-          let newLikesCount = p.likes || 0;
-
-          if (newLikedByCurrentUser) { 
-            newLikesCount = (p.likes || 0) + 1;
-          } else { 
-            newLikesCount = Math.max(0, (p.likes || 0) - 1);
-          }
-          return { ...p, likes: newLikesCount, likedByCurrentUser: newLikedByCurrentUser };
-        }
-        return p;
-      })
-    );
-
-    try {
-      const postRef = doc(db, "posts", postId);
-      const likesCollectionRef = collection(db, "likes");
-      const likeQuery = query(likesCollectionRef, where("postId", "==", postId), where("userId", "==", currentUser.uid));
-      const likeSnapshot = await getDocs(likeQuery);
-      const batch = writeBatch(db);
-
-      if (likeSnapshot.empty) { // User is liking
-        const newLikeRef = doc(likesCollectionRef); // Auto-generate ID
-        batch.set(newLikeRef, { postId: postId, userId: currentUser.uid, createdAt: serverTimestamp() });
-        batch.update(postRef, { likes: increment(1) });
-        await batch.commit();
-        toast({ title: "Post Liked!", description: "Your like has been recorded." });
-      } else { // User is unliking
-        likeSnapshot.forEach(doc => batch.delete(doc.ref));
-        batch.update(postRef, { likes: increment(-1) });
-        await batch.commit();
-        toast({ title: "Like Removed", description: "Your like has been removed." });
-      }
-    } catch (error) {
-      console.error("Error updating likes in Firestore:", error);
-      setCommunityPosts(originalPosts); 
-      toast({
-        title: "Error Liking Post",
-        description: "Could not save your like to Firestore.",
-        variant: "destructive",
-      });
+  const onLikePost = async (postId: string) => {
+    const result = await handleLikePost({ postId, currentUser, posts: communityPosts });
+    if (result.updatedPosts) {
+      setCommunityPosts(result.updatedPosts);
     }
   };
 
-  const handleCommentOnPost = async (postId: string, commentText: string) => {
-    if (!currentUser) {
-      toast({ title: "Authentication Error", description: "You must be logged in to comment.", variant: "destructive" });
-      return;
-    }
-    const loggedInUserString = localStorage.getItem("loggedInUser");
-    if (!loggedInUserString) {
-        toast({ title: "Profile Error", description: "Could not retrieve your profile details to comment.", variant: "destructive" });
-        return;
-    }
-    const loggedInUserDetails = JSON.parse(loggedInUserString);
-
-
-    const db = getFirestore(app, "poker");
-    const postRef = doc(db, "posts", postId);
-    const commentsCollectionRef = collection(db, "posts", postId, "comments");
-
-    const newCommentData: Omit<PostComment, 'id'> = {
-      userId: currentUser.uid,
-      username: loggedInUserDetails.username || "Anonymous",
-      avatar: loggedInUserDetails.avatar || `https://placehold.co/40x40.png?text=${(loggedInUserDetails.username || "A").substring(0,1)}`,
-      text: commentText,
-      createdAt: serverTimestamp(),
-    };
-
-    try {
-      const commentDocRef = await addDoc(commentsCollectionRef, newCommentData);
-      await updateDoc(postRef, { comments: increment(1) });
-
-      // Optimistic UI update
-      const newCommentForUI: PostComment = {
-        ...newCommentData,
-        id: commentDocRef.id,
-        createdAt: new Date() // For immediate display, serverTimestamp will be accurate in DB
-      };
-
-      setCommunityPosts(prevPosts => prevPosts.map(p => {
-        if (p.id === postId) {
-          return {
-            ...p,
-            comments: (p.comments || 0) + 1,
-            fetchedComments: [...(p.fetchedComments || []), newCommentForUI]
-          };
-        }
-        return p;
-      }));
-
-      toast({ title: "Comment Posted!", description: "Your comment has been added." });
-    } catch (error) {
-      console.error("Error adding comment to Firestore:", error);
-      toast({
-        title: "Error Posting Comment",
-        description: "Could not save your comment. Please try again.",
-        variant: "destructive",
-      });
+  const onCommentPost = async (postId: string, commentText: string) => {
+    const result = await handleCommentOnPost({ postId, commentText, currentUser, posts: communityPosts });
+    if (result.updatedPosts) {
+      setCommunityPosts(result.updatedPosts);
     }
   };
 
@@ -282,8 +167,8 @@ export default function CommunityWallPage() {
             key={post.id} 
             post={post} 
             currentUserId={currentUser?.uid}
-            onLikePost={handleLikePost}
-            onCommentPost={handleCommentOnPost}
+            onLikePost={onLikePost}
+            onCommentPost={onCommentPost}
             isLCPItem={index === 0} 
           />
         ))}

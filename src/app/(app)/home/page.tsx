@@ -1,38 +1,24 @@
-
 "use client";
 
 import type { ReactNode } from 'react';
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
-import Link from "next/link";
+import Link from "next/link"; // Use next/link
 import { PlusCircle, Lightbulb, Loader2, RefreshCcw } from "lucide-react";
 import { PostCard } from "@/components/post-card";
-import type { Post, Comment as PostComment } from "@/types/post"; // Import PostComment
+import type { Post, Comment as PostComment } from "@/types/post";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { generatePokerTips, type GeneratePokerTipsInput, type GeneratePokerTipsOutput } from "@/ai/flows/generate-poker-tips";
 import { useToast } from "@/hooks/use-toast";
-import { 
-  getFirestore, 
-  collection, 
-  query, 
-  orderBy, 
-  getDocs, 
-  Timestamp, 
-  doc, 
-  updateDoc, 
-  increment,
-  where,
-  writeBatch,
-  serverTimestamp,
-  addDoc 
-} from "firebase/firestore";
+import { getFirestore, collection, query, where, orderBy, getDocs, Timestamp } from "firebase/firestore";
 import { app } from "@/lib/firebase"; 
 import { getAuth, type User as FirebaseUser } from "firebase/auth";
+import { handleLikePost } from "@/utils/handleLikePost";
+import { handleCommentOnPost } from "@/utils/handleCommentOnPost";
 
-interface LoggedInUserDetails {
+interface UserDetails {
   username?: string;
   avatar?: string;
-  // Add other fields if needed from localStorage.loggedInUser
 }
 
 export default function HomePage() {
@@ -96,7 +82,6 @@ export default function HomePage() {
           likedByCurrentUser = !likeSnapshot.empty;
         }
 
-        // Fetch comments for this post
         const commentsCollectionRef = collection(db, "posts", docSnap.id, "comments");
         const commentsQuery = query(commentsCollectionRef, orderBy("createdAt", "asc"));
         const commentsSnapshot = await getDocs(commentsQuery);
@@ -127,12 +112,12 @@ export default function HomePage() {
       });
       const postsData = await Promise.all(postsDataPromises);
       setFeedPosts(postsData);
-       if (postsData.length === 0 && !isLoadingPosts) { 
-          toast({
-            title: "No Posts Yet",
-            description: "The home feed is quiet. Create a post!",
-          });
-        }
+      if (postsData.length === 0 && !isLoadingPosts) { 
+        toast({
+          title: "No Posts Yet",
+          description: "The home feed is quiet. Create a post!",
+        });
+      }
     } catch (error: any) {
       console.error("Error fetching posts from Firestore for Home Feed:", error);
       let firestoreErrorMessage = "Could not retrieve posts from Firestore. Please ensure Firestore is set up and rules allow reads.";
@@ -151,151 +136,29 @@ export default function HomePage() {
     }
   };
 
-
   useEffect(() => {
     fetchPokerTips();
   }, []); 
 
   useEffect(() => {
     if (currentUser !== undefined) { 
-        fetchFeedPosts();
+      fetchFeedPosts();
     }
   }, [currentUser]); 
 
-
-  const handleLikePost = async (postId: string) => {
-    if (!currentUser) {
-      toast({ title: "Authentication Error", description: "You must be logged in to like a post.", variant: "destructive" });
-      return;
-    }
-    const db = getFirestore(app, "poker");
-    const originalPosts = feedPosts.map(p => ({...p, fetchedComments: p.fetchedComments ? [...p.fetchedComments] : [] }));
-    
-    console.log(`Liking post ${postId}. Current state:`, feedPosts.find(p => p.id === postId));
-
-    setFeedPosts(prevPosts => {
-      const updatedPosts = prevPosts.map(p => {
-        if (p.id === postId) {
-          const isCurrentlyLiked = !!p.likedByCurrentUser;
-          const newLikedByCurrentUser = !isCurrentlyLiked;
-          
-          console.log(`Post ${postId} - Before optimistic update: p.likes = ${p.likes}, p.likedByCurrentUser = ${p.likedByCurrentUser}`);
-          
-          let newLikesCount = p.likes || 0;
-          if (newLikedByCurrentUser) { 
-            newLikesCount = Math.max(0, (p.likes || 0)) + 1;
-          } else { 
-            newLikesCount = Math.max(0, (p.likes || 0) - 1);
-          }
-          
-          console.log(`Post ${postId} - Calculated for optimistic update: newLikesCount = ${newLikesCount}, newLikedByCurrentUser = ${newLikedByCurrentUser}`);
-          
-          return { 
-            ...p, 
-            likes: newLikesCount, 
-            likedByCurrentUser: newLikedByCurrentUser 
-          };
-        }
-        return p;
-      });
-      const postAfterUpdate = updatedPosts.find(p => p.id === postId);
-      console.log(`Post ${postId} - After optimistic update attempt (inside map):`, postAfterUpdate);
-      return updatedPosts;
-    });
-
-    try {
-      const likesCollectionRef = collection(db, "likes");
-      const postDocRef = doc(db, "posts", postId);
-      const likeQuery = query(likesCollectionRef, where("postId", "==", postId), where("userId", "==", currentUser.uid));
-      const likeSnapshot = await getDocs(likeQuery);
-      const batch = writeBatch(db);
-
-      if (likeSnapshot.empty) { 
-        const newLikeRef = doc(likesCollectionRef); 
-        batch.set(newLikeRef, { postId: postId, userId: currentUser.uid, createdAt: serverTimestamp() });
-        batch.update(postDocRef, { likes: increment(1) });
-        await batch.commit();
-        toast({ title: "Post Liked!", description: "Your like has been recorded." });
-      } else { 
-        likeSnapshot.forEach(doc => batch.delete(doc.ref));
-        batch.update(postDocRef, { likes: increment(-1) });
-        await batch.commit();
-        toast({ title: "Like Removed", description: "Your like has been removed." });
-      }
-    } catch (error) {
-      console.error("Error updating likes in Firestore:", error);
-      setFeedPosts(originalPosts); 
-      toast({
-        title: "Error Liking Post",
-        description: "Could not save your like to Firestore.",
-        variant: "destructive",
-      });
+  const onLikePost = async (postId: string) => {
+    const result = await handleLikePost({ postId, currentUser, posts: feedPosts });
+    if (result.updatedPosts) {
+      setFeedPosts(result.updatedPosts);
     }
   };
 
-  const handleCommentOnPost = async (postId: string, commentText: string) => {
-    if (!currentUser) {
-      toast({ title: "Authentication Error", description: "You must be logged in to comment.", variant: "destructive" });
-      return;
-    }
-    const loggedInUserString = localStorage.getItem("loggedInUser");
-    let loggedInUserDetails: LoggedInUserDetails | null = null;
-    if (loggedInUserString) {
-      try {
-        loggedInUserDetails = JSON.parse(loggedInUserString);
-      } catch (e) {
-        console.error("Error parsing loggedInUser from localStorage for comment:", e);
-      }
-    }
-    if (!loggedInUserDetails) {
-        toast({ title: "Profile Error", description: "Could not retrieve your profile details to comment.", variant: "destructive" });
-        return;
-    }
-
-    const db = getFirestore(app, "poker");
-    const postRef = doc(db, "posts", postId);
-    const commentsCollectionRef = collection(db, "posts", postId, "comments");
-
-    const newCommentData: Omit<PostComment, 'id'> = {
-      userId: currentUser.uid,
-      username: loggedInUserDetails.username || "Anonymous",
-      avatar: loggedInUserDetails.avatar || `https://placehold.co/40x40.png?text=${(loggedInUserDetails.username || "A").substring(0,1)}`,
-      text: commentText,
-      createdAt: serverTimestamp(),
-    };
-
-    try {
-      const commentDocRef = await addDoc(commentsCollectionRef, newCommentData);
-      await updateDoc(postRef, { comments: increment(1) });
-
-      const newCommentForUI: PostComment = {
-        ...newCommentData,
-        id: commentDocRef.id,
-        createdAt: new Date() 
-      };
-
-      setFeedPosts(prevPosts => prevPosts.map(p => {
-        if (p.id === postId) {
-          return {
-            ...p,
-            comments: (p.comments || 0) + 1,
-            fetchedComments: [...(p.fetchedComments || []), newCommentForUI].sort((a,b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
-          };
-        }
-        return p;
-      }));
-
-      toast({ title: "Comment Posted!", description: "Your comment has been added." });
-    } catch (error) {
-      console.error("Error adding comment to Firestore:", error);
-      toast({
-        title: "Error Posting Comment",
-        description: "Could not save your comment. Please try again.",
-        variant: "destructive",
-      });
+  const onCommentPost = async (postId: string, commentText: string) => {
+    const result = await handleCommentOnPost({ postId, commentText, currentUser, posts: feedPosts });
+    if (result.updatedPosts) {
+      setFeedPosts(result.updatedPosts);
     }
   };
-
 
   return (
     <div className="container mx-auto max-w-2xl">
@@ -335,14 +198,14 @@ export default function HomePage() {
             </ul>
           )}
           {!isLoadingTips && !tipsError && aiTips.length === 0 && (
-             <p className="text-muted-foreground text-center py-4">No tips available at the moment. Try refreshing!</p>
+            <p className="text-muted-foreground text-center py-4">No tips available at the moment. Try refreshing!</p>
           )}
         </CardContent>
       </Card>
 
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-3xl font-bold">Home Feed</h1>
-        <Link href="/create-post" passHref>
+        <Link href="/create-post">
           <Button>
             <PlusCircle className="mr-2 h-5 w-5" /> Create Post
           </Button>
@@ -366,7 +229,7 @@ export default function HomePage() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <Link href="/create-post" passHref>
+              <Link href="/create-post">
                 <Button>Create a Post</Button>
               </Link>
             </CardContent>
@@ -377,8 +240,8 @@ export default function HomePage() {
             key={post.id} 
             post={post} 
             currentUserId={currentUser?.uid}
-            onLikePost={handleLikePost}
-            onCommentPost={handleCommentOnPost}
+            onLikePost={onLikePost}
+            onCommentPost={onCommentPost}
             isLCPItem={index === 0}
           />
         ))}
