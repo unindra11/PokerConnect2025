@@ -6,6 +6,7 @@ interface HandleLikePostParams {
   postId: string;
   currentUser: any; // FirebaseUser | null
   posts: Post[];
+  loggedInUserDetails?: any; // Add loggedInUserDetails to the params
 }
 
 interface HandleLikePostResult {
@@ -13,9 +14,13 @@ interface HandleLikePostResult {
   error?: string;
 }
 
-export async function handleLikePost({ postId, currentUser, posts }: HandleLikePostParams): Promise<HandleLikePostResult> {
+export async function handleLikePost({ postId, currentUser, posts, loggedInUserDetails }: HandleLikePostParams): Promise<HandleLikePostResult> {
   if (!currentUser) {
     return { error: "You must be logged in to like a post." };
+  }
+
+  if (!loggedInUserDetails) {
+    return { error: "Could not retrieve your profile details to like the post." };
   }
 
   const db = getFirestore(app, "poker");
@@ -46,15 +51,13 @@ export async function handleLikePost({ postId, currentUser, posts }: HandleLikeP
     const likeSnapshot = await getDocs(likeQuery);
     const batch = writeBatch(db);
 
-    // Fetch the post to get the owner's UID and user details for the notification
+    // Fetch the post to get the owner's UID
     const postSnap = await getDoc(postDocRef);
     if (!postSnap.exists()) {
       throw new Error("Post not found");
     }
     const postData = postSnap.data();
     const postOwnerId = postData.userId; // Use userId field as per Post type
-    const postUser = postData.user || { name: "Unknown User", avatar: `https://placehold.co/100x100.png?text=U`, handle: "@unknown" };
-    const senderUsername = postUser.handle ? postUser.handle.replace(/^@/, '') : (postUser.name || "unknown");
 
     if (likeSnapshot.empty) {
       // Like the post
@@ -68,8 +71,8 @@ export async function handleLikePost({ postId, currentUser, posts }: HandleLikeP
         const notificationData = {
           type: "like_post",
           senderId: currentUser.uid,
-          senderUsername: senderUsername || "Anonymous",
-          senderAvatar: postUser.avatar || `https://placehold.co/40x40.png?text=${(senderUsername || "A").substring(0,1)}`,
+          senderUsername: loggedInUserDetails.username || "Anonymous", // Use loggedInUserDetails for the liker
+          senderAvatar: loggedInUserDetails.avatar || `https://placehold.co/40x40.png?text=${(loggedInUserDetails.username || "A").substring(0,1)}`, // Use loggedInUserDetails for the liker
           postId: postId,
           createdAt: serverTimestamp(),
           read: false,

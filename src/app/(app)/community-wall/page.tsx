@@ -99,7 +99,7 @@ export default function CommunityWallPage() {
   }, [currentUserAuth, toast]);
 
   const onLikePost = async (postId: string) => {
-    const result = await handleLikePost({ postId, currentUser: currentUserAuth, posts: communityPosts });
+    const result = await handleLikePost({ postId, currentUser: currentUserAuth, posts: communityPosts, loggedInUserDetails });
     if (result.updatedPosts) {
       setCommunityPosts(result.updatedPosts);
     }
