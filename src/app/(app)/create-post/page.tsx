@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useEffect, useState, useRef } from "react";
@@ -14,9 +13,10 @@ import { ImagePlus, Send, Edit, Loader2, X, ArrowLeft } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useRouter, useSearchParams } from "next/navigation";
 import type { Post, User } from "@/types/post";
-import { storage, app, auth } from "@/lib/firebase"; 
+import { storage, app } from "@/lib/firebase";
 import { ref, uploadBytesResumable, getDownloadURL } from "firebase/storage";
 import { addDoc, collection, serverTimestamp, doc, getDoc, updateDoc, Timestamp, getFirestore } from "firebase/firestore";
+import { useUser } from "@/context/UserContext";
 
 const MAX_FILE_SIZE_MB = 5;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
@@ -28,6 +28,7 @@ const createPostSchema = z.object({
 type CreatePostFormValues = z.infer<typeof createPostSchema>;
 
 export default function CreatePostPage() {
+  const { currentUserAuth, loggedInUserDetails, isLoadingAuth } = useUser();
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -35,12 +36,12 @@ export default function CreatePostPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const fileInputRef = useRef<HTMLInputElement>(null);
-  
+
   const editPostId = searchParams.get("editPostId");
   const isEditMode = !!editPostId;
+  const redirectTo = searchParams.get("redirect") || "/community-wall";
 
   const [postToEdit, setPostToEdit] = useState<Post | null>(null);
-
 
   const form = useForm<CreatePostFormValues>({
     resolver: zodResolver(createPostSchema),
@@ -59,8 +60,8 @@ export default function CreatePostPage() {
           const postDocSnap = await getDoc(postDocRef);
 
           if (postDocSnap.exists()) {
-            const postData = postDocSnap.data() as Omit<Post, 'id' | 'timestamp'>; 
-            const fetchedPost: Post = { 
+            const postData = postDocSnap.data() as Omit<Post, 'id' | 'timestamp'>;
+            const fetchedPost: Post = {
               id: postDocSnap.id,
               userId: postData.userId,
               user: postData.user,
@@ -74,12 +75,11 @@ export default function CreatePostPage() {
               commentTexts: postData.commentTexts || [],
               shares: postData.shares || 0,
               createdAt: postData.createdAt,
-              // timestamp is derived dynamically or not used if createdAt is a Firestore Timestamp
             };
             setPostToEdit(fetchedPost);
             form.setValue("postContent", fetchedPost.content);
             if (fetchedPost.image) {
-              setPreviewUrl(fetchedPost.image); 
+              setPreviewUrl(fetchedPost.image);
             }
           } else {
             toast({ title: "Error", description: "Post not found for editing in Firestore.", variant: "destructive" });
@@ -93,8 +93,8 @@ export default function CreatePostPage() {
         }
       }
     };
-    if (isEditMode && editPostId) { // Only call if in edit mode and ID exists
-        loadPostForEdit();
+    if (isEditMode && editPostId) {
+      loadPostForEdit();
     }
   }, [isEditMode, editPostId, form, toast, router]);
 
@@ -109,7 +109,7 @@ export default function CreatePostPage() {
         });
         if (fileInputRef.current) fileInputRef.current.value = "";
         setSelectedFile(null);
-        setPreviewUrl(postToEdit?.image || null); 
+        setPreviewUrl(postToEdit?.image || null);
         return;
       }
       if (!file.type.startsWith("image/")) {
@@ -123,10 +123,10 @@ export default function CreatePostPage() {
         setPreviewUrl(postToEdit?.image || null);
         return;
       }
-      setSelectedFile(file); 
+      setSelectedFile(file);
       const reader = new FileReader();
       reader.onloadend = () => {
-        setPreviewUrl(reader.result as string); 
+        setPreviewUrl(reader.result as string);
       };
       reader.readAsDataURL(file);
     }
@@ -134,8 +134,8 @@ export default function CreatePostPage() {
 
   const clearMedia = () => {
     setSelectedFile(null);
-    setPreviewUrl(null); 
-    if (postToEdit) { 
+    setPreviewUrl(null);
+    if (postToEdit) {
       setPostToEdit(prev => prev ? { ...prev, image: undefined, imageAiHint: undefined } : null);
     }
     if (fileInputRef.current) {
@@ -144,48 +144,42 @@ export default function CreatePostPage() {
   };
 
   const onSubmit: SubmitHandler<CreatePostFormValues> = async (data) => {
-    setIsLoading(true);
-    const currentUserAuth = auth.currentUser;
-    let loggedInUserForPost: User | null = null;
-
-    if (currentUserAuth) {
-      const loggedInUserString = localStorage.getItem("loggedInUser");
-      if (loggedInUserString) {
-        const parsedUser = JSON.parse(loggedInUserString);
-        loggedInUserForPost = {
-          name: parsedUser.fullName || parsedUser.username || "Anonymous",
-          avatar: parsedUser.avatar || `https://placehold.co/100x100.png?text=${(parsedUser.fullName || parsedUser.username || "A").substring(0,1)}`,
-          handle: parsedUser.username ? `@${parsedUser.username}` : `@${currentUserAuth.uid}`
-        };
-      } else { 
-        loggedInUserForPost = {
-          name: currentUserAuth.displayName || currentUserAuth.email?.split('@')[0] || "Anonymous",
-          avatar: currentUserAuth.photoURL || `https://placehold.co/100x100.png?text=${(currentUserAuth.displayName || currentUserAuth.email || "A").substring(0,1)}`,
-          handle: currentUserAuth.email ? `@${currentUserAuth.email.split('@')[0]}` : `@${currentUserAuth.uid}`
-        };
-      }
+    if (isLoadingAuth) {
+      toast({ title: "Error", description: "Authentication is still loading. Please wait.", variant: "destructive" });
+      return;
     }
-    
-    console.log("CreatePostPage: currentUserAuth object before operations:", currentUserAuth);
-
-    if (!currentUserAuth || !loggedInUserForPost) {
+    if (!currentUserAuth) {
+      console.log('CreatePostPage: No authenticated user');
       toast({ title: "Authentication Error", description: "You must be logged in to create or edit a post.", variant: "destructive" });
-      setIsLoading(false);
+      router.push("/login");
+      return;
+    }
+    if (!loggedInUserDetails) {
+      console.log('CreatePostPage: No user details available');
+      toast({ title: "Error", description: "User details not loaded. Please try again.", variant: "destructive" });
       return;
     }
 
-    let finalImageUrl: string | null = null;
-    let finalImageAiHint: string | null = null; // Initialize to null
+    setIsLoading(true);
 
-    if (isEditMode && postToEdit && !selectedFile && previewUrl === null) { 
+    const loggedInUserForPost: User = {
+      name: loggedInUserDetails.fullName || loggedInUserDetails.username || "Anonymous",
+      avatar: loggedInUserDetails.avatar || `https://placehold.co/100x100.png?text=${(loggedInUserDetails.username || "A").substring(0,1)}`,
+      handle: loggedInUserDetails.username ? `@${loggedInUserDetails.username}` : `@${currentUserAuth.uid}`
+    };
+
+    let finalImageUrl: string | null = null;
+    let finalImageAiHint: string | null = null;
+
+    if (isEditMode && postToEdit && !selectedFile && previewUrl === null) {
       finalImageUrl = null;
       finalImageAiHint = null;
-    } else if (isEditMode && postToEdit && !selectedFile && postToEdit.image) { 
+    } else if (isEditMode && postToEdit && !selectedFile && postToEdit.image) {
       finalImageUrl = postToEdit.image;
       finalImageAiHint = postToEdit.imageAiHint || null;
     }
-    
-    if (selectedFile) { 
+
+    if (selectedFile) {
       const storageRefPath = `posts/${currentUserAuth.uid}/${Date.now()}_${selectedFile.name}`;
       const fileStorageRef = ref(storage, storageRefPath);
       const uploadTask = uploadBytesResumable(fileStorageRef, selectedFile);
@@ -194,7 +188,7 @@ export default function CreatePostPage() {
         console.log(`CreatePostPage: Attempting to upload to Firebase Storage path: ${storageRefPath}`);
         await uploadTask;
         finalImageUrl = await getDownloadURL(uploadTask.snapshot.ref);
-        finalImageAiHint = "user uploaded image"; // Default hint for newly uploaded image
+        finalImageAiHint = "user uploaded image";
         console.log("CreatePostPage: Firebase Storage upload successful. Download URL:", finalImageUrl);
       } catch (error: any) {
         console.error("CreatePostPage: Firebase Storage upload error:", error);
@@ -207,27 +201,28 @@ export default function CreatePostPage() {
           finalImageAiHint = null;
         }
       }
-    } else if (!isEditMode) { 
-        finalImageUrl = null;
-        finalImageAiHint = null;
+    } else if (!isEditMode) {
+      finalImageUrl = null;
+      finalImageAiHint = null;
     }
-    
+
     const firestore = getFirestore(app, "poker");
-    
+
     const postDataForFirestore: Partial<Post> = {
-      userId: currentUserAuth.uid,
-      user: loggedInUserForPost, 
-      username: loggedInUserForPost.handle.replace("@", ""), 
+      uid: currentUserAuth.uid, // Required by security rules
+      userId: currentUserAuth.uid, // For consistency with HomePage and MyPostsPage
+      user: loggedInUserForPost,
+      username: loggedInUserDetails.username || "anonymous",
       content: data.postContent,
-      image: finalImageUrl, 
-      imageAiHint: finalImageAiHint, // Will be null if no image
+      image: finalImageUrl,
+      imageAiHint: finalImageAiHint,
       likes: isEditMode && postToEdit ? postToEdit.likes : 0,
       likedByCurrentUser: isEditMode && postToEdit ? postToEdit.likedByCurrentUser : false,
       comments: isEditMode && postToEdit ? postToEdit.comments : 0,
       commentTexts: isEditMode && postToEdit ? postToEdit.commentTexts || [] : [],
       shares: isEditMode && postToEdit ? postToEdit.shares : 0,
     };
-    
+
     console.log("CreatePostPage: Attempting to save to Firestore. Is Edit Mode:", isEditMode);
     console.log("CreatePostPage: Data for Firestore:", JSON.stringify(postDataForFirestore, null, 2));
 
@@ -236,22 +231,17 @@ export default function CreatePostPage() {
         const postDocRef = doc(firestore, "posts", editPostId);
         const dataToUpdate: Partial<Post> = {
           ...postDataForFirestore,
-          updatedAt: serverTimestamp(), 
-          createdAt: postToEdit.createdAt, 
+          updatedAt: serverTimestamp(),
+          createdAt: postToEdit.createdAt,
         };
-        // Fields that should not be updated
-        delete (dataToUpdate as any).userId; 
-        delete (dataToUpdate as any).username; 
-        delete (dataToUpdate as any).user; 
-        
         await updateDoc(postDocRef, dataToUpdate);
         console.log("CreatePostPage: Firestore post UPDATE successful for ID:", editPostId);
         toast({ title: "Post Updated!", description: "Your changes have been saved to Firestore." });
       } else {
         const docRef = await addDoc(collection(firestore, "posts"), {
           ...postDataForFirestore,
-          createdAt: serverTimestamp(), 
-          updatedAt: serverTimestamp(), 
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
         });
         console.log("CreatePostPage: Firestore post ADD successful. New Post ID:", docRef.id);
         toast({ title: "Post Created!", description: "Your thoughts have been shared on Firestore." });
@@ -261,8 +251,7 @@ export default function CreatePostPage() {
       setSelectedFile(null);
       setPreviewUrl(null);
       if (fileInputRef.current) fileInputRef.current.value = "";
-      router.push(isEditMode ? "/my-posts" : "/community-wall");
-
+      router.push(redirectTo);
     } catch (error: any) {
       console.error("CreatePostPage: Error saving post to Firestore:", error);
       let firestoreErrorMessage = `Could not save post: ${error.message}`;
@@ -277,6 +266,30 @@ export default function CreatePostPage() {
     }
   };
 
+  if (isLoadingAuth) {
+    return (
+      <div className="container mx-auto max-w-xl text-center py-10">
+        <p>Authenticating...</p>
+      </div>
+    );
+  }
+
+  if (!currentUserAuth) {
+    return (
+      <div className="container mx-auto max-w-xl text-center py-10">
+        <Card className="shadow-lg rounded-xl p-6">
+          <CardHeader>
+            <CardTitle>Please Log In</CardTitle>
+            <CardDescription>You need to be logged in to create a post.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button onClick={() => router.push("/login")}>Go to Login</Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div className="container mx-auto max-w-xl">
       <Card className="shadow-xl rounded-xl">
@@ -288,7 +301,7 @@ export default function CreatePostPage() {
                 {isEditMode ? "Make changes to your post below." : "Post updates, ask questions, or share experiences. Images are uploaded to Firebase Storage."}
               </CardDescription>
             </div>
-             {isEditMode && (
+            {isEditMode && (
               <Button variant="outline" size="sm" onClick={() => router.push('/my-posts')}>
                 <ArrowLeft className="mr-2 h-4 w-4" /> Cancel Edit
               </Button>
@@ -309,7 +322,7 @@ export default function CreatePostPage() {
                 <p className="text-sm text-destructive mt-1">{form.formState.errors.postContent.message}</p>
               )}
             </div>
-            
+
             <div>
               <Label htmlFor="mediaFile">Add Image (Optional, max {MAX_FILE_SIZE_MB}MB)</Label>
               <div className="mt-2 flex flex-col items-center justify-center px-6 pt-5 pb-6 border-2 border-dashed rounded-md hover:border-primary transition-colors">
@@ -322,11 +335,11 @@ export default function CreatePostPage() {
                         className="relative cursor-pointer rounded-md font-medium text-primary hover:text-primary/80 focus-within:outline-none focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-primary"
                       >
                         <span>Upload an image</span>
-                        <Input 
-                          id="mediaFile-upload" 
-                          type="file" 
+                        <Input
+                          id="mediaFile-upload"
+                          type="file"
                           className="sr-only"
-                          accept="image/*" 
+                          accept="image/*"
                           onChange={handleFileChange}
                           ref={fileInputRef}
                         />
@@ -339,12 +352,12 @@ export default function CreatePostPage() {
                 {previewUrl && (
                   <div className="mt-2 w-full flex justify-center">
                     <div className="relative inline-block">
-                        <img 
-                            src={previewUrl} 
-                            alt="Preview" 
-                            className="max-h-60 rounded-md object-contain" 
-                            data-ai-hint={selectedFile ? "image preview" : (postToEdit?.imageAiHint || "image preview")} 
-                        />
+                      <img
+                        src={previewUrl}
+                        alt="Preview"
+                        className="max-h-60 rounded-md object-contain"
+                        data-ai-hint={selectedFile ? "image preview" : (postToEdit?.imageAiHint || "image preview")}
+                      />
                       <Button
                         type="button"
                         variant="ghost"
@@ -359,14 +372,13 @@ export default function CreatePostPage() {
                   </div>
                 )}
               </div>
-               <p className="text-xs text-muted-foreground mt-2 text-center">
+              <p className="text-xs text-muted-foreground mt-2 text-center">
                 Images will be uploaded to Firebase Cloud Storage in your project '{process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || 'Not Set'}'.
               </p>
             </div>
-            
           </CardContent>
           <CardFooter>
-            <Button type="submit" className="w-full" disabled={isLoading}>
+            <Button type="submit" className="w-full" disabled={isLoading || isLoadingAuth}>
               {isLoading ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -385,4 +397,3 @@ export default function CreatePostPage() {
     </div>
   );
 }
-    

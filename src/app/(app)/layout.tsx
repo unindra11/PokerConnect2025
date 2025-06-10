@@ -1,5 +1,4 @@
-
-"use client"; 
+'use client';
 
 import type { ReactNode } from 'react';
 import { useState, useEffect, useRef } from "react";
@@ -20,132 +19,65 @@ import { Button } from "@/components/ui/button";
 import { Settings, LogOut, UploadCloud, Loader2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useToast } from "@/hooks/use-toast"; 
-import { app, auth, storage } from "@/lib/firebase"; // Import app for specific DB instance
+import { useToast } from "@/hooks/use-toast";
+import { storage } from "@/lib/firebase";
 import { ref, uploadBytesResumable, getDownloadURL } from "firebase/storage";
-import { onAuthStateChanged, signOut as firebaseSignOut, type User as FirebaseUser } from "firebase/auth";
-import { getFirestore, doc, getDoc, updateDoc } from "firebase/firestore"; // Import getFirestore
-import type { MockUserPin } from "@/app/(app)/map/page";
-
-interface LoggedInUser {
-  uid: string;
-  email?: string | null;
-  displayName?: string | null;
-  username?: string;
-  fullName?: string;
-  bio?: string;
-  avatar?: string;
-  coverImage?: string;
-  location?: string;
-  locationCoords?: { lat: number; lng: number } | null;
-}
+import { signOut as firebaseSignOut } from "firebase/auth";
+import { getFirestore, doc, updateDoc, collection, getDocs } from "firebase/firestore";
+import { auth, app } from "@/lib/firebase";
+import { useUser } from "@/context/UserContext";
 
 const MAX_AVATAR_SIZE_MB = 2;
 const MAX_AVATAR_SIZE_BYTES = MAX_AVATAR_SIZE_MB * 1024 * 1024;
 
-export default function AppLayout({ children }: { children: ReactNode }) {
-  const [currentUserAuth, setCurrentUserAuth] = useState<FirebaseUser | null>(null);
-  const [loggedInUserDetails, setLoggedInUserDetails] = useState<LoggedInUser | null>(null);
-  const [isLoadingAuth, setIsLoadingAuth] = useState(true);
+interface MockUserPin {
+  id: string;
+  username: string;
+  avatar: string;
+  lat: number;
+  lng: number;
+}
 
+export default function AppLayout({ children }: { children: ReactNode }) {
+  const { currentUserAuth, loggedInUserDetails, isLoadingAuth, setLoggedInUserDetails } = useUser();
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
+  const [mapUsers, setMapUsers] = useState<MockUserPin[]>([]);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      setIsLoadingAuth(true);
-      if (user) {
-        console.log("AppLayout: Firebase Auth state changed: User is logged in with UID:", user.uid);
-        setCurrentUserAuth(user);
-        
-        const storedUserString = localStorage.getItem("loggedInUser");
-        if (storedUserString) {
-            try {
-                const storedUser: LoggedInUser = JSON.parse(storedUserString);
-                if (storedUser.uid === user.uid) {
-                    setLoggedInUserDetails(storedUser);
-                    setIsLoadingAuth(false);
-                    console.log("AppLayout: Loaded user details from localStorage:", storedUser);
-                    return; 
-                } else {
-                    localStorage.removeItem("loggedInUser"); // Stored user doesn't match current auth user
-                }
-            } catch (e) {
-                console.error("AppLayout: Error parsing loggedInUser from localStorage", e);
-                localStorage.removeItem("loggedInUser");
-            }
-        }
-        
-        // Explicitly get Firestore instance for "poker" database
-        const db = getFirestore(app, "poker");
-        console.log("AppLayout: Firestore instance for 'poker' DB:", db._databaseId.projectId, db._databaseId.database);
-        const userDocRef = doc(db, "users", user.uid);
-        console.log("AppLayout: Attempting to fetch from Firestore path:", userDocRef.path);
-
-        try {
-          const userDocSnap = await getDoc(userDocRef);
-          if (userDocSnap.exists()) {
-            const profileData = userDocSnap.data();
-            const details: LoggedInUser = {
-              uid: user.uid,
-              email: user.email,
-              displayName: profileData.fullName || profileData.username || user.email || "User",
-              username: profileData.username,
-              fullName: profileData.fullName,
-              bio: profileData.bio,
-              avatar: profileData.avatar,
-              coverImage: profileData.coverImage,
-              location: profileData.location,
-              locationCoords: profileData.locationCoords,
-            };
-            setLoggedInUserDetails(details);
-            localStorage.setItem("loggedInUser", JSON.stringify(details));
-            console.log("AppLayout: Fetched and saved user details from Firestore (UID:", user.uid,") :", details);
-          } else {
-            console.warn("AppLayout: No profile document in Firestore for UID:", user.uid, ". User might need to complete profile or this is a new signup without Firestore doc yet.");
-             const basicDetails: LoggedInUser = {
-              uid: user.uid,
-              email: user.email,
-              displayName: user.email || "User",
-              username: user.email?.split('@')[0] || "user",
-              fullName: user.email || "User",
-              avatar: `https://placehold.co/100x100.png?text=${(user.email || "U").substring(0,1).toUpperCase()}`,
-            };
-            setLoggedInUserDetails(basicDetails);
-            localStorage.setItem("loggedInUser", JSON.stringify(basicDetails));
-             toast({ title: "Profile Note", description: "Your full profile may not be set up in the database yet.", variant: "default" });
-          }
-        } catch (error: any) {
-          console.error("AppLayout: Error fetching user document from Firestore:", error);
-          toast({ title: "Profile Load Error", description: `Could not load your full profile details. Error: ${error.message}`, variant: "destructive", duration: 7000});
-          const basicDetails: LoggedInUser = {
-            uid: user.uid,
-            email: user.email,
-            displayName: user.email || "User",
-            username: user.email?.split('@')[0] || "user",
-            fullName: user.email || "User",
-            avatar: `https://placehold.co/100x100.png?text=${(user.email || "U").substring(0,1).toUpperCase()}`,
+    console.log("AppLayout: Current user state - currentUserAuth:", currentUserAuth?.uid, "loggedInUserDetails:", loggedInUserDetails);
+    // Fetch map users from Firestore
+    const fetchMapUsers = async () => {
+      const db = getFirestore(app, "poker");
+      const usersRef = collection(db, "users");
+      try {
+        const usersSnapshot = await getDocs(usersRef);
+        const usersData = usersSnapshot.docs.map(doc => {
+          const data = doc.data();
+          return {
+            id: doc.id,
+            username: data.username || "unknown",
+            avatar: data.avatar || `https://placehold.co/100x100.png?text=${(data.username || "U").substring(0,1)}`,
+            lat: data.locationCoords?.lat || 0,
+            lng: data.locationCoords?.lng || 0,
           };
-          setLoggedInUserDetails(basicDetails);
-        }
-      } else {
-        console.log("AppLayout: Firebase Auth state changed: User is logged out.");
-        setCurrentUserAuth(null);
-        setLoggedInUserDetails(null);
-        localStorage.removeItem("loggedInUser");
-        router.push("/login"); 
+        }).filter(user => user.lat !== 0 && user.lng !== 0); // Filter out users with invalid coordinates
+        setMapUsers(usersData);
+        console.log("AppLayout: Fetched map users from Firestore:", usersData);
+      } catch (error) {
+        console.error("AppLayout: Error fetching map users from Firestore:", error);
+        toast({ title: "Error", description: "Failed to load map users", variant: "destructive" });
       }
-      setIsLoadingAuth(false);
-    });
-    return () => unsubscribe();
-  }, [router, toast]);
+    };
 
+    fetchMapUsers();
+  }, []);
 
   const handleAvatarChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    if (!file || !currentUserAuth?.uid || !loggedInUserDetails) { // Use currentUserAuth.uid for consistency
-      toast({ title: "Error", description: "User not fully loaded. Cannot upload avatar.", variant: "destructive"});
+    if (!file || !currentUserAuth?.uid || !loggedInUserDetails) {
+      toast({ title: "Error", description: "User not fully loaded. Cannot upload avatar.", variant: "destructive" });
       return;
     }
 
@@ -161,14 +93,13 @@ export default function AppLayout({ children }: { children: ReactNode }) {
     }
 
     const originalAvatar = loggedInUserDetails.avatar || `https://placehold.co/100x100.png?text=${(loggedInUserDetails.displayName || "P").substring(0,1).toUpperCase()}`;
-    
-    // Temporary local preview
+
     const reader = new FileReader();
     reader.onloadend = () => {
-        setLoggedInUserDetails(prev => prev ? {...prev, avatar: reader.result as string} : null);
+      setLoggedInUserDetails(prev => prev ? { ...prev, avatar: reader.result as string } : null);
     };
     reader.readAsDataURL(file);
-    
+
     const storageRefPath = `avatars/${currentUserAuth.uid}/avatar_${Date.now()}_${file.name}`;
     const storageRefVal = ref(storage, storageRefPath);
     const uploadTask = uploadBytesResumable(storageRefVal, file);
@@ -178,7 +109,6 @@ export default function AppLayout({ children }: { children: ReactNode }) {
       await uploadTask;
       const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
 
-      // Explicitly get Firestore instance for "poker" database
       const db = getFirestore(app, "poker");
       const userDocRef = doc(db, "users", currentUserAuth.uid);
       await updateDoc(userDocRef, { avatar: downloadURL });
@@ -186,36 +116,25 @@ export default function AppLayout({ children }: { children: ReactNode }) {
       setLoggedInUserDetails(prev => {
         if (!prev) return null;
         const updatedDetails = { ...prev, avatar: downloadURL };
-        localStorage.setItem("loggedInUser", JSON.stringify(updatedDetails));
-        
-        // Update avatar in pokerConnectMapUsers if user exists there
-        const mapUsersString = localStorage.getItem("pokerConnectMapUsers");
-        if (mapUsersString) {
-            try {
-                let mapUsers: MockUserPin[] = JSON.parse(mapUsersString);
-                mapUsers = mapUsers.map(mu => mu.id === currentUserAuth.uid ? {...mu, avatar: downloadURL} : mu);
-                localStorage.setItem("pokerConnectMapUsers", JSON.stringify(mapUsers));
-            } catch (e) { console.error("Error updating map users avatar in localStorage", e); }
-        }
         return updatedDetails;
       });
-      
+
+      setMapUsers(prev => prev.map(mu => mu.id === currentUserAuth.uid ? { ...mu, avatar: downloadURL } : mu));
       toast({ title: "Avatar Updated!", description: "New avatar saved." });
     } catch (error: any) {
-      console.error("Error uploading/saving avatar:", error);
+      console.error("AppLayout: Error uploading/saving avatar:", error);
       toast({ title: "Upload Failed", description: `Could not save avatar: ${error.message}. Reverting.`, variant: "destructive" });
-      setLoggedInUserDetails(prev => prev ? {...prev, avatar: originalAvatar} : null);
+      setLoggedInUserDetails(prev => prev ? { ...prev, avatar: originalAvatar } : null);
     } finally {
-        if (fileInputRef.current) fileInputRef.current.value = "";
+      if (fileInputRef.current) fileInputRef.current.value = "";
     }
   };
 
   const handleLogout = async () => {
     try {
       await firebaseSignOut(auth);
-      localStorage.removeItem("loggedInUser");
       console.log("AppLayout: User signed out successfully.");
-      // onAuthStateChanged will handle redirect to /login
+      router.push("/login");
     } catch (error) {
       console.error("AppLayout: Error signing out:", error);
       toast({ title: "Logout Error", description: "Could not log out. Please try again.", variant: "destructive" });
@@ -224,47 +143,26 @@ export default function AppLayout({ children }: { children: ReactNode }) {
 
   if (isLoadingAuth) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
+      <div className="flex items-center justify-center min-h-screen bg-background text-foreground">
         <Loader2 className="h-12 w-12 animate-spin text-primary" />
         <p className="ml-4 text-lg">Loading user session...</p>
       </div>
     );
   }
-  
-  if (!loggedInUserDetails && !currentUserAuth) { 
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <Loader2 className="h-12 w-12 animate-spin text-primary" />
-        <p className="ml-4 text-lg">Initializing...</p>
-      </div>
-    );
+
+  if (!loggedInUserDetails) {
+    console.log("AppLayout: No loggedInUserDetails, redirecting to /login");
+    router.push("/login");
+    return null;
   }
 
-  if (!loggedInUserDetails && currentUserAuth) {
-     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <Loader2 className="h-12 w-12 animate-spin text-primary" />
-        <p className="ml-4 text-lg">Loading profile...</p>
-      </div>
-    );
-  }
-  
-  if (!loggedInUserDetails && !isLoadingAuth) {
-    return (
-         <div className="flex items-center justify-center min-h-screen">
-            <p className="text-lg">Session expired or not logged in. Redirecting...</p>
-        </div>
-    );
-  }
-
-  const userNameToDisplay = loggedInUserDetails!.displayName || loggedInUserDetails!.email || "User";
-  const userEmailToDisplay = loggedInUserDetails!.email || "No email";
-  const avatarUrlToDisplay = loggedInUserDetails!.avatar || `https://placehold.co/100x100.png?text=${(userNameToDisplay).substring(0,1)?.toUpperCase() || 'P'}`;
-
+  const userNameToDisplay = loggedInUserDetails.displayName || loggedInUserDetails.email || "User";
+  const userEmailToDisplay = loggedInUserDetails.email || "No email";
+  const avatarUrlToDisplay = loggedInUserDetails.avatar || `https://placehold.co/100x100.png?text=${(userNameToDisplay).substring(0,1)?.toUpperCase() || 'P'}`;
 
   return (
     <SidebarProvider defaultOpen collapsible="icon" variant="sidebar">
-      <Sidebar side="left" className="border-r">
+      <Sidebar side="left" className="border-r bg-background">
         <SidebarHeader className="p-4 border-b">
           <div className="flex items-center justify-between">
             <Logo className="group-data-[collapsible=icon]:hidden delay-300" />
@@ -279,7 +177,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
             <label htmlFor="avatar-upload-sidebar" className="cursor-pointer rounded-full group relative" title="Change avatar">
               <Avatar className="h-9 w-9">
                 <AvatarImage src={avatarUrlToDisplay} alt="User Avatar" data-ai-hint="user avatar" key={avatarUrlToDisplay} />
-                <AvatarFallback>{userNameToDisplay.substring(0, 1)?.toUpperCase() || 'P'}</AvatarFallback>
+                <AvatarFallback>{userNameToDisplay.substring(0,1)?.toUpperCase() || 'P'}</AvatarFallback>
               </Avatar>
               <div className="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity rounded-full">
                 <UploadCloud className="h-5 w-5 text-white" />
@@ -319,7 +217,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           </div>
         </SidebarFooter>
       </Sidebar>
-      <SidebarInset className="flex flex-col">
+      <SidebarInset className="flex flex-col min-h-screen bg-background">
         <header className="sticky top-0 z-10 flex items-center justify-between h-14 px-4 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 md:hidden">
           <Logo size={20} />
           <SidebarTrigger />

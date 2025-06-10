@@ -1,9 +1,9 @@
-"use client";
+'use client';
 
-import type { ReactNode } from 'react';
+import type { ReactNode } from "react";
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
-import Link from "next/link"; // Use next/link
+import Link from "next/link";
 import { PlusCircle, Lightbulb, Loader2, RefreshCcw } from "lucide-react";
 import { PostCard } from "@/components/post-card";
 import type { Post, Comment as PostComment } from "@/types/post";
@@ -11,8 +11,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { generatePokerTips, type GeneratePokerTipsInput, type GeneratePokerTipsOutput } from "@/ai/flows/generate-poker-tips";
 import { useToast } from "@/hooks/use-toast";
 import { getFirestore, collection, query, where, orderBy, getDocs, Timestamp } from "firebase/firestore";
-import { app } from "@/lib/firebase"; 
-import { getAuth, type User as FirebaseUser } from "firebase/auth";
+import { app } from "@/lib/firebase";
+import { useUser } from "@/context/UserContext";
 import { handleLikePost } from "@/utils/handleLikePost";
 import { handleCommentOnPost } from "@/utils/handleCommentOnPost";
 
@@ -22,21 +22,15 @@ interface UserDetails {
 }
 
 export default function HomePage() {
+  const { currentUserAuth, loggedInUserDetails, isLoadingAuth, isLoadingUserDetails } = useUser();
   const [aiTips, setAiTips] = useState<string[]>([]);
   const [isLoadingTips, setIsLoadingTips] = useState(true);
   const [tipsError, setTipsError] = useState<string | null>(null);
-  const { toast } = useToast();
   const [feedPosts, setFeedPosts] = useState<Post[]>([]);
   const [isLoadingPosts, setIsLoadingPosts] = useState(true);
-  const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
-  const auth = getAuth(app);
+  const { toast } = useToast();
 
-  useEffect(() => {
-    const unsubscribe = auth.onAuthStateChanged(user => {
-      setCurrentUser(user);
-    });
-    return () => unsubscribe();
-  }, [auth]);
+  console.log('HomePage: Component mounted');
 
   const fetchPokerTips = async () => {
     setIsLoadingTips(true);
@@ -49,8 +43,9 @@ export default function HomePage() {
       };
       const result: GeneratePokerTipsOutput = await generatePokerTips(input);
       setAiTips(result.tips);
+      console.log('HomePage: Successfully fetched poker tips:', result.tips);
     } catch (error) {
-      console.error("Error generating poker tips:", error);
+      console.error("HomePage: Error generating poker tips:", error);
       setTipsError("Failed to load poker tips. Please try refreshing.");
       toast({
         title: "Error Loading Tips",
@@ -63,21 +58,28 @@ export default function HomePage() {
   };
 
   const fetchFeedPosts = async () => {
+    if (!currentUserAuth) {
+      console.log('HomePage: Cannot fetch posts, no authenticated user');
+      setIsLoadingPosts(false);
+      return;
+    }
+
     setIsLoadingPosts(true);
     const db = getFirestore(app, "poker");
     try {
       const postsCollectionRef = collection(db, "posts");
       const q = query(postsCollectionRef, orderBy("createdAt", "desc"));
       const querySnapshot = await getDocs(q);
-      
+      console.log('HomePage: Fetched posts from Firestore, count:', querySnapshot.size);
+
       const postsDataPromises: Promise<Post>[] = querySnapshot.docs.map(async (docSnap) => {
         const data = docSnap.data();
         const postUser = data.user || { name: "Unknown User", avatar: `https://placehold.co/100x100.png?text=U`, handle: "@unknown" };
-        
+
         let likedByCurrentUser = false;
-        if (currentUser) {
+        if (currentUserAuth) {
           const likesCollectionRef = collection(db, "likes");
-          const likeQuery = query(likesCollectionRef, where("postId", "==", docSnap.id), where("userId", "==", currentUser.uid));
+          const likeQuery = query(likesCollectionRef, where("postId", "==", docSnap.id), where("userId", "==", currentUserAuth.uid));
           const likeSnapshot = await getDocs(likeQuery);
           likedByCurrentUser = !likeSnapshot.empty;
         }
@@ -87,7 +89,7 @@ export default function HomePage() {
         const commentsSnapshot = await getDocs(commentsQuery);
         const fetchedComments: PostComment[] = commentsSnapshot.docs.map(commentDoc => ({
           id: commentDoc.id,
-          ...(commentDoc.data() as Omit<PostComment, 'id'>)
+          ...(commentDoc.data() as Omit<PostComment, 'id'>),
         }));
 
         return {
@@ -95,31 +97,38 @@ export default function HomePage() {
           userId: data.userId,
           user: {
             name: postUser.name || "Unknown User",
-            avatar: postUser.avatar || `https://placehold.co/100x100.png?text=${(postUser.name || "U").substring(0,1)}`,
+            avatar: postUser.avatar || `https://placehold.co/100x100.png?text=${(postUser.name || "U").substring(0, 1)}`,
             handle: postUser.handle || `@${postUser.username || 'unknown'}`,
           },
           content: data.content,
           image: data.image,
           imageAiHint: data.imageAiHint,
           likes: data.likes || 0,
-          likedByCurrentUser: likedByCurrentUser, 
+          likedByCurrentUser: likedByCurrentUser,
           comments: data.comments || 0,
           fetchedComments: fetchedComments,
           shares: data.shares || 0,
-          createdAt: data.createdAt, 
-          timestamp: data.createdAt instanceof Timestamp ? data.createdAt.toDate().toLocaleString() : (data.createdAt?.seconds ? new Date(data.createdAt.seconds * 1000).toLocaleString() : new Date().toLocaleString()),
+          createdAt: data.createdAt,
+          timestamp: data.createdAt instanceof Timestamp
+            ? data.createdAt.toDate().toLocaleString()
+            : (data.createdAt?.seconds
+              ? new Date(data.createdAt.seconds * 1000).toLocaleString()
+              : new Date().toLocaleString()),
         };
       });
+
       const postsData = await Promise.all(postsDataPromises);
       setFeedPosts(postsData);
-      if (postsData.length === 0 && !isLoadingPosts) { 
+      console.log('HomePage: Processed and set feed posts:', postsData.length);
+
+      if (postsData.length === 0) {
         toast({
           title: "No Posts Yet",
           description: "The home feed is quiet. Create a post!",
         });
       }
     } catch (error: any) {
-      console.error("Error fetching posts from Firestore for Home Feed:", error);
+      console.error("HomePage: Error fetching posts from Firestore for Home Feed:", error);
       let firestoreErrorMessage = "Could not retrieve posts from Firestore. Please ensure Firestore is set up and rules allow reads.";
       if (error.message && (error.message.includes("firestore") || error.message.includes("Firestore") || error.message.includes("RPC") || (typeof error.code === 'string' && error.code.startsWith("permission-denied")) || error.code === 'unavailable' || error.code === 'unimplemented' || error.code === 'internal')) {
         firestoreErrorMessage = `Failed to fetch posts. Ensure Firestore is correctly set up (DB 'poker' exists, API enabled, and security rules published for 'posts' collection). Details: ${error.message}`;
@@ -137,28 +146,95 @@ export default function HomePage() {
   };
 
   useEffect(() => {
+    console.log('HomePage: Fetching poker tips on mount');
     fetchPokerTips();
-  }, []); 
+  }, []);
 
   useEffect(() => {
-    if (currentUser !== undefined) { 
+    console.log('HomePage: useEffect for fetching posts triggered, currentUserAuth:', !!currentUserAuth);
+    if (currentUserAuth !== undefined) {
       fetchFeedPosts();
     }
-  }, [currentUser]); 
+  }, [currentUserAuth]);
 
   const onLikePost = async (postId: string) => {
-    const result = await handleLikePost({ postId, currentUser, posts: feedPosts });
-    if (result.updatedPosts) {
-      setFeedPosts(result.updatedPosts);
+    if (!currentUserAuth) {
+      console.log('HomePage: Cannot like post, no authenticated user');
+      toast({
+        title: "Authentication Required",
+        description: "Please log in to like posts.",
+        variant: "destructive",
+      });
+      return;
+    }
+    try {
+      const result = await handleLikePost({ postId, currentUser: currentUserAuth, posts: feedPosts, loggedInUserDetails });
+      if (result.updatedPosts) {
+        setFeedPosts(result.updatedPosts);
+      } else {
+        toast({
+          title: "Error",
+          description: "Could not like the post. Please try again.",
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      console.error("HomePage: Error liking post:", error);
+      toast({
+        title: "Error",
+        description: "Could not like the post. Please try again.",
+        variant: "destructive",
+      });
     }
   };
 
   const onCommentPost = async (postId: string, commentText: string) => {
-    const result = await handleCommentOnPost({ postId, commentText, currentUser, posts: feedPosts });
-    if (result.updatedPosts) {
-      setFeedPosts(result.updatedPosts);
+    if (!currentUserAuth) {
+      console.log('HomePage: Cannot comment on post, no authenticated user');
+      toast({
+        title: "Authentication Required",
+        description: "Please log in to comment on posts.",
+        variant: "destructive",
+      });
+      return;
+    }
+    try {
+      const result = await handleCommentOnPost({ postId, commentText, currentUser: currentUserAuth, posts: feedPosts, loggedInUserDetails });
+      if (result.updatedPosts) {
+        setFeedPosts(result.updatedPosts);
+      } else {
+        toast({
+          title: "Error",
+          description: "Could not add your comment. Please try again.",
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      console.error("HomePage: Error commenting on post:", error);
+      toast({
+        title: "Error",
+        description: "Could not add your comment. Please try again.",
+        variant: "destructive",
+      });
     }
   };
+
+  console.log('HomePage: Rendering component, isLoadingAuth:', isLoadingAuth, 'isLoadingUserDetails:', isLoadingUserDetails);
+
+  if (isLoadingAuth || isLoadingUserDetails) {
+    console.log('HomePage: Rendering loading state');
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <div className="text-center">
+          <Loader2 className="h-12 w-12 animate-spin text-primary mx-auto" />
+          <p className="mt-4">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Rely on UserContext for redirect, no need to check currentUserAuth here
+  console.log('HomePage: Rendering main content for user:', loggedInUserDetails?.username);
 
   return (
     <div className="container mx-auto max-w-2xl">
@@ -211,7 +287,7 @@ export default function HomePage() {
           </Button>
         </Link>
       </div>
-        
+
       {isLoadingPosts && (
         <div className="text-center py-10">
           <Loader2 className="h-12 w-12 animate-spin text-primary mx-auto" />
@@ -236,10 +312,10 @@ export default function HomePage() {
           </Card>
         )}
         {feedPosts.map((post, index) => (
-          <PostCard 
-            key={post.id} 
-            post={post} 
-            currentUserId={currentUser?.uid}
+          <PostCard
+            key={post.id}
+            post={post}
+            currentUserId={currentUserAuth?.uid}
             onLikePost={onLikePost}
             onCommentPost={onCommentPost}
             isLCPItem={index === 0}

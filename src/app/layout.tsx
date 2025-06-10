@@ -1,24 +1,18 @@
-import type { Metadata } from 'next';
-// Using Inter as a common sans-serif, Geist is also good
-import './globals.css';
-import { Toaster } from "@/components/ui/toaster";
-import { GeistSans } from 'geist/font/sans';
+import { UserProvider } from "@/context/UserContext";
+import "@/app/globals.css"; // Import global styles
 
-export const metadata: Metadata = {
-  title: 'PokerConnect',
-  description: 'Connect with poker players worldwide.',
+export const metadata = {
+  title: "PokerConnect",
+  description: "Connect with poker players, share tips, and join the community.",
 };
 
-export default function RootLayout({
-  children,
-}: Readonly<{
-  children: React.ReactNode;
-}>) {
+export default function RootLayout({ children }) {
   return (
-    <html lang="en" className={`${GeistSans.variable} dark`}>
-      <body className="antialiased">
-        {children}
-        <Toaster />
+    <html lang="en">
+      <body className="min-h-screen bg-background text-foreground">
+        <UserProvider>
+          {children}
+        </UserProvider>
       </body>
     </html>
   );

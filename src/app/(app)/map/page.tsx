@@ -1,9 +1,9 @@
-
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
 import { GoogleMap, useJsApiLoader, Marker, InfoWindow } from "@react-google-maps/api";
 import Link from "next/link";
+import { Inter } from '@next/font/google';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Loader2 } from "lucide-react";
@@ -11,15 +11,21 @@ import { getFirestore, collection, getDocs, query, where } from "firebase/firest
 import { app, auth } from "@/lib/firebase";
 import type { User as FirebaseUser } from "firebase/auth";
 
+// Configure Inter font
+const inter = Inter({
+  subsets: ['latin'],
+  variable: '--font-inter',
+});
+
 const containerStyle = {
   width: "100%",
   height: "600px",
 };
 
-// Centered broadly on India
+// Centered on Chandigarh (near clerk123 and roma123)
 const initialCenter = {
-  lat: 22.9734,
-  lng: 78.6569,
+  lat: 30.73,
+  lng: 76.779,
 };
 
 export interface MockUserPin {
@@ -35,14 +41,6 @@ export interface MockUserPin {
 
 const googleMapsApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
 const libraries: ("places")[] = ['places'];
-
-// COMMON ERROR: RefererNotAllowedMapError
-// To fix this:
-// 1. Go to Google Cloud Console > APIs & Services > Credentials.
-// 2. Select your API key.
-// 3. Under "Application restrictions", choose "HTTP referrers (web sites)".
-// 4. Add the current development URL (e.g., https://YOUR_DEV_DOMAIN.cloudworkstations.dev/* or http://localhost:PORT/*)
-// 5. Save changes. It might take a few minutes to propagate.
 
 export default function MapPage() {
   const [selectedUser, setSelectedUser] = useState<MockUserPin | null>(null);
@@ -68,27 +66,21 @@ export default function MapPage() {
       if (!currentUser) {
         setIsLoadingUsers(false);
         setMapMarkersData([]);
-        console.log("MapPage: No current user, not fetching Firestore users for map.");
         return;
       }
       setIsLoadingUsers(true);
-      console.log("MapPage: Current user detected, attempting to fetch users from Firestore.");
       try {
         const db = getFirestore(app, "poker");
         const usersCollectionRef = collection(db, "users");
         const q = query(usersCollectionRef);
-        console.log("MapPage: Querying 'users' collection in 'poker' database.");
         const querySnapshot = await getDocs(q);
         
-        console.log(`MapPage: Fetched ${querySnapshot.docs.length} total user documents from Firestore.`);
         const usersForMap: MockUserPin[] = [];
         querySnapshot.forEach((docSnap) => {
           const userData = docSnap.data();
           const userId = docSnap.id;
-          console.log(`MapPage: Processing user ID: ${userId}, Data:`, JSON.stringify(userData));
           
           if (userData.locationCoords && typeof userData.locationCoords.lat === 'number' && typeof userData.locationCoords.lng === 'number') {
-            console.log(`MapPage: User ID: ${userId} has valid locationCoords. Adding to map. Coords: lat=${userData.locationCoords.lat}, lng=${userData.locationCoords.lng}`);
             usersForMap.push({
               id: docSnap.id,
               username: userData.username || "unknown_user",
@@ -102,43 +94,27 @@ export default function MapPage() {
               coverImage: userData.coverImage,
               aiHint: "map user profile",
             });
-          } else {
-            console.warn(`MapPage: User ID: ${userId} SKIPPED. Missing or invalid locationCoords. locationCoords data:`, userData.locationCoords);
           }
         });
         setMapMarkersData(usersForMap);
-        console.log(`MapPage: Final usersForMap to be rendered on map (${usersForMap.length} users):`, usersForMap.map(u => ({id: u.id, name: u.name, lat: u.position.lat, lng: u.position.lng })));
       } catch (error) {
-        console.error("MapPage: Error fetching users from Firestore:", error);
+        console.error("Error fetching users from Firestore:", error);
         setMapMarkersData([]);
       } finally {
         setIsLoadingUsers(false);
       }
     };
 
-    if (isLoaded && !loadError && googleMapsApiKey && currentUser !== undefined) { // Check currentUser is not undefined to avoid race condition
+    if (isLoaded && !loadError && googleMapsApiKey && currentUser !== undefined) {
         fetchUsersFromFirestore();
     } else if (!googleMapsApiKey || loadError) {
         setIsLoadingUsers(false);
     }
   }, [isLoaded, loadError, googleMapsApiKey, currentUser]);
 
-
-  useEffect(() => {
-    console.log(
-      `%cMapPage Update: isLoaded=${isLoaded}, selectedUser=${selectedUser?.id || 'null'}, markerCount=${mapMarkersData.length}, isLoadingUsers=${isLoadingUsers}`,
-      'color: blue; font-weight: bold;'
-    );
-    if (loadError) {
-      console.error("%cMapPage: Error loading Google Maps script via useJsApiLoader:", 'color: red; font-weight: bold;', loadError);
-    }
-  }, [isLoaded, selectedUser, mapMarkersData, loadError, isLoadingUsers]);
-
-
   if (!googleMapsApiKey) {
-    console.error("MapPage: NEXT_PUBLIC_GOOGLE_MAPS_API_KEY is not set.");
     return (
-      <div className="container mx-auto">
+      <div className={`${inter.className} container mx-auto`}>
         <h1 className="text-3xl font-bold mb-6">Player Map</h1>
         <Card className="shadow-lg rounded-xl">
           <CardHeader>
@@ -149,9 +125,6 @@ export default function MapPage() {
               The Google Maps API key is not configured. Please set the{" "}
               <code>NEXT_PUBLIC_GOOGLE_MAPS_API_KEY</code> environment variable.
             </p>
-            <p className="mt-2 text-muted-foreground">
-              This map feature cannot be displayed.
-            </p>
           </CardContent>
         </Card>
       </div>
@@ -160,7 +133,7 @@ export default function MapPage() {
 
   if (loadError) {
     return (
-      <div className="container mx-auto">
+      <div className={`${inter.className} container mx-auto`}>
         <h1 className="text-3xl font-bold mb-6">Player Map</h1>
         <Card className="shadow-lg rounded-xl">
           <CardHeader>
@@ -168,9 +141,8 @@ export default function MapPage() {
           </CardHeader>
           <CardContent>
             <p className="text-destructive">
-              Could not load the Google Maps script. Please check your API key, internet connection, and the browser console for more details.
+              Could not load the Google Maps script. Please check your API key.
             </p>
-            <p className="text-xs text-muted-foreground mt-2">{loadError.message}</p>
           </CardContent>
         </Card>
       </div>
@@ -178,52 +150,43 @@ export default function MapPage() {
   }
 
   return (
-    <div className="container mx-auto">
+    <div className={`${inter.className} container mx-auto`}>
       <h1 className="text-3xl font-bold mb-6">Player Map</h1>
       <Card className="shadow-lg rounded-xl overflow-hidden">
         <CardHeader>
-          <CardTitle>Interactive Player Map - India (Users from Firestore)</CardTitle>
+          <CardTitle>Interactive Player Map</CardTitle>
         </CardHeader>
         <CardContent>
           {!isLoaded || isLoadingUsers ? (
             <div className="flex items-center justify-center h-[600px]">
               <Loader2 className="h-16 w-16 animate-spin text-primary" />
-              <p className="ml-4 text-lg">{!isLoaded ? "Loading Map Script..." : "Loading Player Locations..."}</p>
+              <p className="ml-4 text-lg">
+                {!isLoaded ? "Loading Map Script..." : "Loading Player Locations..."}
+              </p>
             </div>
           ) : (
             <GoogleMap
               mapContainerStyle={containerStyle}
               center={initialCenter}
-              zoom={5} 
-              onLoad={(map) => console.log("%cGoogleMap: component mounted (onLoad event). Map instance:", 'color: purple;', map)}
-              onUnmount={() => console.log("%cGoogleMap: component unmounted (onUnmount event).", 'color: red;')}
+              zoom={14}
               options={{ zoomControl: true, mapId: "POKER_CONNECT_MAP_ID" }}
             >
-              {mapMarkersData.map((user) => {
-                console.log(`MapPage: Rendering Marker for ${user.username} at lat: ${user.position.lat}, lng: ${user.position.lng}`);
-                return (
-                  <Marker
-                    key={user.id}
-                    position={user.position}
-                    onClick={() => {
-                      console.log(`Marker clicked: ${user.username}`);
-                      setSelectedUser(user);
-                    }}
-                  />
-                );
-              })}
+              {mapMarkersData.map((user) => (
+                <Marker
+                  key={user.id}
+                  position={user.position}
+                  onClick={() => setSelectedUser(user)}
+                />
+              ))}
 
               {selectedUser && (
                 <InfoWindow
                   position={selectedUser.position}
-                  onCloseClick={() => {
-                    console.log("InfoWindow closed.");
-                    setSelectedUser(null);
-                  }}
+                  onCloseClick={() => setSelectedUser(null)}
                 >
                   <div className="p-2 flex items-center space-x-3">
                     <Avatar className="h-10 w-10">
-                      <AvatarImage src={selectedUser.avatar} alt={selectedUser.name} data-ai-hint={selectedUser.aiHint || "profile picture"} />
+                      <AvatarImage src={selectedUser.avatar} alt={selectedUser.name} />
                       <AvatarFallback>{selectedUser.name.substring(0,1).toUpperCase()}</AvatarFallback>
                     </Avatar>
                     <div>
@@ -239,10 +202,9 @@ export default function MapPage() {
           )}
           {!isLoadingUsers && (
             <p className="text-sm text-muted-foreground mt-4">
-                {mapMarkersData.length > 0
-                ? `This map shows approximate locations of ${mapMarkersData.length} PokerConnect user(s) who have shared their location (data from Firestore). Click on a marker to see more details.`
-                : "No users with location data found in Firestore to display on the map. Sign up and select a location to appear!"
-                }
+              {mapMarkersData.length > 0
+                ? `Showing ${mapMarkersData.length} user(s)`
+                : "No users with location data found"}
             </p>
           )}
         </CardContent>
@@ -250,4 +212,3 @@ export default function MapPage() {
     </div>
   );
 }
-

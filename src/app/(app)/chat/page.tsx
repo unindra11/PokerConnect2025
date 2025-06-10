@@ -1,171 +1,210 @@
+"use client";
 
-"use client"; // For potential future interactivity and useToast
-
-import { useState } from "react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Button } from "@/components/ui/button";
-import { MessageSquareText, Trash2, Eraser, MoreVertical } from "lucide-react";
-import { useToast } from "@/hooks/use-toast";
+import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { app, auth } from "@/lib/firebase";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+  getFirestore,
+  collection,
+  query,
+  where,
+  onSnapshot,
+  doc,
+  getDoc,
+} from "firebase/firestore";
+import type { User as FirebaseUser } from "firebase/auth";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Loader2, MessageSquare } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
+import Link from "next/link";
 
-
-interface MockChat {
+interface ChatSummary {
   id: string;
-  name: string;
-  avatar: string;
-  lastMessage: string;
-  timestamp: string;
-  unreadCount?: number;
+  otherParticipant: {
+    id: string;
+    username: string;
+    name: string;
+    avatar: string;
+  };
+  lastMessage: {
+    text: string;
+    senderId: string;
+    timestamp: any;
+  };
+  unreadCount: number;
 }
 
-const initialMockChats: MockChat[] = [
-  {
-    id: "chat1",
-    name: "Alice PokerFace",
-    avatar: "https://placehold.co/100x100.png?c=a1",
-    lastMessage: "Sure, let's play tomorrow!",
-    timestamp: "10:30 AM",
-    unreadCount: 2,
-  },
-  {
-    id: "chat2",
-    name: "Bob TheBluffer",
-    avatar: "https://placehold.co/100x100.png?c=b2",
-    lastMessage: "Did you see that hand? Crazy river.",
-    timestamp: "Yesterday",
-  },
-  {
-    id: "chat3",
-    name: "Charlie Chips",
-    avatar: "https://placehold.co/100x100.png?c=c3",
-    lastMessage: "Thanks for the tip on strategy!",
-    timestamp: "Mon",
-    unreadCount: 0,
-  },
-  {
-    id: "chat4",
-    name: "StrategySteve",
-    avatar: "https://placehold.co/100x100.png?c=s4",
-    lastMessage: "Let's discuss 3-betting ranges.",
-    timestamp: "Sun",
-  },
-];
-
-export default function ChatPage() {
+export default function ChatsPage() {
+  const router = useRouter();
+  const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
+  const [chats, setChats] = useState<ChatSummary[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const { toast } = useToast();
-  const [mockChats, setMockChats] = useState<MockChat[]>(initialMockChats);
+  const db = getFirestore(app, "poker");
 
-  const handleViewChat = (chatId: string, chatName: string) => {
-    toast({
-      title: "Opening Chat (Simulated)",
-      description: `Displaying messages for ${chatName}. Full message view is coming soon!`,
+  useEffect(() => {
+    const unsubscribe = auth.onAuthStateChanged((user) => {
+      setCurrentUser(user);
+      if (!user) {
+        router.push("/login");
+        setChats([]);
+        setIsLoading(false);
+      }
     });
-    // In a real app, this would navigate to a specific chat view or update a message panel.
-  };
+    return () => unsubscribe();
+  }, [router]);
 
-  const handleDeleteChat = (chatId: string, chatName: string) => {
-    // Simulate deletion by filtering the chat out of the local state
-    setMockChats(prevChats => prevChats.filter(chat => chat.id !== chatId));
-    toast({
-      title: "Chat Deleted (Simulated)",
-      description: `Conversation with ${chatName} has been removed.`,
-      variant: "destructive",
+  useEffect(() => {
+    if (!currentUser) return;
+
+    setIsLoading(true);
+    const chatsQuery = query(
+      collection(db, "chats"),
+      where("participants", "array-contains", currentUser.uid)
+    );
+
+    const unsubscribe = onSnapshot(chatsQuery, async (snapshot) => {
+      const chatsData: ChatSummary[] = [];
+      for (const chatDoc of snapshot.docs) {
+        const chatData = chatDoc.data();
+        const otherParticipantId = chatData.participants.find(
+          (id: string) => id !== currentUser.uid
+        );
+
+        if (!otherParticipantId) continue;
+
+        const friendDocRef = doc(db, "users", currentUser.uid, "friends", otherParticipantId);
+        const friendDocSnap = await getDoc(friendDocRef);
+        if (!friendDocSnap.exists()) {
+          console.warn(`ChatsPage: Skipping chat ${chatDoc.id} - not friends with ${otherParticipantId}`);
+          continue;
+        }
+
+        const otherUserRef = doc(db, "users", otherParticipantId);
+        const otherUserSnap = await getDoc(otherUserRef);
+        let otherParticipant;
+        if (!otherUserSnap.exists()) {
+          otherParticipant = {
+            id: otherParticipantId,
+            username: "unknown_user",
+            name: "Unknown User",
+            avatar: `https://placehold.co/40x40.png?text=U`,
+          };
+        } else {
+          const otherUserData = otherUserSnap.data();
+          otherParticipant = {
+            id: otherParticipantId,
+            username: otherUserData.username || "unknown_user",
+            name: otherUserData.fullName || otherUserData.username || "Unknown User",
+            avatar: otherUserData.avatar || `https://placehold.co/40x40.png?text=${(otherUserData.username || "U").substring(0, 1)}`,
+          };
+        }
+
+        chatsData.push({
+          id: chatDoc.id,
+          otherParticipant,
+          lastMessage: chatData.lastMessage,
+          unreadCount: chatData.unreadCounts[currentUser.uid] || 0,
+        });
+      }
+
+      setChats(chatsData.sort((a, b) => {
+        const aTime = a.lastMessage.timestamp?.toDate?.() || new Date(0);
+        const bTime = b.lastMessage.timestamp?.toDate?.() || new Date(0);
+        return bTime - aTime;
+      }));
+      setIsLoading(false);
+    }, (error) => {
+      console.error("ChatsPage: Error fetching chats:", error);
+      toast({
+        title: "Error",
+        description: "Could not load your chats. Please try again.",
+        variant: "destructive",
+      });
+      setIsLoading(false);
     });
-  };
 
-  const handleClearChat = (chatId: string, chatName: string) => {
-    // Simulate clearing by updating the last message for that chat
-    setMockChats(prevChats => prevChats.map(chat => 
-      chat.id === chatId ? { ...chat, lastMessage: "Chat history cleared.", unreadCount: 0 } : chat
-    ));
-    toast({
-      title: "Chat Cleared (Simulated)",
-      description: `Messages with ${chatName} have been cleared.`,
-    });
-  };
+    return () => unsubscribe();
+  }, [currentUser, toast, db]);
 
+  const formatTimestamp = (timestamp: any) => {
+    if (!timestamp || !timestamp.toDate) return "Unknown";
+    const date = timestamp.toDate();
+    const now = new Date();
+    const diffInMs = now.getTime() - date.getTime();
+    const diffInDays = Math.floor(diffInMs / (1000 * 60 * 60 * 24));
+
+    if (diffInDays === 0) {
+      return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    } else if (diffInDays === 1) {
+      return "Yesterday";
+    } else if (diffInDays < 7) {
+      return date.toLocaleDateString([], { weekday: "short" });
+    } else {
+      return date.toLocaleDateString();
+    }
+  };
 
   return (
     <div className="container mx-auto">
-      <Card className="shadow-xl rounded-xl">
-        <CardHeader className="text-center border-b pb-4">
-          <div className="flex justify-center items-center mb-2">
-            <MessageSquareText className="h-10 w-10 text-primary" />
+      <Card className="mb-8 shadow-lg rounded-xl">
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <MessageSquare className="h-6 w-6 text-primary" />
+            <CardTitle className="text-xl">Messages</CardTitle>
           </div>
-          <CardTitle className="text-2xl font-bold">Chat Central</CardTitle>
-          <CardDescription className="text-sm text-muted-foreground">
-            Your conversations will appear here. Full chat functionality is coming soon!
-          </CardDescription>
         </CardHeader>
-        <CardContent className="p-0">
-          {mockChats.length === 0 && (
-            <div className="text-center py-10">
-              <p className="text-lg text-muted-foreground">No active chats.</p>
-              <p className="text-sm text-muted-foreground">Start a conversation from a friend's profile!</p>
+        <CardContent>
+          {isLoading && (
+            <div className="text-center py-6">
+              <Loader2 className="h-8 w-8 animate-spin text-primary mx-auto" />
+              <p className="mt-2">Loading your chats...</p>
             </div>
           )}
-          <ul className="divide-y divide-border">
-            {mockChats.map((chat) => (
-              <li key={chat.id} className="flex items-center p-4 hover:bg-muted/50 transition-colors">
-                <button 
-                  onClick={() => handleViewChat(chat.id, chat.name)} 
-                  className="flex items-center flex-grow text-left focus:outline-none focus:ring-2 focus:ring-primary rounded-md -m-1 p-1"
-                  aria-label={`View chat with ${chat.name}`}
-                >
-                  <Avatar className="h-12 w-12 mr-4">
-                    <AvatarImage src={chat.avatar} alt={chat.name} data-ai-hint="profile picture" />
-                    <AvatarFallback>{chat.name.substring(0, 1)}</AvatarFallback>
-                  </Avatar>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex justify-between items-center">
-                      <p className="font-semibold text-foreground truncate">{chat.name}</p>
-                      <span className="text-xs text-muted-foreground ml-2 flex-shrink-0">{chat.timestamp}</span>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <p className="text-sm text-muted-foreground truncate">{chat.lastMessage}</p>
-                      {chat.unreadCount && chat.unreadCount > 0 && (
-                        <span className="ml-2 bg-primary text-primary-foreground text-xs font-bold rounded-full h-5 w-5 flex items-center justify-center">
-                          {chat.unreadCount}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                </button>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" size="icon" className="ml-2 flex-shrink-0 h-8 w-8">
-                      <MoreVertical className="h-5 w-5" />
-                      <span className="sr-only">Chat options for {chat.name}</span>
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem onClick={() => handleClearChat(chat.id, chat.name)}>
-                      <Eraser className="mr-2 h-4 w-4" />
-                      Clear Chat
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => handleDeleteChat(chat.id, chat.name)} className="text-destructive focus:bg-destructive/10 focus:text-destructive">
-                      <Trash2 className="mr-2 h-4 w-4" />
-                      Delete Chat
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </li>
-            ))}
-          </ul>
-        </CardContent>
-         {mockChats.length > 0 && (
-            <CardFooter className="text-center py-4 border-t">
-                <p className="text-xs text-muted-foreground w-full">
-                Full message viewing and sending functionality is under development.
+          {!isLoading && chats.length === 0 && (
+            <Card className="text-center p-6 shadow-md rounded-lg">
+              <CardHeader>
+                <CardTitle className="text-lg">No Chats Yet!</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="mb-3 text-muted-foreground">
+                  Start a conversation with a friend from the Friends page.
                 </p>
-            </CardFooter>
-        )}
+              </CardContent>
+            </Card>
+          )}
+          {!isLoading && chats.length > 0 && (
+            <div className="space-y-4">
+              {chats.map((chat) => (
+                <Link href={`/chat/${chat.id}`} key={chat.id} passHref>
+                  <Card className="p-4 flex items-center gap-3 hover:bg-accent transition-colors cursor-pointer">
+                    <Avatar className="h-10 w-10">
+                      <AvatarImage src={chat.otherParticipant.avatar} alt={chat.otherParticipant.name} />
+                      <AvatarFallback>{chat.otherParticipant.name.substring(0, 1).toUpperCase()}</AvatarFallback>
+                    </Avatar>
+                    <div className="flex-1">
+                      <div className="flex justify-between items-baseline">
+                        <p className="font-semibold">{chat.otherParticipant.name}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {formatTimestamp(chat.lastMessage.timestamp)}
+                        </p>
+                      </div>
+                      <p className="text-sm text-muted-foreground truncate">
+                        {chat.lastMessage.text}
+                      </p>
+                    </div>
+                    {chat.unreadCount > 0 && (
+                      <span className="bg-primary text-primary-foreground rounded-full px-2 py-1 text-xs">
+                        {chat.unreadCount}
+                      </span>
+                    )}
+                  </Card>
+                </Link>
+              ))}
+            </div>
+          )}
+        </CardContent>
       </Card>
     </div>
   );

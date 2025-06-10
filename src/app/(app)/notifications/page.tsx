@@ -1,4 +1,4 @@
-"use client";
+'use client';
 
 import { useState, useEffect } from "react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { BellRing, UserPlus, MessageSquareText, ThumbsUp, Share2, UserCheck, CheckCircle, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { app, auth } from "@/lib/firebase";
+import { app } from "@/lib/firebase";
 import { 
   getFirestore, 
   collection, 
@@ -20,7 +20,7 @@ import {
   Timestamp,
   orderBy
 } from "firebase/firestore";
-import type { User as FirebaseUser } from "firebase/auth";
+import { useUser } from "@/context/UserContext";
 import { formatDistanceToNow } from 'date-fns';
 import Link from "next/link";
 
@@ -37,22 +37,15 @@ interface AppNotification {
   user: NotificationUser | null; 
   message: string;
   timestamp: string | Timestamp | Date; 
-  read: boolean; // Make read mandatory
+  read: boolean;
   senderId?: string; 
   senderUsername?: string;
   senderAvatar?: string;
   receiverId?: string;
   receiverUsername?: string;
   receiverAvatar?: string;
-  postId?: string; // Add postId for like_post and comment_post
-  commentText?: string; // Add commentText for comment_post
-}
-
-interface LoggedInUserFromStorage {
-  uid: string;
-  username: string;
-  fullName?: string;
-  avatar?: string;
+  postId?: string;
+  commentText?: string;
 }
 
 const staticNotifications: AppNotification[] = [
@@ -83,60 +76,30 @@ const staticNotifications: AppNotification[] = [
 ];
 
 export default function NotificationsPage() {
+  const { currentUserAuth, loggedInUserDetails, isLoadingAuth, isLoadingUserDetails } = useUser();
   const [displayedNotifications, setDisplayedNotifications] = useState<AppNotification[]>([]);
-  const [loggedInUser, setLoggedInUser] = useState<LoggedInUserFromStorage | null>(null);
-  const [currentUserAuth, setCurrentUserAuth] = useState<FirebaseUser | null>(null); 
   const [isLoading, setIsLoading] = useState(true);
   const { toast } = useToast();
 
   useEffect(() => {
-    setIsLoading(true);
-    const unsubscribe = auth.onAuthStateChanged(async (user) => {
-      setCurrentUserAuth(user); 
-      if (user) {
-        const storedUserString = localStorage.getItem("loggedInUser");
-        if (storedUserString) {
-          try {
-            const parsedUser: LoggedInUserFromStorage = JSON.parse(storedUserString);
-            if (parsedUser.uid === user.uid) {
-              setLoggedInUser(parsedUser);
-              console.log("NotificationsPage (Auth Effect): LoggedInUserFromStorage successfully set from localStorage:", parsedUser);
-            } else {
-              console.warn("NotificationsPage (Auth Effect): localStorage UID mismatch with auth UID. Clearing local.");
-              localStorage.removeItem("loggedInUser");
-              setLoggedInUser(null);
-            }
-          } catch (e) {
-            console.error("NotificationsPage (Auth Effect): Error parsing loggedInUser from localStorage", e);
-            localStorage.removeItem("loggedInUser");
-            setLoggedInUser(null);
-          }
-        } else {
-          console.log("NotificationsPage (Auth Effect): No loggedInUser in localStorage for auth user:", user.uid);
-          setLoggedInUser(null); 
-        }
-      } else {
-        console.log("NotificationsPage (Auth Effect): No Firebase auth user found (user is null).");
-        setLoggedInUser(null);
-        setDisplayedNotifications(staticNotifications.sort((a,b) => getEpochMillis(b.timestamp) - getEpochMillis(a.timestamp)));
-        setIsLoading(false);
-      }
-    });
-    return () => unsubscribe();
-  }, []);
+    if (isLoadingAuth || isLoadingUserDetails) {
+      setIsLoading(true);
+      return;
+    }
 
-  useEffect(() => {
-    if (loggedInUser && loggedInUser.uid) {
-      console.log("NotificationsPage (Data Fetch Effect): loggedInUser is available, calling fetchNotifications for UID:", loggedInUser.uid);
-      fetchNotifications(loggedInUser.uid);
-    } else if (!currentUserAuth && !isLoading) {
-      console.log("NotificationsPage (Data Fetch Effect): No authenticated user to fetch notifications for. Displaying static notifications only.");
-    } else if (currentUserAuth && !loggedInUser && !isLoading) {
-      console.log("NotificationsPage (Data Fetch Effect): Auth user exists, profile details not fully loaded. Displaying static for now.");
-      setDisplayedNotifications(staticNotifications.sort((a,b) => getEpochMillis(b.timestamp) - getEpochMillis(a.timestamp)));
+    if (loggedInUserDetails && loggedInUserDetails.uid) {
+      console.log("NotificationsPage: loggedInUserDetails available, calling fetchNotifications for UID:", loggedInUserDetails.uid);
+      fetchNotifications(loggedInUserDetails.uid);
+    } else if (!currentUserAuth) {
+      console.log("NotificationsPage: No authenticated user. Displaying static notifications only.");
+      setDisplayedNotifications(staticNotifications.sort((a, b) => getEpochMillis(b.timestamp) - getEpochMillis(a.timestamp)));
+      setIsLoading(false);
+    } else if (currentUserAuth && !loggedInUserDetails) {
+      console.log("NotificationsPage: Auth user exists, but profile details not loaded. Displaying static notifications for now.");
+      setDisplayedNotifications(staticNotifications.sort((a, b) => getEpochMillis(b.timestamp) - getEpochMillis(a.timestamp)));
       setIsLoading(false);
     }
-  }, [loggedInUser, currentUserAuth]);
+  }, [currentUserAuth, loggedInUserDetails, isLoadingAuth, isLoadingUserDetails]);
 
   const getEpochMillis = (timestamp: AppNotification['timestamp']): number => {
     if (timestamp instanceof Timestamp) {
@@ -149,7 +112,7 @@ export default function NotificationsPage() {
         return date.getTime();
       }
     }
-    console.warn("NotificationsPage (getEpochMillis): Could not parse timestamp, returning 0:", timestamp);
+    console.warn("NotificationsPage: Could not parse timestamp, returning 0:", timestamp);
     return 0;
   };
 
@@ -166,7 +129,7 @@ export default function NotificationsPage() {
         orderBy("createdAt", "desc")
       );
       const friendRequestSnapshot = await getDocs(friendRequestQuery);
-      console.log(`NotificationsPage (fetchNotifications): Found ${friendRequestSnapshot.docs.length} friend requests for user ${currentUserId}`);
+      console.log(`NotificationsPage: Found ${friendRequestSnapshot.docs.length} friend requests for user ${currentUserId}`);
 
       const friendRequestNotifications: AppNotification[] = friendRequestSnapshot.docs.map(docSnap => {
         const data = docSnap.data();
@@ -181,7 +144,7 @@ export default function NotificationsPage() {
           },
           message: "sent you a friend request.",
           timestamp: data.createdAt,
-          read: false, // Friend requests are always unread initially
+          read: false,
           senderId: data.senderId,
           senderUsername: data.senderUsername,
           senderAvatar: data.senderAvatar,
@@ -196,7 +159,7 @@ export default function NotificationsPage() {
         orderBy("createdAt", "desc")
       );
       const notificationsSnapshot = await getDocs(notificationsQuery);
-      console.log(`NotificationsPage (fetchNotifications): Found ${notificationsSnapshot.docs.length} like/comment notifications for user ${currentUserId}`);
+      console.log(`NotificationsPage: Found ${notificationsSnapshot.docs.length} like/comment notifications for user ${currentUserId}`);
 
       const likeCommentNotifications: AppNotification[] = notificationsSnapshot.docs.map(docSnap => {
         const data = docSnap.data();
@@ -232,13 +195,13 @@ export default function NotificationsPage() {
       combinedNotifications.sort((a, b) => getEpochMillis(b.timestamp) - getEpochMillis(a.timestamp));
       setDisplayedNotifications(combinedNotifications);
     } catch (error) {
-      console.error("NotificationsPage (fetchNotifications): Error fetching notifications from Firestore:", error);
+      console.error("NotificationsPage: Error fetching notifications from Firestore:", error);
       toast({ 
         title: "Error Loading Notifications", 
         description: `Could not retrieve notifications. Error: ${error instanceof Error ? error.message : String(error)}`, 
         variant: "destructive" 
       });
-      setDisplayedNotifications(staticNotifications.sort((a,b) => getEpochMillis(b.timestamp) - getEpochMillis(a.timestamp)));
+      setDisplayedNotifications(staticNotifications.sort((a, b) => getEpochMillis(b.timestamp) - getEpochMillis(a.timestamp)));
     } finally {
       setIsLoading(false);
     }
@@ -262,13 +225,13 @@ export default function NotificationsPage() {
   };
 
   const handleAcceptFirestoreRequest = async (notification: AppNotification) => {
-    if (!loggedInUser || !notification.user?.uid || !notification.user.username || !notification.user.name) {
+    if (!loggedInUserDetails || !notification.user?.uid || !notification.user.username || !notification.user.name) {
       toast({ title: "Error", description: "Missing current user or sender data for action.", variant: "destructive" });
-      console.error("NotificationsPage (handleAccept): Aborted - missing user data. LoggedInUser:", loggedInUser, "Notification User:", notification.user);
+      console.error("NotificationsPage: Aborted accept - missing user data. loggedInUserDetails:", loggedInUserDetails, "Notification User:", notification.user);
       return;
     }
 
-    const acceptorUid = loggedInUser.uid;
+    const acceptorUid = loggedInUserDetails.uid;
     const senderUid = notification.user.uid;
     const db = getFirestore(app, "poker");
     const batch = writeBatch(db);
@@ -289,9 +252,9 @@ export default function NotificationsPage() {
     const senderFriendsRef = doc(db, "users", senderUid, "friends", acceptorUid);
     const senderFriendData = {
       friendUserId: acceptorUid, 
-      username: loggedInUser.username,
-      name: loggedInUser.fullName || loggedInUser.username,
-      avatar: loggedInUser.avatar || `https://placehold.co/40x40.png?text=${(loggedInUser.fullName || "U").substring(0,1)}`,
+      username: loggedInUserDetails.username,
+      name: loggedInUserDetails.fullName || loggedInUserDetails.username,
+      avatar: loggedInUserDetails.avatar || `https://placehold.co/40x40.png?text=${(loggedInUserDetails.fullName || "U").substring(0,1)}`,
       since: serverTimestamp()
     };
     batch.set(senderFriendsRef, senderFriendData);
@@ -301,7 +264,7 @@ export default function NotificationsPage() {
       toast({ title: "Friend Request Accepted!", description: `You are now friends with ${notification.user.name}.` });
       setDisplayedNotifications(prev => prev.filter(n => n.id !== notification.id));
     } catch (error) {
-      console.error("NotificationsPage (handleAccept): Error accepting friend request in Firestore:", error);
+      console.error("NotificationsPage: Error accepting friend request in Firestore:", error);
       toast({ 
         title: "Firestore Error", 
         description: `Could not accept friend request. Error: ${error instanceof Error ? error.message : String(error)}`, 
@@ -312,7 +275,7 @@ export default function NotificationsPage() {
   };
 
   const handleDeclineFirestoreRequest = async (notificationId: string) => {
-    if (!loggedInUser) return;
+    if (!loggedInUserDetails) return;
     const db = getFirestore(app, "poker");
     const requestRef = doc(db, "friendRequests", notificationId);
     try {
@@ -320,7 +283,7 @@ export default function NotificationsPage() {
       toast({ title: "Friend Request Declined", variant: "destructive" });
       setDisplayedNotifications(prev => prev.filter(n => n.id !== notificationId));
     } catch (error) {
-      console.error("NotificationsPage (handleDecline): Error declining friend request in Firestore:", error);
+      console.error("NotificationsPage: Error declining friend request in Firestore:", error);
       toast({ 
         title: "Error", 
         description: `Could not decline friend request. Error: ${error instanceof Error ? error.message : String(error)}`, 
@@ -330,17 +293,17 @@ export default function NotificationsPage() {
   };
 
   const handleMarkAsRead = async (notification: AppNotification) => {
-    if (notification.read || !loggedInUser || !["like_post", "comment_post"].includes(notification.type)) return;
+    if (notification.read || !loggedInUserDetails || !["like_post", "comment_post"].includes(notification.type)) return;
 
     const db = getFirestore(app, "poker");
-    const notificationRef = doc(db, "users", loggedInUser.uid, "notifications", notification.id);
+    const notificationRef = doc(db, "users", loggedInUserDetails.uid, "notifications", notification.id);
     try {
       await updateDoc(notificationRef, { read: true });
       setDisplayedNotifications(prev =>
         prev.map(n => n.id === notification.id ? { ...n, read: true } : n)
       );
     } catch (error) {
-      console.error("NotificationsPage (handleMarkAsRead): Error marking notification as read:", error);
+      console.error("NotificationsPage: Error marking notification as read:", error);
       toast({
         title: "Error",
         description: `Could not mark notification as read. Error: ${error instanceof Error ? error.message : String(error)}`,
@@ -350,7 +313,7 @@ export default function NotificationsPage() {
   };
 
   const handleMarkAllAsRead = async () => {
-    if (!loggedInUser) return;
+    if (!loggedInUserDetails) return;
     const db = getFirestore(app, "poker");
     const unreadNotifications = displayedNotifications.filter(n =>
       ["like_post", "comment_post"].includes(n.type) && !n.read
@@ -362,7 +325,7 @@ export default function NotificationsPage() {
 
     const batch = writeBatch(db);
     unreadNotifications.forEach(notification => {
-      const notificationRef = doc(db, "users", loggedInUser.uid, "notifications", notification.id);
+      const notificationRef = doc(db, "users", loggedInUserDetails.uid, "notifications", notification.id);
       batch.update(notificationRef, { read: true });
     });
 
@@ -373,7 +336,7 @@ export default function NotificationsPage() {
       );
       toast({ title: "Notifications Marked as Read", description: "All unread notifications have been marked as read." });
     } catch (error) {
-      console.error("NotificationsPage (handleMarkAllAsRead): Error marking all notifications as read:", error);
+      console.error("NotificationsPage: Error marking all notifications as read:", error);
       toast({
         title: "Error",
         description: `Could not mark notifications as read. Error: ${error instanceof Error ? error.message : String(error)}`,
@@ -385,7 +348,7 @@ export default function NotificationsPage() {
   const getTimestampString = (timestampInput: AppNotification['timestamp']): string => {
     const epochMillis = getEpochMillis(timestampInput);
     if (epochMillis === 0 && timestampInput) {
-      console.warn("NotificationsPage (getTimestampString): Fallback for invalid timestamp:", timestampInput);
+      console.warn("NotificationsPage: Fallback for invalid timestamp:", timestampInput);
       return "Invalid date";
     }
     if (epochMillis === 0) return 'Just now';
@@ -393,7 +356,7 @@ export default function NotificationsPage() {
     try {
       return formatDistanceToNow(new Date(epochMillis), { addSuffix: true });
     } catch (e) {
-      console.error("NotificationsPage (getTimestampString): Error formatting date with formatDistanceToNow:", e, "Epoch was:", epochMillis);
+      console.error("NotificationsPage: Error formatting date with formatDistanceToNow:", e, "Epoch was:", epochMillis);
       return new Date(epochMillis).toLocaleString();
     }
   };
@@ -463,7 +426,7 @@ export default function NotificationsPage() {
                 </p>
                 <p className="text-xs text-muted-foreground">{getTimestampString(notification.timestamp)}</p>
               </div>
-              {notification.type === "friend_request_firestore" && notification.user && loggedInUser && (
+              {notification.type === "friend_request_firestore" && notification.user && loggedInUserDetails && (
                 <div className="flex gap-2 ml-auto">
                   <Button size="sm" onClick={(e) => { e.stopPropagation(); handleAcceptFirestoreRequest(notification); }}>Accept</Button>
                   <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); handleDeclineFirestoreRequest(notification.id); }}>Decline</Button>

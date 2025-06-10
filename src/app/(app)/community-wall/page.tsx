@@ -9,24 +9,16 @@ import type { Post, Comment as PostComment } from "@/types/post";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { getFirestore, collection, query, orderBy, getDocs, Timestamp, where } from "firebase/firestore";
-import { app } from "@/lib/firebase"; 
-import { getAuth, type User as FirebaseUser } from "firebase/auth";
-import { handleLikePost } from "@/utils/handleLikePost"; // Import shared utility
-import { handleCommentOnPost } from "@/utils/handleCommentOnPost"; // Import shared utility
+import { app } from "@/lib/firebase";
+import { useUser } from "@/context/UserContext";
+import { handleLikePost } from "@/utils/handleLikePost";
+import { handleCommentOnPost } from "@/utils/handleCommentOnPost";
 
 export default function CommunityWallPage() {
+  const { currentUserAuth, loggedInUserDetails, isLoadingAuth } = useUser();
   const [communityPosts, setCommunityPosts] = useState<Post[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
   const { toast } = useToast();
-  const auth = getAuth(app);
-
-  useEffect(() => {
-    const unsubscribe = auth.onAuthStateChanged(user => {
-      setCurrentUser(user);
-    });
-    return () => unsubscribe();
-  }, [auth]);
 
   useEffect(() => {
     const fetchPosts = async () => {
@@ -36,22 +28,21 @@ export default function CommunityWallPage() {
         const postsCollectionRef = collection(db, "posts");
         const q = query(postsCollectionRef, orderBy("createdAt", "desc"));
         const querySnapshot = await getDocs(q);
-        
+
         const postsPromises: Promise<Post>[] = querySnapshot.docs.map(async (docSnap) => {
           const data = docSnap.data();
           const postUser = data.user || { name: "Unknown User", avatar: `https://placehold.co/100x100.png?text=U`, handle: `@unknown` };
-          
+
           let likedByCurrentUser = false;
-          if (currentUser) {
+          if (currentUserAuth) {
             const likesCollectionRef = collection(db, "likes");
-            const likeQuery = query(likesCollectionRef, where("postId", "==", docSnap.id), where("userId", "==", currentUser.uid));
+            const likeQuery = query(likesCollectionRef, where("postId", "==", docSnap.id), where("userId", "==", currentUserAuth.uid));
             const likeSnapshot = await getDocs(likeQuery);
             likedByCurrentUser = !likeSnapshot.empty;
           }
 
-          // Fetch comments for this post
           const commentsCollectionRef = collection(db, "posts", docSnap.id, "comments");
-          const commentsQuery = query(commentsCollectionRef, orderBy("createdAt", "asc")); // Oldest first, will reverse in PostCard
+          const commentsQuery = query(commentsCollectionRef, orderBy("createdAt", "asc"));
           const commentsSnapshot = await getDocs(commentsQuery);
           const fetchedComments: PostComment[] = commentsSnapshot.docs.map(commentDoc => ({
             id: commentDoc.id,
@@ -70,11 +61,11 @@ export default function CommunityWallPage() {
             image: data.image,
             imageAiHint: data.imageAiHint,
             likes: data.likes || 0,
-            likedByCurrentUser: likedByCurrentUser, 
-            comments: data.comments || 0, // Denormalized count
-            fetchedComments: fetchedComments, // Actual comment objects
+            likedByCurrentUser: likedByCurrentUser,
+            comments: data.comments || 0,
+            fetchedComments: fetchedComments,
             shares: data.shares || 0,
-            createdAt: data.createdAt, 
+            createdAt: data.createdAt,
             timestamp: data.createdAt instanceof Timestamp ? data.createdAt.toDate().toLocaleString() : (data.createdAt?.seconds ? new Date(data.createdAt.seconds * 1000).toLocaleString() : new Date().toLocaleString()),
           };
         });
@@ -102,24 +93,47 @@ export default function CommunityWallPage() {
       }
     };
 
-    if (currentUser !== undefined) { // Ensure currentUser state is resolved
+    if (typeof currentUserAuth !== 'undefined') {
       fetchPosts();
     }
-  }, [currentUser, toast]);
+  }, [currentUserAuth, toast]);
 
   const onLikePost = async (postId: string) => {
-    const result = await handleLikePost({ postId, currentUser, posts: communityPosts });
+    const result = await handleLikePost({ postId, currentUser: currentUserAuth, posts: communityPosts });
     if (result.updatedPosts) {
       setCommunityPosts(result.updatedPosts);
+    }
+    if (result.error) {
+      toast({ title: "Error Liking Post", description: result.error, variant: "destructive" });
+    } else {
+      const post = communityPosts.find(p => p.id === postId);
+      if (post && post.likedByCurrentUser) {
+        toast({ title: "Like Removed", description: "Your like has been removed." });
+      } else {
+        toast({ title: "Post Liked!", description: "Your like has been recorded." });
+      }
     }
   };
 
   const onCommentPost = async (postId: string, commentText: string) => {
-    const result = await handleCommentOnPost({ postId, commentText, currentUser, posts: communityPosts });
+    const result = await handleCommentOnPost({ postId, commentText, currentUser: currentUserAuth, loggedInUserDetails, posts: communityPosts });
     if (result.updatedPosts) {
       setCommunityPosts(result.updatedPosts);
     }
+    if (result.error) {
+      toast({ title: "Error Posting Comment", description: result.error, variant: "destructive" });
+    } else {
+      toast({ title: "Comment Posted!", description: "Your comment has been added to Firestore." });
+    }
   };
+
+  if (isLoadingAuth || (isLoading && typeof currentUserAuth === 'undefined')) {
+    return (
+      <div className="container mx-auto max-w-2xl text-center py-10">
+        <p>Authenticating...</p>
+      </div>
+    );
+  }
 
   if (isLoading) {
     return (
@@ -139,7 +153,7 @@ export default function CommunityWallPage() {
             See what everyone in the PokerConnect community is talking about! (Posts & Comments from Firestore)
           </p>
         </div>
-        <Link href="/create-post" passHref>
+        <Link href="/create-post?redirect=/community-wall" passHref>
           <Button>
             <PlusCircle className="mr-2 h-5 w-5" /> Share Your Thoughts
           </Button>
@@ -156,20 +170,20 @@ export default function CommunityWallPage() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <Link href="/create-post" passHref>
+              <Link href="/create-post?redirect=/community-wall" passHref>
                 <Button>Create a Post</Button>
               </Link>
             </CardContent>
           </Card>
         )}
         {communityPosts.map((post, index) => (
-          <PostCard 
-            key={post.id} 
-            post={post} 
-            currentUserId={currentUser?.uid}
+          <PostCard
+            key={post.id}
+            post={post}
+            currentUserId={currentUserAuth?.uid}
             onLikePost={onLikePost}
             onCommentPost={onCommentPost}
-            isLCPItem={index === 0} 
+            isLCPItem={index === 0}
           />
         ))}
       </div>

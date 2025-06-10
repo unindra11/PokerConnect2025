@@ -1,8 +1,13 @@
-
-"use client";
+'use client';
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useUser } from "@/context/UserContext";
+import {
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+} from "@/components/ui/sidebar";
 import {
   Home,
   MapPinned,
@@ -10,14 +15,9 @@ import {
   Users,
   Bell,
   LayoutGrid,
-  MessageCircleMore, // Added Chat icon
+  MessageCircleMore,
 } from "lucide-react";
-import {
-  SidebarMenu,
-  SidebarMenuItem,
-  SidebarMenuButton,
-} from "@/components/ui/sidebar";
-import { cn } from "@/lib/utils";
+import { Loader2 } from "lucide-react";
 
 const menuItems = [
   { href: "/home", label: "Home", icon: Home },
@@ -30,7 +30,21 @@ const menuItems = [
 ];
 
 export function AppNavigation() {
+  const { loggedInUserDetails, isLoadingUserDetails } = useUser();
   const pathname = usePathname();
+
+  if (isLoadingUserDetails) {
+    return (
+      <div className="flex items-center justify-center p-4">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        <span className="ml-2 text-muted-foreground">Loading...</span>
+      </div>
+    );
+  }
+
+  if (!loggedInUserDetails) {
+    return null; // Let UserContext handle redirects
+  }
 
   return (
     <SidebarMenu>
@@ -38,23 +52,20 @@ export function AppNavigation() {
         const Icon = item.icon;
         return (
           <SidebarMenuItem key={item.href}>
-            <Link href={item.href} passHref legacyBehavior={false} asChild>
-              <SidebarMenuButton
-                isActive={pathname === item.href || (item.href !== "/home" && pathname.startsWith(item.href))}
-                tooltip={item.label}
-                // The asChild prop for SidebarMenuButton is handled by its own definition
-                // when Link asChild passes its own asChild=true to it.
-                // No explicit asChild here is needed.
-              >
-                {/* Single child for Link asChild */}
+            <SidebarMenuButton
+              asChild
+              isActive={pathname === item.href || (item.href !== "/home" && pathname.startsWith(item.href))}
+              tooltip={item.label}
+            >
+              <Link href={item.href}>
                 <span className="flex items-center justify-start gap-2 w-full">
                   <Icon size={20} />
                   <span className="group-data-[collapsible=icon]:hidden delay-300 whitespace-nowrap truncate">
                     {item.label}
                   </span>
                 </span>
-              </SidebarMenuButton>
-            </Link>
+              </Link>
+            </SidebarMenuButton>
           </SidebarMenuItem>
         );
       })}

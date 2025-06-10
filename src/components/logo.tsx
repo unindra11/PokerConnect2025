@@ -1,17 +1,30 @@
-import { Spade } from 'lucide-react';
+'use client';
 
-interface LogoProps {
-  size?: number;
-  className?: string;
-}
+import { useUser } from "@/context/UserContext";
+import { Loader2 } from "lucide-react";
 
-export function Logo({ size = 24, className }: LogoProps) {
+export function Logo({ size = 20, className = "" }) {
+  const { loggedInUserDetails, isLoadingUserDetails } = useUser();
+
+  if (isLoadingUserDetails) {
+    return (
+      <div className="flex items-center gap-2">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        <span className="text-muted-foreground">Loading...</span>
+      </div>
+    );
+  }
+
+  if (!loggedInUserDetails) {
+    return null; // Let UserContext handle redirects
+  }
+
   return (
     <div className={`flex items-center gap-2 ${className}`}>
-      <Spade size={size} className="text-primary" />
-      <span className={`font-semibold text-xl`} style={{ fontSize: `${size * 0.8}px` }}>
-        PokerConnect
-      </span>
+      <svg width={size} height={size} viewBox="0 0 24 24">
+        <path d="M12 2L2 22h20L12 2z" fill="currentColor" />
+      </svg>
+      <span>PokerConnect</span>
     </div>
   );
 }

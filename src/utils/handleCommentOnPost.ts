@@ -1,31 +1,30 @@
-import { getFirestore, doc, collection, addDoc, updateDoc, increment, serverTimestamp } from "firebase/firestore";
+import { getFirestore, collection, doc, updateDoc, increment, addDoc, serverTimestamp, getDoc } from "firebase/firestore";
 import { app } from "@/lib/firebase";
 import type { Post, Comment as PostComment } from "@/types/post";
 
-interface HandleCommentOnPostInput {
+interface HandleCommentOnPostParams {
   postId: string;
   commentText: string;
-  currentUser: any; // Firebase User
+  currentUser: any; // FirebaseUser | null
+  loggedInUserDetails: any; // User details from useUser
   posts: Post[];
 }
 
-interface HandleCommentOnPostOutput {
-  updatedPosts: Post[] | null;
+interface HandleCommentOnPostResult {
+  updatedPosts?: Post[];
+  error?: string;
 }
 
-export const handleCommentOnPost = async ({ postId, commentText, currentUser, posts }: HandleCommentOnPostInput): Promise<HandleCommentOnPostOutput> => {
-  const db = getFirestore(app, "poker");
-
+export async function handleCommentOnPost({ postId, commentText, currentUser, loggedInUserDetails, posts }: HandleCommentOnPostParams): Promise<HandleCommentOnPostResult> {
   if (!currentUser) {
-    return { updatedPosts: null };
+    return { error: "You must be logged in to comment." };
   }
 
-  const loggedInUserString = localStorage.getItem("loggedInUser");
-  if (!loggedInUserString) {
-    return { updatedPosts: null };
+  if (!loggedInUserDetails) {
+    return { error: "Could not retrieve your profile details to comment." };
   }
-  const loggedInUserDetails = JSON.parse(loggedInUserString);
 
+  const db = getFirestore(app, "poker");
   const postRef = doc(db, "posts", postId);
   const commentsCollectionRef = collection(db, "posts", postId, "comments");
 
@@ -38,20 +37,33 @@ export const handleCommentOnPost = async ({ postId, commentText, currentUser, po
   };
 
   try {
+    // Fetch the post to get the owner's UID
+    const postSnap = await getDoc(postRef);
+    if (!postSnap.exists()) {
+      throw new Error("Post not found");
+    }
+    const postData = postSnap.data();
+    const postOwnerId = postData.userId; // Use userId field as per Post type
+
+    // Add the comment
     const commentDocRef = await addDoc(commentsCollectionRef, newCommentData);
     await updateDoc(postRef, { comments: increment(1) });
-    // Add notification for post owner
-    const post = posts.find(p => p.id === postId);
-    if (post && post.userId !== currentUser.uid) {
-      await addDoc(collection(db, `users/${post.userId}/notifications`), {
+
+    // Create a notification for the post owner (if the commenter is not the owner)
+    if (currentUser.uid !== postOwnerId) {
+      const notificationRef = collection(db, "users", postOwnerId, "notifications");
+      const notificationData = {
         type: "comment_post",
         senderId: currentUser.uid,
-        senderUsername: loggedInUserDetails.username || "Anonymous", // Add senderUsername
-        postId,
-        commentText,
+        senderUsername: loggedInUserDetails.username || "Anonymous",
+        senderAvatar: loggedInUserDetails.avatar || `https://placehold.co/40x40.png?text=${(loggedInUserDetails.username || "A").substring(0,1)}`,
+        postId: postId,
+        commentText: commentText,
         createdAt: serverTimestamp(),
         read: false,
-      });
+      };
+      await addDoc(notificationRef, notificationData);
+      console.log(`handleCommentOnPost: Created notification for user ${postOwnerId} about comment on post ${postId}`);
     }
 
     const newCommentForUI: PostComment = {
@@ -65,15 +77,15 @@ export const handleCommentOnPost = async ({ postId, commentText, currentUser, po
         return {
           ...p,
           comments: (p.comments || 0) + 1,
-          fetchedComments: [...(p.fetchedComments || []), newCommentForUI],
+          fetchedComments: [...(p.fetchedComments || []), newCommentForUI].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()),
         };
       }
       return p;
     });
 
     return { updatedPosts };
-  } catch (error) {
-    console.error("Error adding comment to Firestore:", error);
-    return { updatedPosts: null };
+  } catch (error: any) {
+    console.error("handleCommentOnPost: Error adding comment to Firestore:", error);
+    return { updatedPosts: posts, error: "Could not save your comment to Firestore." };
   }
-};
+}
