@@ -46,6 +46,7 @@ interface AppNotification {
   receiverAvatar?: string;
   postId?: string;
   commentText?: string;
+  caption?: string;
 }
 
 const staticNotifications: AppNotification[] = [
@@ -151,17 +152,20 @@ export default function NotificationsPage() {
         };
       });
 
-      // Fetch like_post and comment_post notifications
+      // Fetch like_post, comment_post, and share_post notifications
       const notificationsRef = collection(db, "users", currentUserId, "notifications");
       const notificationsQuery = query(
         notificationsRef,
-        where("type", "in", ["like_post", "comment_post"]),
+        where("type", "in", ["like_post", "comment_post", "share_post"]),
         orderBy("createdAt", "desc")
       );
       const notificationsSnapshot = await getDocs(notificationsQuery);
-      console.log(`NotificationsPage: Found ${notificationsSnapshot.docs.length} like/comment notifications for user ${currentUserId}`);
+      console.log(`NotificationsPage: Found ${notificationsSnapshot.docs.length} like/comment/share notifications for user ${currentUserId}`);
+      notificationsSnapshot.docs.forEach(doc => {
+        console.log(`NotificationsPage: Notification for user ${currentUserId}:`, doc.data());
+      });
 
-      const likeCommentNotifications: AppNotification[] = notificationsSnapshot.docs.map(docSnap => {
+      const activityNotifications: AppNotification[] = notificationsSnapshot.docs.map(docSnap => {
         const data = docSnap.data();
         return {
           id: docSnap.id,
@@ -174,25 +178,29 @@ export default function NotificationsPage() {
           },
           message: data.type === "like_post"
             ? "liked your post."
-            : `commented on your post: "${data.commentText}"`,
+            : data.type === "comment_post"
+            ? `commented on your post: "${data.commentText}"`
+            : `shared your post: "${data.caption}"`,
           timestamp: data.createdAt,
           read: data.read || false,
           senderId: data.senderId,
           senderUsername: data.senderUsername,
           senderAvatar: data.senderAvatar,
           postId: data.postId,
-          commentText: data.commentText,
+          commentText: data.type === "comment_post" ? data.commentText : undefined,
+          caption: data.type === "share_post" ? data.caption : undefined,
         };
       });
 
       // Combine notifications
       const combinedNotifications = [
         ...friendRequestNotifications,
-        ...likeCommentNotifications,
-        ...staticNotifications.filter(n => n.type !== "friend_request" && n.type !== "friend_request_firestore"),
+        ...activityNotifications,
+        ...staticNotifications.filter(n => !["friend_request", "friend_request_firestore", "like_post", "comment_post", "share_post"].includes(n.type)),
       ];
 
       combinedNotifications.sort((a, b) => getEpochMillis(b.timestamp) - getEpochMillis(a.timestamp));
+      console.log(`NotificationsPage: Combined notifications for user ${currentUserId}:`, combinedNotifications);
       setDisplayedNotifications(combinedNotifications);
     } catch (error) {
       console.error("NotificationsPage: Error fetching notifications from Firestore:", error);
@@ -216,6 +224,7 @@ export default function NotificationsPage() {
       case "like": return <ThumbsUp className="h-5 w-5 text-red-500" />;
       case "like_post": return <ThumbsUp className="h-5 w-5 text-red-500" />;
       case "share": return <Share2 className="h-5 w-5 text-green-500" />;
+      case "share_post": return <Share2 className="h-5 w-5 text-green-500" />;
       case "friend_accept": return <UserCheck className="h-5 w-5 text-blue-500" />;
       case "friend_accept_confirmation": return <CheckCircle className="h-5 w-5 text-green-500" />;
       case "friend_request_sent_confirmation": return <UserPlus className="h-5 w-5 text-blue-500" />;
@@ -293,7 +302,7 @@ export default function NotificationsPage() {
   };
 
   const handleMarkAsRead = async (notification: AppNotification) => {
-    if (notification.read || !loggedInUserDetails || !["like_post", "comment_post"].includes(notification.type)) return;
+    if (notification.read || !loggedInUserDetails || !["like_post", "comment_post", "share_post"].includes(notification.type)) return;
 
     const db = getFirestore(app, "poker");
     const notificationRef = doc(db, "users", loggedInUserDetails.uid, "notifications", notification.id);
@@ -316,7 +325,7 @@ export default function NotificationsPage() {
     if (!loggedInUserDetails) return;
     const db = getFirestore(app, "poker");
     const unreadNotifications = displayedNotifications.filter(n =>
-      ["like_post", "comment_post"].includes(n.type) && !n.read
+      ["like_post", "comment_post", "share_post"].includes(n.type) && !n.read
     );
     if (unreadNotifications.length === 0) {
       toast({ title: "No Unread Notifications", description: "All notifications are already read." });
@@ -374,7 +383,7 @@ export default function NotificationsPage() {
     <div className="container mx-auto max-w-2xl">
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-3xl font-bold">Notifications</h1>
-        {displayedNotifications.some(n => ["friend_request_firestore", "like_post", "comment_post"].includes(n.type) && !n.read) && (
+        {displayedNotifications.some(n => ["friend_request_firestore", "like_post", "comment_post", "share_post"].includes(n.type) && !n.read) && (
           <Button variant="outline" size="sm" onClick={handleMarkAllAsRead}>Mark All as Read</Button>
         )}
       </div>
@@ -416,7 +425,7 @@ export default function NotificationsPage() {
                     <span className="font-semibold text-primary">{notification.user.name}</span>
                   )}
                   {' '}
-                  {["like_post", "comment_post"].includes(notification.type) && notification.postId ? (
+                  {["like_post", "comment_post", "share_post"].includes(notification.type) && notification.postId ? (
                     <Link href={`/post/${notification.postId}`} className="text-primary hover:underline">
                       {notification.message}
                     </Link>

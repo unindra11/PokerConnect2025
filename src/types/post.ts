@@ -1,4 +1,3 @@
-
 import type { Timestamp } from "firebase/firestore";
 
 export interface User {
@@ -17,19 +16,20 @@ export interface Comment {
 }
 
 export interface Post {
-  id: string; // Firestore document ID
-  userId: string; // Firebase Auth UID of the author
-  user: User; // Contains name, avatar, handle for display
+  id: string;
+  userId: string;
+  user: User;
+  username?: string;
   content: string;
-  image?: string; // URL from Firebase Storage
-  imageAiHint?: string | null;
+  image?: string;
+  imageAiHint?: string;
   likes: number;
-  likedByCurrentUser?: boolean; // Client-side state, determined by querying 'likes' collection
-  comments: number; // Denormalized count
-  fetchedComments?: Comment[]; // Populated by parent component after fetching from 'comments' subcollection
+  likedByCurrentUser: boolean;
+  comments: number;
+  fetchedComments?: Comment[];
   shares: number;
-  createdAt: Timestamp | any; 
-  updatedAt?: Timestamp | any;
-  // Deprecated, use fetchedComments instead
-  commentTexts?: string[];
+  createdAt: any; // Firestore Timestamp
+  timestamp: string;
+  originalPostId?: string; // ID of the original post if this is a reshare
+  originalPost?: Post | null; // The original post data if this is a reshare
 }

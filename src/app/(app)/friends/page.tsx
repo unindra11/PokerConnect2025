@@ -13,6 +13,7 @@ import {
   getDoc,
   setDoc,
   serverTimestamp,
+  writeBatch,
 } from "firebase/firestore";
 import type { User as FirebaseUser } from "firebase/auth";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -26,6 +27,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Loader2, MoreHorizontal, User, MessageSquare } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import Link from "next/link";
 
 interface Friend {
   friendUserId: string;
@@ -91,7 +93,7 @@ export default function FriendsPage() {
     if (!confirmUnfriend) return;
 
     try {
-      const batch = db.batch();
+      const batch = writeBatch(db);
       const userFriendRef = doc(db, "users", currentUserAuth.uid, "friends", friendId);
       const friendUserFriendRef = doc(db, "users", friendId, "friends", currentUserAuth.uid);
 
@@ -197,7 +199,10 @@ export default function FriendsPage() {
             <div className="grid gap-4">
               {friends.map((friend) => (
                 <Card key={friend.friendUserId} className="p-4 flex items-center justify-between shadow-md rounded-lg">
-                  <div className="flex items-center gap-3">
+                  <Link
+                    href={`/profile/${friend.username}`}
+                    className="flex items-center gap-3 hover:bg-gray-100 p-2 rounded-lg transition-colors"
+                  >
                     <Avatar className="h-10 w-10">
                       <AvatarImage src={friend.avatar} alt={friend.name} />
                       <AvatarFallback>{friend.name.charAt(0)}</AvatarFallback>
@@ -206,7 +211,7 @@ export default function FriendsPage() {
                       <p className="font-semibold">{friend.name}</p>
                       <p className="text-sm text-muted-foreground">@{friend.username}</p>
                     </div>
-                  </div>
+                  </Link>
                   <div className="flex items-center gap-2">
                     <Button
                       variant="outline"

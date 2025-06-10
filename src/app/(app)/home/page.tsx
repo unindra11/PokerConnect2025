@@ -1,4 +1,4 @@
-'use client';
+"use client";
 
 import type { ReactNode } from "react";
 import { useState, useEffect } from "react";
@@ -10,11 +10,12 @@ import type { Post, Comment as PostComment } from "@/types/post";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { generatePokerTips, type GeneratePokerTipsInput, type GeneratePokerTipsOutput } from "@/ai/flows/generate-poker-tips";
 import { useToast } from "@/hooks/use-toast";
-import { getFirestore, collection, query, where, orderBy, getDocs, Timestamp } from "firebase/firestore";
+import { getFirestore, collection, query, where, orderBy, getDocs, Timestamp, doc, getDoc } from "firebase/firestore";
 import { app } from "@/lib/firebase";
 import { useUser } from "@/context/UserContext";
 import { handleLikePost } from "@/utils/handleLikePost";
 import { handleCommentOnPost } from "@/utils/handleCommentOnPost";
+import { handleSharePost } from "@/utils/handleSharePost";
 
 interface UserDetails {
   username?: string;
@@ -92,6 +93,41 @@ export default function HomePage() {
           ...(commentDoc.data() as Omit<PostComment, 'id'>),
         }));
 
+        let originalPost: Post | null = null;
+        if (data.originalPostId) {
+          const originalPostRef = doc(db, "posts", data.originalPostId);
+          const originalPostSnap = await getDoc(originalPostRef);
+          if (originalPostSnap.exists()) {
+            const originalData = originalPostSnap.data();
+            const originalPostUser = originalData.user || { name: "Unknown User", avatar: `https://placehold.co/100x100.png?text=U`, handle: `@unknown` };
+            originalPost = {
+              id: originalPostSnap.id,
+              userId: originalData.userId,
+              user: {
+                name: originalPostUser.name || "Unknown User",
+                avatar: originalPostUser.avatar || `https://placehold.co/100x100.png?text=${(originalPostUser.name || "U").substring(0,1)}`,
+                handle: originalPostUser.handle || `@${originalData.username || 'unknown'}`,
+              },
+              content: originalData.content,
+              image: originalData.image,
+              imageAiHint: originalData.imageAiHint,
+              likes: originalData.likes || 0,
+              likedByCurrentUser: false,
+              comments: originalData.comments || 0,
+              fetchedComments: [],
+              shares: originalData.shares || 0,
+              createdAt: originalData.createdAt,
+              timestamp: originalData.createdAt instanceof Timestamp
+                ? originalData.createdAt.toDate().toLocaleString()
+                : (originalData.createdAt?.seconds
+                  ? new Date(originalData.createdAt.seconds * 1000).toLocaleString()
+                  : new Date().toLocaleString()),
+              originalPostId: undefined,
+              originalPost: null,
+            };
+          }
+        }
+
         return {
           id: docSnap.id,
           userId: data.userId,
@@ -114,6 +150,8 @@ export default function HomePage() {
             : (data.createdAt?.seconds
               ? new Date(data.createdAt.seconds * 1000).toLocaleString()
               : new Date().toLocaleString()),
+          originalPostId: data.originalPostId,
+          originalPost: originalPost,
         };
       });
 
@@ -219,6 +257,37 @@ export default function HomePage() {
     }
   };
 
+  const onSharePost = async (postId: string, caption: string) => {
+    if (!currentUserAuth) {
+      console.log('HomePage: Cannot share post, no authenticated user');
+      toast({
+        title: "Authentication Required",
+        description: "Please log in to share posts.",
+        variant: "destructive",
+      });
+      return;
+    }
+    try {
+      const result = await handleSharePost({ postId, caption, currentUser: currentUserAuth, loggedInUserDetails, posts: feedPosts });
+      if (result.updatedPosts) {
+        setFeedPosts(result.updatedPosts);
+      } else {
+        toast({
+          title: "Error",
+          description: "Could not share the post. Please try again.",
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      console.error("HomePage: Error sharing post:", error);
+      toast({
+        title: "Error",
+        description: "Could not share the post. Please try again.",
+        variant: "destructive",
+      });
+    }
+  };
+
   console.log('HomePage: Rendering component, isLoadingAuth:', isLoadingAuth, 'isLoadingUserDetails:', isLoadingUserDetails);
 
   if (isLoadingAuth || isLoadingUserDetails) {
@@ -233,7 +302,6 @@ export default function HomePage() {
     );
   }
 
-  // Rely on UserContext for redirect, no need to check currentUserAuth here
   console.log('HomePage: Rendering main content for user:', loggedInUserDetails?.username);
 
   return (
@@ -318,6 +386,7 @@ export default function HomePage() {
             currentUserId={currentUserAuth?.uid}
             onLikePost={onLikePost}
             onCommentPost={onCommentPost}
+            onSharePost={onSharePost}
             isLCPItem={index === 0}
           />
         ))}

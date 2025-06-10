@@ -28,6 +28,70 @@ const initialCenter = {
   lng: 76.779,
 };
 
+// Custom map style for a professional look
+const mapStyles = [
+  {
+    featureType: "all",
+    elementType: "geometry",
+    stylers: [{ color: "#e8ecef" }],
+  },
+  {
+    featureType: "all",
+    elementType: "labels.text.fill",
+    stylers: [{ color: "#5c6b73" }],
+  },
+  {
+    featureType: "all",
+    elementType: "labels.text.stroke",
+    stylers: [{ color: "#ffffff" }],
+  },
+  {
+    featureType: "all",
+    elementType: "labels.icon",
+    stylers: [{ visibility: "off" }],
+  },
+  {
+    featureType: "administrative",
+    elementType: "geometry.stroke",
+    stylers: [{ color: "#d1d5d8" }],
+  },
+  {
+    featureType: "landscape",
+    elementType: "geometry",
+    stylers: [{ color: "#f5f7fa" }],
+  },
+  {
+    featureType: "poi",
+    elementType: "geometry",
+    stylers: [{ color: "#e8ecef" }],
+  },
+  {
+    featureType: "road",
+    elementType: "geometry",
+    stylers: [{ color: "#ffffff" }],
+  },
+  {
+    featureType: "road.arterial",
+    elementType: "geometry",
+    stylers: [{ color: "#e4e8eb" }],
+  },
+  {
+    featureType: "road.highway",
+    elementType: "geometry",
+    stylers: [{ color: "#d1d5d8" }],
+  },
+  {
+    featureType: "transit",
+    elementType: "geometry",
+    stylers: [{ color: "#e8ecef" }],
+  },
+  {
+    featureType: "water",
+    elementType: "geometry",
+    stylers: [{ color: "#c9d7e0" }],
+  },
+];
+
 export interface MockUserPin {
   id: string; // UID
   username: string;
@@ -47,6 +111,7 @@ export default function MapPage() {
   const [mapMarkersData, setMapMarkersData] = useState<MockUserPin[]>([]);
   const [isLoadingUsers, setIsLoadingUsers] = useState(true);
   const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
+  const [markerIcons, setMarkerIcons] = useState<{ [key: string]: string }>({});
 
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged(user => {
@@ -60,6 +125,63 @@ export default function MapPage() {
     googleMapsApiKey: googleMapsApiKey || "",
     libraries,
   });
+
+  // Function to create a custom marker icon with avatar and pin
+  const createCustomMarkerIcon = async (avatarUrl: string, userId: string) => {
+    try {
+      // Create a canvas to draw the custom marker
+      const canvas = document.createElement("canvas");
+      const size = 64; // Size of the marker
+      canvas.width = size;
+      canvas.height = size + 16; // Extra height for the pin
+      const ctx = canvas.getContext("2d");
+
+      if (!ctx) return;
+
+      // Draw the circular avatar
+      const img = new Image();
+      img.crossOrigin = "Anonymous";
+      await new Promise((resolve, reject) => {
+        img.onload = resolve;
+        img.onerror = reject;
+        img.src = avatarUrl;
+      });
+
+      // Create a circular clip path for the avatar
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(size / 2, size / 2, size / 2 - 2, 0, Math.PI * 2);
+      ctx.closePath();
+      ctx.clip();
+
+      // Draw the avatar image inside the circle
+      ctx.drawImage(img, 0, 0, size, size);
+      ctx.restore();
+
+      // Draw a white border around the avatar
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.arc(size / 2, size / 2, size / 2 - 2, 0, Math.PI * 2);
+      ctx.closePath();
+      ctx.stroke();
+
+      // Draw a small pin (triangle) below the avatar
+      ctx.fillStyle = "#ff0000"; // Red pin
+      ctx.beginPath();
+      ctx.moveTo(size / 2, size); // Bottom center of avatar
+      ctx.lineTo(size / 2 - 8, size + 16); // Left bottom of triangle
+      ctx.lineTo(size / 2 + 8, size + 16); // Right bottom of triangle
+      ctx.closePath();
+      ctx.fill();
+
+      // Convert canvas to data URL and store it
+      const dataUrl = canvas.toDataURL("image/png");
+      setMarkerIcons(prev => ({ ...prev, [userId]: dataUrl }));
+    } catch (error) {
+      console.error(`Error creating custom marker for user ${userId}:`, error);
+    }
+  };
 
   useEffect(() => {
     const fetchUsersFromFirestore = async () => {
@@ -81,7 +203,7 @@ export default function MapPage() {
           const userId = docSnap.id;
           
           if (userData.locationCoords && typeof userData.locationCoords.lat === 'number' && typeof userData.locationCoords.lng === 'number') {
-            usersForMap.push({
+            const userPin: MockUserPin = {
               id: docSnap.id,
               username: userData.username || "unknown_user",
               name: userData.fullName || userData.username || "Unknown User",
@@ -93,7 +215,10 @@ export default function MapPage() {
               bio: userData.bio,
               coverImage: userData.coverImage,
               aiHint: "map user profile",
-            });
+            };
+            usersForMap.push(userPin);
+            // Create custom marker icon for this user
+            createCustomMarkerIcon(userPin.avatar, userPin.id);
           }
         });
         setMapMarkersData(usersForMap);
@@ -169,12 +294,21 @@ export default function MapPage() {
               mapContainerStyle={containerStyle}
               center={initialCenter}
               zoom={14}
-              options={{ zoomControl: true, mapId: "POKER_CONNECT_MAP_ID" }}
+              options={{
+                zoomControl: true,
+                mapId: "POKER_CONNECT_MAP_ID",
+                styles: mapStyles, // Apply custom map styles
+              }}
             >
               {mapMarkersData.map((user) => (
                 <Marker
                   key={user.id}
                   position={user.position}
+                  icon={{
+                    url: markerIcons[user.id] || user.avatar,
+                    scaledSize: new window.google.maps.Size(64, 80), // Size including the pin
+                    anchor: new window.google.maps.Point(32, 80), // Anchor at the bottom center (tip of the pin)
+                  }}
                   onClick={() => setSelectedUser(user)}
                 />
               ))}
@@ -184,14 +318,18 @@ export default function MapPage() {
                   position={selectedUser.position}
                   onCloseClick={() => setSelectedUser(null)}
                 >
-                  <div className="p-2 flex items-center space-x-3">
-                    <Avatar className="h-10 w-10">
+                  <div className="p-3 flex items-center space-x-4 bg-white rounded-lg shadow-md max-w-xs">
+                    <Avatar className="h-12 w-12">
                       <AvatarImage src={selectedUser.avatar} alt={selectedUser.name} />
                       <AvatarFallback>{selectedUser.name.substring(0,1).toUpperCase()}</AvatarFallback>
                     </Avatar>
-                    <div>
-                      <p className="font-semibold">{selectedUser.name}</p>
-                      <Link href={`/profile/${selectedUser.username}`} className="text-sm text-primary hover:underline">
+                    <div className="flex-1">
+                      <p className="font-semibold text-lg text-gray-800">{selectedUser.name}</p>
+                      <p className="text-sm text-gray-500">{selectedUser.bio || "No bio available"}</p>
+                      <Link
+                        href={`/profile/${selectedUser.username}`}
+                        className="text-sm text-primary font-medium hover:underline hover:text-primary-dark transition-colors"
+                      >
                         View Profile
                       </Link>
                     </div>

@@ -183,32 +183,63 @@ export default function UserProfilePage() {
   useEffect(() => {
     if (!profileUser) return;
 
-    console.log('UserProfilePage: Setting up posts listener for user UID:', profileUser.uid);
+    console.log('UserProfilePage: Setting up posts listener for user:', profileUser);
+    console.log('UserProfilePage: Querying posts with userId:', profileUser.uid);
     const postsQuery = query(
       collection(db, 'posts'),
-      where('uid', '==', profileUser.uid),
+      where('userId', '==', profileUser.uid),
       limit(10)
     );
 
     const unsubscribe = onSnapshot(postsQuery, async (snapshot) => {
       console.log('Posts query snapshot size:', snapshot.size);
-      console.log('Posts query snapshot docs:', snapshot.docs.map(doc => doc.data()));
-      try {
-        const postsDataPromises = snapshot.docs.map(async (doc) => {
-          const postData = doc.data();
-          const userRef = doc(db, 'users', postData.uid);
-          const userSnap = await getDoc(userRef);
-          const userData = userSnap.exists() ? userSnap.data() : null;
+      console.log('Posts query snapshot docs:', snapshot.docs.map(postDoc => ({ id: postDoc.id, data: postDoc.data() })));
+      if (snapshot.empty) {
+        console.log('UserProfilePage: No posts found for userId:', profileUser.uid);
+        setPosts([]);
+        return;
+      }
 
-          let likedByCurrentUser = false;
-          if (currentUserAuth) {
-            const likeRef = doc(db, 'likes', `${currentUserAuth.uid}_${doc.id}`);
-            const likeSnap = await getDoc(likeRef);
-            likedByCurrentUser = likeSnap.exists();
+      try {
+        const postsDataPromises = snapshot.docs.map(async (postDoc) => {
+          const postData = postDoc.data();
+          console.log('Processing post ID:', postDoc.id, 'data:', postData);
+
+          // Validate postData.userId
+          if (!postData.userId || typeof postData.userId !== 'string') {
+            console.error('Invalid userId in post data:', postData);
+            return {
+              id: postDoc.id,
+              ...postData,
+              user: {
+                name: 'Unknown User',
+                username: 'unknown',
+                handle: '@unknown',
+                avatar: '',
+              },
+              likedByCurrentUser: false,
+              fetchedComments: [],
+            };
           }
 
+          // Fetch user data for the post author
+          const userRef = doc(db, 'users', postData.userId);
+          const userSnap = await getDoc(userRef);
+          const userData = userSnap.exists() ? userSnap.data() : null;
+          console.log('Fetched user data for post author:', userData);
+
+          // Check if the current user liked this post
+          let likedByCurrentUser = false;
+          if (currentUserAuth) {
+            const likeRef = doc(db, 'likes', `${currentUserAuth.uid}_${postDoc.id}`);
+            const likeSnap = await getDoc(likeRef);
+            likedByCurrentUser = likeSnap.exists();
+            console.log('Liked by current user:', likedByCurrentUser);
+          }
+
+          // Fetch comments for the post
           const commentsQuery = query(
-            collection(db, 'posts', doc.id, 'comments'),
+            collection(db, 'posts', postDoc.id, 'comments'),
             limit(5)
           );
           const commentsSnap = await getDocs(commentsQuery);
@@ -216,9 +247,10 @@ export default function UserProfilePage() {
             id: commentDoc.id,
             ...commentDoc.data(),
           }));
+          console.log('Fetched comments for post:', fetchedComments);
 
           return {
-            id: doc.id,
+            id: postDoc.id,
             ...postData,
             user: userData
               ? {
@@ -245,17 +277,19 @@ export default function UserProfilePage() {
         console.error('UserProfilePage: Error processing posts snapshot:', error);
         toast({ 
           title: "Error", 
-          description: "Could not load posts.", 
+          description: "Could not load posts. Please try again: " + error.message,
           variant: "destructive" 
         });
+        setPosts([]);
       }
     }, (error) => {
       console.error('UserProfilePage: Error fetching posts:', error);
       toast({ 
         title: "Error", 
-        description: "Could not load posts.", 
+        description: "Could not load posts: " + error.message,
         variant: "destructive" 
       });
+      setPosts([]);
     });
 
     return () => {
@@ -288,7 +322,7 @@ export default function UserProfilePage() {
         console.error('UserProfilePage: Error processing friends snapshot:', error);
         toast({ 
           title: "Error", 
-          description: "Could not load friends list.", 
+          description: "Could not load friends list.",
           variant: "destructive" 
         });
       }
@@ -296,7 +330,7 @@ export default function UserProfilePage() {
       console.error('UserProfilePage: Permission denied accessing friends:', error);
       toast({ 
         title: "Error", 
-        description: "Could not load friends list.", 
+        description: "Could not load friends list.",
         variant: "destructive" 
       });
     });
@@ -354,7 +388,7 @@ export default function UserProfilePage() {
           console.error('UserProfilePage: Error processing relationship check:', error);
           toast({ 
             title: "Error", 
-            description: "Could not load relationship status.", 
+            description: "Could not load relationship status.",
             variant: "destructive" 
           });
           setRelationshipStatus('not_friends');
@@ -363,7 +397,7 @@ export default function UserProfilePage() {
         console.error('Error checking friends:', error);
         toast({ 
           title: "Error", 
-          description: "Could not load relationship status.", 
+          description: "Could not load relationship status.",
           variant: "destructive" 
         });
         setRelationshipStatus('not_friends');
@@ -379,7 +413,7 @@ export default function UserProfilePage() {
       console.error('UserProfilePage: Failed to check relationship:', error);
       toast({ 
         title: "Error", 
-        description: "Could not load relationship status.", 
+        description: "Could not load relationship status.",
         variant: "destructive" 
       });
       setRelationshipStatus('not_friends');
@@ -902,7 +936,7 @@ export default function UserProfilePage() {
     console.log('UserProfilePage: Rendering error state', { error });
     return (
       <div className="flex items-center justify-center h-screen">
-        <div class="text-center">
+        <div className="text-center">
           <p className="text-lg text-red-500">{error}</p>
         </div>
       </div>
@@ -927,23 +961,25 @@ export default function UserProfilePage() {
     <div className="container mx-auto px-4 py-8">
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <Card className="md:col-span-1 shadow-lg rounded-xl">
-          <CardHeader className="relative">
+          <CardHeader>
             <div className="h-32 bg-gradient-to-r from-blue-500 to-purple-500 rounded-t-lg"></div>
-            <div className="absolute -bottom-12 left-1/2 transform -translate-x-1/2">
+          </CardHeader>
+          <CardContent className="pt-0 text-center">
+            <div className="flex justify-center -mt-12">
               <Avatar className="h-24 w-24 border-4 border-white">
                 <AvatarImage src={profileUser.avatar} alt={profileUser.username} />
                 <AvatarFallback>{profileUser.username?.charAt(0).toUpperCase()}</AvatarFallback>
               </Avatar>
             </div>
-          </CardHeader>
-          <CardContent className="pt-16 text-center">
-            <CardTitle className="text-xl">{profileUser.fullName || profileUser.username}</CardTitle>
-            <p className="text-muted-foreground">@{profileUser.username}</p>
-            <div className="mt-4 flex items-center justify-center text-muted-foreground">
-              <MapPin className="h-4 w-4 mr-1" />
-              <span>{profileUser.location || "Unknown location"}</span>
+            <div className="mt-4 p-4 border border-gray-200 rounded-lg bg-gray-50">
+              <CardTitle className="text-xl">{profileUser.fullName || profileUser.username}</CardTitle>
+              <p className="text-muted-foreground">@{profileUser.username}</p>
+              <div className="mt-2 flex items-center justify-center text-muted-foreground">
+                <MapPin className="h-4 w-4 mr-1" />
+                <span>{profileUser.location || "Unknown location"}</span>
+              </div>
+              <p className="mt-2 text-sm">{profileUser.bio || "No bio yet."}</p>
             </div>
-            <p className="mt-2 text-sm">{profileUser.bio || "No bio yet."}</p>
 
             {!isOwnProfile && (
               <div className="mt-4 flex flex-col sm:flex-row justify-center gap-2">
@@ -981,22 +1017,32 @@ export default function UserProfilePage() {
                   </>
                 )}
                 {relationshipStatus === "friends" && (
-                  <>
+                  <div className="flex flex-wrap items-center justify-center space-x-0.5 p-2 border border-gray-200 rounded-lg bg-gray-50 w-full">
                     <Button
-                      variant="outline"
+                      variant="ghost"
                       size="sm"
-                      className="bg-green-100 text-green-700 border-green-300"
+                      className="text-green-700 hover:bg-green-100"
                       disabled
                     >
                       <Users className="mr-2 h-4 w-4" /> Friends
                     </Button>
-                    <Button variant="outline" size="sm" onClick={handleMessage}>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="hover:bg-gray-200"
+                      onClick={handleMessage}
+                    >
                       <MessageCircle className="mr-2 h-4 w-4" /> Message
                     </Button>
-                    <Button variant="outline" size="sm" onClick={handleUnfriend}>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="hover:bg-red-100 text-red-600"
+                      onClick={handleUnfriend}
+                    >
                       <UserMinus className="mr-2 h-4 w-4" /> Unfriend
                     </Button>
-                  </>
+                  </div>
                 )}
               </div>
             )}

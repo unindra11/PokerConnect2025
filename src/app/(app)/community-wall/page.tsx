@@ -8,11 +8,12 @@ import { PostCard } from "@/components/post-card";
 import type { Post, Comment as PostComment } from "@/types/post";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
-import { getFirestore, collection, query, orderBy, getDocs, Timestamp, where } from "firebase/firestore";
+import { getFirestore, collection, query, orderBy, getDocs, Timestamp, where, doc, getDoc } from "firebase/firestore";
 import { app } from "@/lib/firebase";
 import { useUser } from "@/context/UserContext";
 import { handleLikePost } from "@/utils/handleLikePost";
 import { handleCommentOnPost } from "@/utils/handleCommentOnPost";
+import { handleSharePost } from "@/utils/handleSharePost";
 
 export default function CommunityWallPage() {
   const { currentUserAuth, loggedInUserDetails, isLoadingAuth } = useUser();
@@ -49,6 +50,41 @@ export default function CommunityWallPage() {
             ...(commentDoc.data() as Omit<PostComment, 'id'>)
           }));
 
+          let originalPost: Post | null = null;
+          if (data.originalPostId) {
+            const originalPostRef = doc(db, "posts", data.originalPostId);
+            const originalPostSnap = await getDoc(originalPostRef);
+            if (originalPostSnap.exists()) {
+              const originalData = originalPostSnap.data();
+              const originalPostUser = originalData.user || { name: "Unknown User", avatar: `https://placehold.co/100x100.png?text=U`, handle: `@unknown` };
+              originalPost = {
+                id: originalPostSnap.id,
+                userId: originalData.userId,
+                user: {
+                  name: originalPostUser.name || "Unknown User",
+                  avatar: originalPostUser.avatar || `https://placehold.co/100x100.png?text=${(originalPostUser.name || "U").substring(0,1)}`,
+                  handle: originalPostUser.handle || `@${originalData.username || 'unknown'}`,
+                },
+                content: originalData.content,
+                image: originalData.image,
+                imageAiHint: originalData.imageAiHint,
+                likes: originalData.likes || 0,
+                likedByCurrentUser: false,
+                comments: originalData.comments || 0,
+                fetchedComments: [],
+                shares: originalData.shares || 0,
+                createdAt: originalData.createdAt,
+                timestamp: originalData.createdAt instanceof Timestamp
+                  ? originalData.createdAt.toDate().toLocaleString()
+                  : (originalData.createdAt?.seconds
+                    ? new Date(originalData.createdAt.seconds * 1000).toLocaleString()
+                    : new Date().toLocaleString()),
+                originalPostId: undefined,
+                originalPost: null,
+              };
+            }
+          }
+
           return {
             id: docSnap.id,
             userId: data.userId,
@@ -66,7 +102,13 @@ export default function CommunityWallPage() {
             fetchedComments: fetchedComments,
             shares: data.shares || 0,
             createdAt: data.createdAt,
-            timestamp: data.createdAt instanceof Timestamp ? data.createdAt.toDate().toLocaleString() : (data.createdAt?.seconds ? new Date(data.createdAt.seconds * 1000).toLocaleString() : new Date().toLocaleString()),
+            timestamp: data.createdAt instanceof Timestamp
+              ? data.createdAt.toDate().toLocaleString()
+              : (data.createdAt?.seconds
+                ? new Date(data.createdAt.seconds * 1000).toLocaleString()
+                : new Date().toLocaleString()),
+            originalPostId: data.originalPostId,
+            originalPost: originalPost,
           };
         });
 
@@ -127,6 +169,18 @@ export default function CommunityWallPage() {
     }
   };
 
+  const onSharePost = async (postId: string, caption: string) => {
+    const result = await handleSharePost({ postId, caption, currentUser: currentUserAuth, loggedInUserDetails, posts: communityPosts });
+    if (result.updatedPosts) {
+      setCommunityPosts(result.updatedPosts);
+    }
+    if (result.error) {
+      toast({ title: "Error Sharing Post", description: result.error, variant: "destructive" });
+    } else {
+      toast({ title: "Post Shared!", description: "Your shared post has been created." });
+    }
+  };
+
   if (isLoadingAuth || (isLoading && typeof currentUserAuth === 'undefined')) {
     return (
       <div className="container mx-auto max-w-2xl text-center py-10">
@@ -183,6 +237,7 @@ export default function CommunityWallPage() {
             currentUserId={currentUserAuth?.uid}
             onLikePost={onLikePost}
             onCommentPost={onCommentPost}
+            onSharePost={onSharePost}
             isLCPItem={index === 0}
           />
         ))}

@@ -65,16 +65,21 @@ export default function CreatePostPage() {
               id: postDocSnap.id,
               userId: postData.userId,
               user: postData.user,
-              username: postData.username,
               content: postData.content,
               image: postData.image,
               imageAiHint: postData.imageAiHint,
               likes: postData.likes || 0,
               likedByCurrentUser: postData.likedByCurrentUser || false,
               comments: postData.comments || 0,
-              commentTexts: postData.commentTexts || [],
               shares: postData.shares || 0,
               createdAt: postData.createdAt,
+              timestamp: postData.createdAt instanceof Timestamp
+                ? postData.createdAt.toDate().toLocaleString()
+                : (postData.createdAt?.seconds
+                  ? new Date(postData.createdAt.seconds * 1000).toLocaleString()
+                  : new Date().toLocaleString()),
+              originalPostId: postData.originalPostId,
+              originalPost: null,
             };
             setPostToEdit(fetchedPost);
             form.setValue("postContent", fetchedPost.content);
@@ -208,19 +213,27 @@ export default function CreatePostPage() {
 
     const firestore = getFirestore(app, "poker");
 
-    const postDataForFirestore: Partial<Post> = {
-      uid: currentUserAuth.uid, // Required by security rules
-      userId: currentUserAuth.uid, // For consistency with HomePage and MyPostsPage
+    const basePostData: Partial<Post> = {
+      userId: currentUserAuth.uid,
       user: loggedInUserForPost,
-      username: loggedInUserDetails.username || "anonymous",
       content: data.postContent,
       image: finalImageUrl,
       imageAiHint: finalImageAiHint,
       likes: isEditMode && postToEdit ? postToEdit.likes : 0,
-      likedByCurrentUser: isEditMode && postToEdit ? postToEdit.likedByCurrentUser : false,
       comments: isEditMode && postToEdit ? postToEdit.comments : 0,
-      commentTexts: isEditMode && postToEdit ? postToEdit.commentTexts || [] : [],
       shares: isEditMode && postToEdit ? postToEdit.shares : 0,
+    };
+
+    // Conditionally add likedByCurrentUser only in edit mode
+    if (isEditMode && postToEdit) {
+      basePostData.likedByCurrentUser = postToEdit.likedByCurrentUser;
+    }
+
+    // Conditionally add originalPostId only if it exists
+    const originalPostId = isEditMode && postToEdit ? postToEdit.originalPostId : undefined;
+    const postDataForFirestore: Partial<Post> = {
+      ...basePostData,
+      ...(originalPostId !== undefined && { originalPostId }),
     };
 
     console.log("CreatePostPage: Attempting to save to Firestore. Is Edit Mode:", isEditMode);

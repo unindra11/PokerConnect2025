@@ -28,6 +28,7 @@ import {
 import { getAuth, onAuthStateChanged, type User as FirebaseUser } from "firebase/auth";
 import { app } from "@/lib/firebase";
 import { useUser } from "@/context/UserContext";
+import { handleSharePost } from "@/utils/handleSharePost";
 
 export default function MyPostsPage() {
   const { currentUserAuth, loggedInUserDetails, isLoadingAuth } = useUser();
@@ -88,6 +89,41 @@ export default function MyPostsPage() {
             ...(commentDoc.data() as Omit<PostComment, 'id'>)
           }));
 
+          let originalPost: Post | null = null;
+          if (data.originalPostId) {
+            const originalPostRef = doc(db, "posts", data.originalPostId);
+            const originalPostSnap = await getDoc(originalPostRef);
+            if (originalPostSnap.exists()) {
+              const originalData = originalPostSnap.data();
+              const originalPostUser = originalData.user || { name: "Unknown User", avatar: `https://placehold.co/100x100.png?text=U`, handle: `@unknown` };
+              originalPost = {
+                id: originalPostSnap.id,
+                userId: originalData.userId,
+                user: {
+                  name: originalPostUser.name || "Unknown User",
+                  avatar: originalPostUser.avatar || `https://placehold.co/100x100.png?text=${(originalPostUser.name || "U").substring(0,1)}`,
+                  handle: originalPostUser.handle || `@${originalData.username || 'unknown'}`,
+                },
+                content: originalData.content,
+                image: originalData.image,
+                imageAiHint: originalData.imageAiHint,
+                likes: originalData.likes || 0,
+                likedByCurrentUser: false,
+                comments: originalData.comments || 0,
+                fetchedComments: [],
+                shares: originalData.shares || 0,
+                createdAt: originalData.createdAt,
+                timestamp: originalData.createdAt instanceof Timestamp
+                  ? originalData.createdAt.toDate().toLocaleString()
+                  : (originalData.createdAt?.seconds
+                    ? new Date(originalData.createdAt.seconds * 1000).toLocaleString()
+                    : new Date().toLocaleString()),
+                originalPostId: undefined,
+                originalPost: null,
+              };
+            }
+          }
+
           return {
             id: docSnap.id,
             userId: data.userId,
@@ -108,6 +144,8 @@ export default function MyPostsPage() {
             timestamp: data.createdAt instanceof Timestamp
               ? data.createdAt.toDate().toLocaleString()
               : (data.createdAt?.seconds ? new Date(data.createdAt.seconds * 1000).toLocaleString() : new Date().toLocaleString()),
+            originalPostId: data.originalPostId,
+            originalPost: originalPost,
           } as Post;
         });
         const posts = await Promise.all(postsPromises);
@@ -294,7 +332,7 @@ export default function MyPostsPage() {
         throw new Error("Post not found");
       }
       const postData = postSnap.data();
-      const postOwnerId = postData.uid;
+      const postOwnerId = postData.userId;
 
       // Step 2: Add the comment
       const commentDocRef = await addDoc(commentsCollectionRef, newCommentData);
@@ -345,6 +383,34 @@ export default function MyPostsPage() {
       toast({
         title: "Error Posting Comment",
         description: "Could not save your comment. Please try again.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const onSharePost = async (postId: string, caption: string) => {
+    if (!currentUser) {
+      toast({ title: "Authentication Error", description: "You must be logged in to share a post.", variant: "destructive" });
+      return;
+    }
+    if (!loggedInUserDetails) {
+      toast({ title: "Profile Error", description: "Could not retrieve your profile details to share.", variant: "destructive" });
+      return;
+    }
+
+    try {
+      const result = await handleSharePost({ postId, caption, currentUser, loggedInUserDetails, posts: userPosts });
+      if (result.updatedPosts) {
+        setUserPosts(result.updatedPosts);
+        toast({ title: "Post Shared!", description: "Your shared post has been created." });
+      } else if (result.error) {
+        toast({ title: "Error Sharing Post", description: result.error, variant: "destructive" });
+      }
+    } catch (error) {
+      console.error("MyPostsPage: Error sharing post:", error);
+      toast({
+        title: "Error",
+        description: "Could not share the post. Please try again.",
         variant: "destructive",
       });
     }
@@ -419,6 +485,7 @@ export default function MyPostsPage() {
             onDeletePost={handleDeletePost}
             onLikePost={handleLikePost}
             onCommentPost={handleCommentOnPost}
+            onSharePost={onSharePost}
             isLCPItem={index === 0}
           />
         ))}
