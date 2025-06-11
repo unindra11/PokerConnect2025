@@ -1,3 +1,4 @@
+
 'use client';
 
 import { createContext, useContext, useState, useEffect, useMemo } from "react";
@@ -161,30 +162,44 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
           };
         });
 
-        // Fetch like_post, comment_post, and share_post notifications
+        // Fetch like_post, comment_post, share_post, and friend_request_accepted notifications
         const notificationsRef = collection(db, "users", currentUserAuth.uid, "notifications");
         const notificationsQuery = query(
           notificationsRef,
-          where("type", "in", ["like_post", "comment_post", "share_post"]),
+          where("type", "in", ["like_post", "comment_post", "share_post", "friend_request_accepted"]),
           orderBy("createdAt", "desc")
         );
         const unsubscribeActivity = onSnapshot(notificationsQuery, (notificationsSnapshot) => {
           const activityNotifications: AppNotification[] = notificationsSnapshot.docs.map(docSnap => {
             const data = docSnap.data();
+            let messageText = "";
+            switch(data.type) {
+              case "like_post":
+                messageText = "liked your post.";
+                break;
+              case "comment_post":
+                messageText = `commented on your post: "${data.commentText}"`;
+                break;
+              case "share_post":
+                messageText = `shared your post: "${data.caption}"`;
+                break;
+              case "friend_request_accepted":
+                messageText = `accepted your friend request.`;
+                break;
+              default:
+                messageText = "interacted with your content.";
+            }
+
             return {
               id: docSnap.id,
               type: data.type,
-              user: {
+              user: { // This 'user' is the sender of the notification
                 name: data.senderUsername || "Unknown User",
                 avatar: data.senderAvatar || `https://placehold.co/100x100.png?text=${(data.senderUsername || "U").substring(0,1)}`,
                 username: data.senderUsername || "unknown_user",
                 uid: data.senderId,
               },
-              message: data.type === "like_post"
-                ? "liked your post."
-                : data.type === "comment_post"
-                ? `commented on your post: "${data.commentText}"`
-                : `shared your post: "${data.caption}"`,
+              message: messageText,
               timestamp: data.createdAt,
               read: data.read || false,
               senderId: data.senderId,
@@ -198,6 +213,11 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
 
           // Combine notifications
           const combinedNotifications = [...friendRequestNotifications, ...activityNotifications];
+          combinedNotifications.sort((a,b) => {
+             const timeA = a.timestamp instanceof Timestamp ? a.timestamp.toMillis() : new Date(a.timestamp as string | Date).getTime();
+             const timeB = b.timestamp instanceof Timestamp ? b.timestamp.toMillis() : new Date(b.timestamp as string | Date).getTime();
+             return timeB - timeA;
+          });
           setNotifications(combinedNotifications);
         }, (error) => {
           console.error("UserContext: Error listening to activity notifications:", error);
@@ -218,7 +238,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const count = notifications.reduce((acc, notification) => {
       if (
-        ["friend_request_firestore", "like_post", "comment_post", "share_post"].includes(notification.type) &&
+        ["friend_request_firestore", "like_post", "comment_post", "share_post", "friend_request_accepted"].includes(notification.type) &&
         !notification.read
       ) {
         return acc + 1;
@@ -256,3 +276,5 @@ export function useUser() {
   }
   return context;
 }
+
+    

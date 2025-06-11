@@ -1,3 +1,4 @@
+
 'use client';
 
 import { useState, useEffect } from "react";
@@ -16,6 +17,7 @@ import {
   serverTimestamp,
   writeBatch,
   Timestamp,
+  addDoc,
 } from "firebase/firestore";
 import { useUser } from "@/context/UserContext";
 import { formatDistanceToNow } from 'date-fns';
@@ -89,7 +91,7 @@ export default function NotificationsPage() {
       console.log("NotificationsPage: Using notifications from UserContext for UID:", loggedInUserDetails.uid);
       const combinedNotifications = [
         ...contextNotifications,
-        ...staticNotifications.filter(n => !["friend_request", "friend_request_firestore", "like_post", "comment_post", "share_post"].includes(n.type)),
+        ...staticNotifications.filter(n => !["friend_request", "friend_request_firestore", "like_post", "comment_post", "share_post", "friend_request_accepted"].includes(n.type)),
       ];
       combinedNotifications.sort((a, b) => getEpochMillis(b.timestamp) - getEpochMillis(a.timestamp));
       setDisplayedNotifications(combinedNotifications);
@@ -130,6 +132,7 @@ export default function NotificationsPage() {
       case "like_post": return <ThumbsUp className="h-5 w-5 text-red-500" />;
       case "share": return <Share2 className="h-5 w-5 text-green-500" />;
       case "share_post": return <Share2 className="h-5 w-5 text-green-500" />;
+      case "friend_request_accepted": return <UserCheck className="h-5 w-5 text-green-500" />;
       case "friend_accept": return <UserCheck className="h-5 w-5 text-blue-500" />;
       case "friend_accept_confirmation": return <CheckCircle className="h-5 w-5 text-green-500" />;
       case "friend_request_sent_confirmation": return <UserPlus className="h-5 w-5 text-blue-500" />;
@@ -146,7 +149,7 @@ export default function NotificationsPage() {
     }
 
     const acceptorUid = loggedInUserDetails.uid;
-    const senderUid = notification.user.uid;
+    const senderUid = notification.user.uid; // This is the UID of the person who SENT the friend request
     const db = getFirestore(app, "poker");
     const batch = writeBatch(db);
 
@@ -172,10 +175,25 @@ export default function NotificationsPage() {
       since: serverTimestamp()
     };
     batch.set(senderFriendsRef, senderFriendData);
+    
+    // Create notification for the original sender (User A) that their request was accepted by User B
+    const notificationForSenderRef = collection(db, "users", senderUid, "notifications");
+    const notificationForSenderData = {
+      type: "friend_request_accepted",
+      senderId: acceptorUid, // The user who accepted the request
+      senderUsername: loggedInUserDetails.username || "Anonymous",
+      senderAvatar: loggedInUserDetails.avatar || `https://placehold.co/40x40.png?text=${(loggedInUserDetails.username || "A").substring(0,1)}`,
+      receiverId: senderUid, // The user who originally sent the request
+      createdAt: serverTimestamp(),
+      read: false,
+    };
+    const newNotificationDocRef = doc(notificationForSenderRef); // Create a new doc reference
+    batch.set(newNotificationDocRef, notificationForSenderData); // Add to batch
+
 
     try {
       await batch.commit();
-      toast({ title: "Friend Request Accepted!", description: `You are now friends with ${notification.user.name}.` });
+      toast({ title: "Friend Request Accepted!", description: `You are now friends with ${notification.user.name}. A notification has been sent to them.` });
       setDisplayedNotifications(prev => prev.filter(n => n.id !== notification.id));
     } catch (error) {
       console.error("NotificationsPage: Error accepting friend request in Firestore:", error);
@@ -207,7 +225,7 @@ export default function NotificationsPage() {
   };
 
   const handleMarkAsRead = async (notification: AppNotification) => {
-    if (notification.read || !loggedInUserDetails || !["like_post", "comment_post", "share_post"].includes(notification.type)) return;
+    if (notification.read || !loggedInUserDetails || !["like_post", "comment_post", "share_post", "friend_request_accepted"].includes(notification.type)) return;
 
     const db = getFirestore(app, "poker");
     const notificationRef = doc(db, "users", loggedInUserDetails.uid, "notifications", notification.id);
@@ -241,7 +259,7 @@ export default function NotificationsPage() {
 
     const db = getFirestore(app, "poker");
     const unreadNotifications = displayedNotifications.filter(n =>
-      ["like_post", "comment_post", "share_post"].includes(n.type) && !n.read
+      ["like_post", "comment_post", "share_post", "friend_request_accepted"].includes(n.type) && !n.read
     );
     if (unreadNotifications.length === 0) {
       toast({ title: "No Unread Notifications", description: "All notifications are already read." });
@@ -299,7 +317,7 @@ export default function NotificationsPage() {
     <div className="container mx-auto max-w-2xl">
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-3xl font-bold">Notifications</h1>
-        {displayedNotifications.some(n => ["friend_request_firestore", "like_post", "comment_post", "share_post"].includes(n.type) && !n.read) && (
+        {displayedNotifications.some(n => ["friend_request_firestore", "like_post", "comment_post", "share_post", "friend_request_accepted"].includes(n.type) && !n.read) && (
           <Button variant="outline" size="sm" onClick={handleMarkAllAsRead}>Mark All as Read</Button>
         )}
       </div>
@@ -338,11 +356,13 @@ export default function NotificationsPage() {
               <div className="flex-1">
                 <p className="text-sm">
                   {notification.user && notification.type !== "system" && (
-                    <span className="font-semibold text-primary">{notification.user.name}</span>
+                     <Link href={`/profile/${notification.user.username}`} className="font-semibold text-primary hover:underline" onClick={(e) => e.stopPropagation()}>
+                        {notification.user.name}
+                     </Link>
                   )}
                   {' '}
                   {["like_post", "comment_post", "share_post"].includes(notification.type) && notification.postId ? (
-                    <Link href={`/post/${notification.postId}`} className="text-primary hover:underline">
+                    <Link href={`/post/${notification.postId}`} className="text-primary hover:underline" onClick={(e) => e.stopPropagation()}>
                       {notification.message}
                     </Link>
                   ) : (
@@ -364,3 +384,5 @@ export default function NotificationsPage() {
     </div>
   );
 }
+
+    
