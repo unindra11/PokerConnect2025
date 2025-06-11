@@ -25,7 +25,7 @@ import { ref, uploadBytesResumable, getDownloadURL } from "firebase/storage";
 import { signOut as firebaseSignOut } from "firebase/auth";
 import { getFirestore, doc, updateDoc, collection, getDocs } from "firebase/firestore";
 import { auth, app } from "@/lib/firebase";
-import { useUser } from "@/context/UserContext";
+import { UserProvider, useUser } from "@/context/UserContext";
 
 const MAX_AVATAR_SIZE_MB = 2;
 const MAX_AVATAR_SIZE_BYTES = MAX_AVATAR_SIZE_MB * 1024 * 1024;
@@ -39,7 +39,15 @@ interface MockUserPin {
 }
 
 export default function AppLayout({ children }: { children: ReactNode }) {
-  const { currentUserAuth, loggedInUserDetails, isLoadingAuth, setLoggedInUserDetails } = useUser();
+  return (
+    <UserProvider>
+      <AppLayoutContent>{children}</AppLayoutContent>
+    </UserProvider>
+  );
+}
+
+function AppLayoutContent({ children }: { children: ReactNode }) {
+  const { currentUserAuth, loggedInUserDetails, isLoadingAuth, isLoadingUserDetails, setLoggedInUserDetails } = useUser();
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
@@ -141,7 +149,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
     }
   };
 
-  if (isLoadingAuth) {
+  if (isLoadingAuth || isLoadingUserDetails) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-background text-foreground">
         <Loader2 className="h-12 w-12 animate-spin text-primary" />

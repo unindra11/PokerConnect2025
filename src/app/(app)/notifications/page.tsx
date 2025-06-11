@@ -11,14 +11,11 @@ import {
   getFirestore, 
   collection, 
   query, 
-  where, 
-  getDocs, 
   doc, 
   updateDoc, 
   serverTimestamp,
   writeBatch,
   Timestamp,
-  orderBy
 } from "firebase/firestore";
 import { useUser } from "@/context/UserContext";
 import { formatDistanceToNow } from 'date-fns';
@@ -77,7 +74,7 @@ const staticNotifications: AppNotification[] = [
 ];
 
 export default function NotificationsPage() {
-  const { currentUserAuth, loggedInUserDetails, isLoadingAuth, isLoadingUserDetails } = useUser();
+  const { currentUserAuth, loggedInUserDetails, isLoadingAuth, isLoadingUserDetails, notifications: contextNotifications } = useUser();
   const [displayedNotifications, setDisplayedNotifications] = useState<AppNotification[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const { toast } = useToast();
@@ -89,8 +86,14 @@ export default function NotificationsPage() {
     }
 
     if (loggedInUserDetails && loggedInUserDetails.uid) {
-      console.log("NotificationsPage: loggedInUserDetails available, calling fetchNotifications for UID:", loggedInUserDetails.uid);
-      fetchNotifications(loggedInUserDetails.uid);
+      console.log("NotificationsPage: Using notifications from UserContext for UID:", loggedInUserDetails.uid);
+      const combinedNotifications = [
+        ...contextNotifications,
+        ...staticNotifications.filter(n => !["friend_request", "friend_request_firestore", "like_post", "comment_post", "share_post"].includes(n.type)),
+      ];
+      combinedNotifications.sort((a, b) => getEpochMillis(b.timestamp) - getEpochMillis(a.timestamp));
+      setDisplayedNotifications(combinedNotifications);
+      setIsLoading(false);
     } else if (!currentUserAuth) {
       console.log("NotificationsPage: No authenticated user. Displaying static notifications only.");
       setDisplayedNotifications(staticNotifications.sort((a, b) => getEpochMillis(b.timestamp) - getEpochMillis(a.timestamp)));
@@ -100,7 +103,7 @@ export default function NotificationsPage() {
       setDisplayedNotifications(staticNotifications.sort((a, b) => getEpochMillis(b.timestamp) - getEpochMillis(a.timestamp)));
       setIsLoading(false);
     }
-  }, [currentUserAuth, loggedInUserDetails, isLoadingAuth, isLoadingUserDetails]);
+  }, [currentUserAuth, loggedInUserDetails, isLoadingAuth, isLoadingUserDetails, contextNotifications]);
 
   const getEpochMillis = (timestamp: AppNotification['timestamp']): number => {
     if (timestamp instanceof Timestamp) {
@@ -115,104 +118,6 @@ export default function NotificationsPage() {
     }
     console.warn("NotificationsPage: Could not parse timestamp, returning 0:", timestamp);
     return 0;
-  };
-
-  const fetchNotifications = async (currentUserId: string) => {
-    if (!isLoading) setIsLoading(true);
-    const db = getFirestore(app, "poker");
-    try {
-      // Fetch friend requests
-      const requestsRef = collection(db, "friendRequests");
-      const friendRequestQuery = query(
-        requestsRef,
-        where("receiverId", "==", currentUserId),
-        where("status", "==", "pending"),
-        orderBy("createdAt", "desc")
-      );
-      const friendRequestSnapshot = await getDocs(friendRequestQuery);
-      console.log(`NotificationsPage: Found ${friendRequestSnapshot.docs.length} friend requests for user ${currentUserId}`);
-
-      const friendRequestNotifications: AppNotification[] = friendRequestSnapshot.docs.map(docSnap => {
-        const data = docSnap.data();
-        return {
-          id: docSnap.id,
-          type: "friend_request_firestore",
-          user: { 
-            name: data.senderUsername || "Unknown Sender",
-            avatar: data.senderAvatar || `https://placehold.co/100x100.png?text=${(data.senderUsername || "S").substring(0,1)}`,
-            username: data.senderUsername || "unknown_sender",
-            uid: data.senderId 
-          },
-          message: "sent you a friend request.",
-          timestamp: data.createdAt,
-          read: false,
-          senderId: data.senderId,
-          senderUsername: data.senderUsername,
-          senderAvatar: data.senderAvatar,
-        };
-      });
-
-      // Fetch like_post, comment_post, and share_post notifications
-      const notificationsRef = collection(db, "users", currentUserId, "notifications");
-      const notificationsQuery = query(
-        notificationsRef,
-        where("type", "in", ["like_post", "comment_post", "share_post"]),
-        orderBy("createdAt", "desc")
-      );
-      const notificationsSnapshot = await getDocs(notificationsQuery);
-      console.log(`NotificationsPage: Found ${notificationsSnapshot.docs.length} like/comment/share notifications for user ${currentUserId}`);
-      notificationsSnapshot.docs.forEach(doc => {
-        console.log(`NotificationsPage: Notification for user ${currentUserId}:`, doc.data());
-      });
-
-      const activityNotifications: AppNotification[] = notificationsSnapshot.docs.map(docSnap => {
-        const data = docSnap.data();
-        return {
-          id: docSnap.id,
-          type: data.type,
-          user: {
-            name: data.senderUsername || "Unknown User",
-            avatar: data.senderAvatar || `https://placehold.co/100x100.png?text=${(data.senderUsername || "U").substring(0,1)}`,
-            username: data.senderUsername || "unknown_user",
-            uid: data.senderId,
-          },
-          message: data.type === "like_post"
-            ? "liked your post."
-            : data.type === "comment_post"
-            ? `commented on your post: "${data.commentText}"`
-            : `shared your post: "${data.caption}"`,
-          timestamp: data.createdAt,
-          read: data.read || false,
-          senderId: data.senderId,
-          senderUsername: data.senderUsername,
-          senderAvatar: data.senderAvatar,
-          postId: data.postId,
-          commentText: data.type === "comment_post" ? data.commentText : undefined,
-          caption: data.type === "share_post" ? data.caption : undefined,
-        };
-      });
-
-      // Combine notifications
-      const combinedNotifications = [
-        ...friendRequestNotifications,
-        ...activityNotifications,
-        ...staticNotifications.filter(n => !["friend_request", "friend_request_firestore", "like_post", "comment_post", "share_post"].includes(n.type)),
-      ];
-
-      combinedNotifications.sort((a, b) => getEpochMillis(b.timestamp) - getEpochMillis(a.timestamp));
-      console.log(`NotificationsPage: Combined notifications for user ${currentUserId}:`, combinedNotifications);
-      setDisplayedNotifications(combinedNotifications);
-    } catch (error) {
-      console.error("NotificationsPage: Error fetching notifications from Firestore:", error);
-      toast({ 
-        title: "Error Loading Notifications", 
-        description: `Could not retrieve notifications. Error: ${error instanceof Error ? error.message : String(error)}`, 
-        variant: "destructive" 
-      });
-      setDisplayedNotifications(staticNotifications.sort((a, b) => getEpochMillis(b.timestamp) - getEpochMillis(a.timestamp)));
-    } finally {
-      setIsLoading(false);
-    }
   };
 
   const getNotificationIcon = (type: string) => {
@@ -322,7 +227,18 @@ export default function NotificationsPage() {
   };
 
   const handleMarkAllAsRead = async () => {
-    if (!loggedInUserDetails) return;
+    if (!loggedInUserDetails || !currentUserAuth) {
+      toast({ title: "Error", description: "User not authenticated.", variant: "destructive" });
+      return;
+    }
+
+    console.log("NotificationsPage: handleMarkAllAsRead - currentUserAuth.uid:", currentUserAuth.uid, "loggedInUserDetails.uid:", loggedInUserDetails.uid);
+    if (currentUserAuth.uid !== loggedInUserDetails.uid) {
+      console.error("NotificationsPage: UID mismatch between currentUserAuth and loggedInUserDetails");
+      toast({ title: "Error", description: "User authentication mismatch.", variant: "destructive" });
+      return;
+    }
+
     const db = getFirestore(app, "poker");
     const unreadNotifications = displayedNotifications.filter(n =>
       ["like_post", "comment_post", "share_post"].includes(n.type) && !n.read

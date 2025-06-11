@@ -30,7 +30,7 @@ const menuItems = [
 ];
 
 export function AppNavigation() {
-  const { loggedInUserDetails, isLoadingUserDetails } = useUser();
+  const { loggedInUserDetails, isLoadingUserDetails, unreadNotificationsCount } = useUser();
   const pathname = usePathname();
 
   if (isLoadingUserDetails) {
@@ -50,12 +50,14 @@ export function AppNavigation() {
     <SidebarMenu>
       {menuItems.map((item) => {
         const Icon = item.icon;
+        const isNotifications = item.href === "/notifications";
         return (
           <SidebarMenuItem key={item.href}>
             <SidebarMenuButton
               asChild
               isActive={pathname === item.href || (item.href !== "/home" && pathname.startsWith(item.href))}
               tooltip={item.label}
+              className={isNotifications ? "relative" : ""}
             >
               <Link href={item.href}>
                 <span className="flex items-center justify-start gap-2 w-full">
@@ -63,6 +65,11 @@ export function AppNavigation() {
                   <span className="group-data-[collapsible=icon]:hidden delay-300 whitespace-nowrap truncate">
                     {item.label}
                   </span>
+                  {isNotifications && unreadNotificationsCount > 0 && (
+                    <span className="absolute top-2 right-2 bg-red-500 text-white text-xs font-bold rounded-full h-5 w-5 flex items-center justify-center group-data-[collapsible=icon]:top-1 group-data-[collapsible=icon]:right-1">
+                      {unreadNotificationsCount}
+                    </span>
+                  )}
                 </span>
               </Link>
             </SidebarMenuButton>

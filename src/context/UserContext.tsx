@@ -3,7 +3,7 @@
 import { createContext, useContext, useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { onAuthStateChanged, type User as FirebaseUser } from "firebase/auth";
-import { getFirestore, doc, getDoc } from "firebase/firestore";
+import { getFirestore, doc, getDoc, collection, query, where, onSnapshot, Timestamp, orderBy } from "firebase/firestore";
 import { app, auth } from "@/lib/firebase";
 
 interface LoggedInUser {
@@ -19,12 +19,32 @@ interface LoggedInUser {
   locationCoords?: { lat: number; lng: number } | null;
 }
 
+interface AppNotification {
+  id: string;
+  type: string;
+  user: { name: string; avatar?: string; username: string; uid?: string } | null;
+  message: string;
+  timestamp: string | Timestamp | Date;
+  read: boolean;
+  senderId?: string;
+  senderUsername?: string;
+  senderAvatar?: string;
+  receiverId?: string;
+  receiverUsername?: string;
+  receiverAvatar?: string;
+  postId?: string;
+  commentText?: string;
+  caption?: string;
+}
+
 interface UserContextType {
   currentUserAuth: FirebaseUser | null;
   loggedInUserDetails: LoggedInUser | null;
   isLoadingAuth: boolean;
   isLoadingUserDetails: boolean;
   setLoggedInUserDetails: (details: LoggedInUser | null) => void;
+  notifications: AppNotification[];
+  unreadNotificationsCount: number;
 }
 
 const UserContext = createContext<UserContextType | undefined>(undefined);
@@ -34,6 +54,8 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   const [loggedInUserDetails, setLoggedInUserDetails] = useState<LoggedInUser | null>(null);
   const [isLoadingAuth, setIsLoadingAuth] = useState(true);
   const [isLoadingUserDetails, setIsLoadingUserDetails] = useState(true);
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const [unreadNotificationsCount, setUnreadNotificationsCount] = useState<number>(0);
 
   const router = useRouter();
   const db = getFirestore(app, "poker");
@@ -103,6 +125,109 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     return () => unsubscribe();
   }, [router, db]);
 
+  useEffect(() => {
+    if (!currentUserAuth || !loggedInUserDetails) {
+      setNotifications([]);
+      return;
+    }
+
+    const fetchNotifications = () => {
+      // Fetch friend requests
+      const requestsRef = collection(db, "friendRequests");
+      const friendRequestQuery = query(
+        requestsRef,
+        where("receiverId", "==", currentUserAuth.uid),
+        where("status", "==", "pending"),
+        orderBy("createdAt", "desc")
+      );
+      const unsubscribeFriendRequests = onSnapshot(friendRequestQuery, (snapshot) => {
+        const friendRequestNotifications: AppNotification[] = snapshot.docs.map(docSnap => {
+          const data = docSnap.data();
+          return {
+            id: docSnap.id,
+            type: "friend_request_firestore",
+            user: {
+              name: data.senderUsername || "Unknown Sender",
+              avatar: data.senderAvatar || `https://placehold.co/100x100.png?text=${(data.senderUsername || "S").substring(0,1)}`,
+              username: data.senderUsername || "unknown_sender",
+              uid: data.senderId,
+            },
+            message: "sent you a friend request.",
+            timestamp: data.createdAt,
+            read: false,
+            senderId: data.senderId,
+            senderUsername: data.senderUsername,
+            senderAvatar: data.senderAvatar,
+          };
+        });
+
+        // Fetch like_post, comment_post, and share_post notifications
+        const notificationsRef = collection(db, "users", currentUserAuth.uid, "notifications");
+        const notificationsQuery = query(
+          notificationsRef,
+          where("type", "in", ["like_post", "comment_post", "share_post"]),
+          orderBy("createdAt", "desc")
+        );
+        const unsubscribeActivity = onSnapshot(notificationsQuery, (notificationsSnapshot) => {
+          const activityNotifications: AppNotification[] = notificationsSnapshot.docs.map(docSnap => {
+            const data = docSnap.data();
+            return {
+              id: docSnap.id,
+              type: data.type,
+              user: {
+                name: data.senderUsername || "Unknown User",
+                avatar: data.senderAvatar || `https://placehold.co/100x100.png?text=${(data.senderUsername || "U").substring(0,1)}`,
+                username: data.senderUsername || "unknown_user",
+                uid: data.senderId,
+              },
+              message: data.type === "like_post"
+                ? "liked your post."
+                : data.type === "comment_post"
+                ? `commented on your post: "${data.commentText}"`
+                : `shared your post: "${data.caption}"`,
+              timestamp: data.createdAt,
+              read: data.read || false,
+              senderId: data.senderId,
+              senderUsername: data.senderUsername,
+              senderAvatar: data.senderAvatar,
+              postId: data.postId,
+              commentText: data.type === "comment_post" ? data.commentText : undefined,
+              caption: data.type === "share_post" ? data.caption : undefined,
+            };
+          });
+
+          // Combine notifications
+          const combinedNotifications = [...friendRequestNotifications, ...activityNotifications];
+          setNotifications(combinedNotifications);
+        }, (error) => {
+          console.error("UserContext: Error listening to activity notifications:", error);
+        });
+
+        return () => unsubscribeActivity();
+      }, (error) => {
+        console.error("UserContext: Error listening to friend requests:", error);
+      });
+
+      return () => unsubscribeFriendRequests();
+    };
+
+    const unsubscribe = fetchNotifications();
+    return () => unsubscribe && unsubscribe();
+  }, [currentUserAuth, loggedInUserDetails, db]);
+
+  useEffect(() => {
+    const count = notifications.reduce((acc, notification) => {
+      if (
+        ["friend_request_firestore", "like_post", "comment_post", "share_post"].includes(notification.type) &&
+        !notification.read
+      ) {
+        return acc + 1;
+      }
+      return acc;
+    }, 0);
+    setUnreadNotificationsCount(count);
+  }, [notifications]);
+
   // Memoize the context value to prevent unnecessary re-renders
   const contextValue = useMemo(
     () => ({
@@ -111,8 +236,10 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       isLoadingAuth,
       isLoadingUserDetails,
       setLoggedInUserDetails,
+      notifications,
+      unreadNotificationsCount,
     }),
-    [currentUserAuth, loggedInUserDetails, isLoadingAuth, isLoadingUserDetails]
+    [currentUserAuth, loggedInUserDetails, isLoadingAuth, isLoadingUserDetails, notifications, unreadNotificationsCount]
   );
 
   return (
