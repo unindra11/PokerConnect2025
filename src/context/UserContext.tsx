@@ -1,4 +1,3 @@
-
 'use client';
 
 import { createContext, useContext, useState, useEffect, useMemo } from "react";
@@ -162,11 +161,11 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
           };
         });
 
-        // Fetch like_post, comment_post, share_post, and friend_request_accepted notifications
+        // Fetch like_post, comment_post, share_post, friend_request_accepted, and friend_request_declined notifications
         const notificationsRef = collection(db, "users", currentUserAuth.uid, "notifications");
         const notificationsQuery = query(
           notificationsRef,
-          where("type", "in", ["like_post", "comment_post", "share_post", "friend_request_accepted"]),
+          where("type", "in", ["like_post", "comment_post", "share_post", "friend_request_accepted", "friend_request_declined"]),
           orderBy("createdAt", "desc")
         );
         const unsubscribeActivity = onSnapshot(notificationsQuery, (notificationsSnapshot) => {
@@ -184,7 +183,10 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
                 messageText = `shared your post: "${data.caption}"`;
                 break;
               case "friend_request_accepted":
-                messageText = `accepted your friend request.`;
+                messageText = "accepted your friend request.";
+                break;
+              case "friend_request_declined":
+                messageText = "declined your friend request.";
                 break;
               default:
                 messageText = "interacted with your content.";
@@ -193,7 +195,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
             return {
               id: docSnap.id,
               type: data.type,
-              user: { // This 'user' is the sender of the notification
+              user: {
                 name: data.senderUsername || "Unknown User",
                 avatar: data.senderAvatar || `https://placehold.co/100x100.png?text=${(data.senderUsername || "U").substring(0,1)}`,
                 username: data.senderUsername || "unknown_user",
@@ -238,7 +240,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const count = notifications.reduce((acc, notification) => {
       if (
-        ["friend_request_firestore", "like_post", "comment_post", "share_post", "friend_request_accepted"].includes(notification.type) &&
+        ["friend_request_firestore", "like_post", "comment_post", "share_post", "friend_request_accepted", "friend_request_declined"].includes(notification.type) &&
         !notification.read
       ) {
         return acc + 1;
@@ -276,5 +278,3 @@ export function useUser() {
   }
   return context;
 }
-
-    

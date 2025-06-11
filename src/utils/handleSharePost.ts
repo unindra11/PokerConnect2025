@@ -1,5 +1,5 @@
 import { getFirestore, doc, updateDoc, increment, addDoc, collection, serverTimestamp, getDoc } from "firebase/firestore";
-import { app } from "@/lib/firebase";
+import { app, auth } from "@/lib/firebase"; // Import auth to check the current user
 import type { Post, User } from "@/types/post";
 
 interface SharePostParams {
@@ -28,6 +28,15 @@ export async function handleSharePost({ postId, caption, currentUser, loggedInUs
   if (!postId || typeof postId !== "string") {
     console.error(`handleSharePost: Invalid postId provided: ${postId}`);
     return { error: "Invalid post ID. Cannot share the post." };
+  }
+
+  // Debug: Verify the authenticated user
+  const authUser = auth.currentUser;
+  console.log("handleSharePost: Provided currentUser.uid:", currentUser.uid);
+  console.log("handleSharePost: Actual auth.currentUser.uid:", authUser?.uid);
+  if (!authUser || authUser.uid !== currentUser.uid) {
+    console.error("handleSharePost: Authentication mismatch or user not authenticated");
+    return { error: "Authentication error: User session mismatch or not authenticated." };
   }
 
   console.log(`handleSharePost: Attempting to share post with postId: ${postId}`);

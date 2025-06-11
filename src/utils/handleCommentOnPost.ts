@@ -1,5 +1,5 @@
 import { getFirestore, collection, doc, updateDoc, increment, addDoc, serverTimestamp, getDoc } from "firebase/firestore";
-import { app } from "@/lib/firebase";
+import { app, auth } from "@/lib/firebase"; // Import auth to check the current user
 import type { Post, Comment as PostComment } from "@/types/post";
 
 interface HandleCommentOnPostParams {
@@ -24,6 +24,15 @@ export async function handleCommentOnPost({ postId, commentText, currentUser, lo
     return { error: "Could not retrieve your profile details to comment." };
   }
 
+  // Debug: Verify the authenticated user
+  const authUser = auth.currentUser;
+  console.log("handleCommentOnPost: Provided currentUser.uid:", currentUser.uid);
+  console.log("handleCommentOnPost: Actual auth.currentUser.uid:", authUser?.uid);
+  if (!authUser || authUser.uid !== currentUser.uid) {
+    console.error("handleCommentOnPost: Authentication mismatch or user not authenticated");
+    return { error: "Authentication error: User session mismatch or not authenticated." };
+  }
+
   const db = getFirestore(app, "poker");
   const postRef = doc(db, "posts", postId);
   const commentsCollectionRef = collection(db, "posts", postId, "comments");
@@ -35,6 +44,7 @@ export async function handleCommentOnPost({ postId, commentText, currentUser, lo
     text: commentText,
     createdAt: serverTimestamp(),
   };
+  console.log("handleCommentOnPost: New comment data:", newCommentData);
 
   try {
     // Fetch the post to get the owner's UID
@@ -47,7 +57,10 @@ export async function handleCommentOnPost({ postId, commentText, currentUser, lo
 
     // Add the comment
     const commentDocRef = await addDoc(commentsCollectionRef, newCommentData);
+    console.log("handleCommentOnPost: Comment added with ID:", commentDocRef.id);
+
     await updateDoc(postRef, { comments: increment(1) });
+    console.log("handleCommentOnPost: Updated comments count for post:", postId);
 
     // Create a notification for the post owner (if the commenter is not the owner)
     if (currentUser.uid !== postOwnerId) {
@@ -62,6 +75,7 @@ export async function handleCommentOnPost({ postId, commentText, currentUser, lo
         createdAt: serverTimestamp(),
         read: false,
       };
+      console.log("handleCommentOnPost: Creating notification for post owner:", notificationData);
       await addDoc(notificationRef, notificationData);
       console.log(`handleCommentOnPost: Created notification for user ${postOwnerId} about comment on post ${postId}`);
     }

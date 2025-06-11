@@ -1,5 +1,5 @@
 import { getFirestore, collection, query, where, getDocs, doc, updateDoc, increment, writeBatch, serverTimestamp, getDoc } from "firebase/firestore";
-import { app } from "@/lib/firebase";
+import { app, auth } from "@/lib/firebase"; // Import auth to check the current user
 import type { Post } from "@/types/post";
 
 interface HandleLikePostParams {
@@ -21,6 +21,15 @@ export async function handleLikePost({ postId, currentUser, posts, loggedInUserD
 
   if (!loggedInUserDetails) {
     return { error: "Could not retrieve your profile details to like the post." };
+  }
+
+  // Debug: Verify the authenticated user
+  const authUser = auth.currentUser;
+  console.log("handleLikePost: Provided currentUser.uid:", currentUser.uid);
+  console.log("handleLikePost: Actual auth.currentUser.uid:", authUser?.uid);
+  if (!authUser || authUser.uid !== currentUser.uid) {
+    console.error("handleLikePost: Authentication mismatch or user not authenticated");
+    return { error: "Authentication error: User session mismatch or not authenticated." };
   }
 
   const db = getFirestore(app, "poker");
@@ -62,7 +71,9 @@ export async function handleLikePost({ postId, currentUser, posts, loggedInUserD
     if (likeSnapshot.empty) {
       // Like the post
       const newLikeRef = doc(likesCollectionRef);
-      batch.set(newLikeRef, { postId: postId, userId: currentUser.uid, createdAt: serverTimestamp() });
+      const newLikeData = { postId: postId, userId: currentUser.uid, createdAt: serverTimestamp() };
+      console.log("handleLikePost: New like data:", newLikeData);
+      batch.set(newLikeRef, newLikeData);
       batch.update(postDocRef, { likes: increment(1) });
 
       // Create a notification for the post owner (if the liker is not the owner)
@@ -71,23 +82,26 @@ export async function handleLikePost({ postId, currentUser, posts, loggedInUserD
         const notificationData = {
           type: "like_post",
           senderId: currentUser.uid,
-          senderUsername: loggedInUserDetails.username || "Anonymous", // Use loggedInUserDetails for the liker
-          senderAvatar: loggedInUserDetails.avatar || `https://placehold.co/40x40.png?text=${(loggedInUserDetails.username || "A").substring(0,1)}`, // Use loggedInUserDetails for the liker
+          senderUsername: loggedInUserDetails.username || "Anonymous",
+          senderAvatar: loggedInUserDetails.avatar || `https://placehold.co/40x40.png?text=${(loggedInUserDetails.username || "A").substring(0,1)}`,
           postId: postId,
           createdAt: serverTimestamp(),
           read: false,
         };
         const notificationDocRef = doc(notificationRef);
+        console.log("handleLikePost: Creating notification for post owner:", notificationData);
         batch.set(notificationDocRef, notificationData);
         console.log(`handleLikePost: Created like notification for user ${postOwnerId} on post ${postId}`);
       }
 
       await batch.commit();
+      console.log("handleLikePost: Batch commit successful for liking post");
     } else {
       // Unlike the post
       likeSnapshot.forEach(doc => batch.delete(doc.ref));
       batch.update(postDocRef, { likes: increment(-1) });
       await batch.commit();
+      console.log("handleLikePost: Batch commit successful for unliking post");
     }
 
     return { updatedPosts };

@@ -1,11 +1,10 @@
-
 'use client';
 
 import { useState, useEffect } from "react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { BellRing, UserPlus, MessageSquareText, ThumbsUp, Share2, UserCheck, CheckCircle, Loader2 } from "lucide-react";
+import { BellRing, UserPlus, MessageSquareText, ThumbsUp, Share2, UserCheck, CheckCircle, Loader2, XCircle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { app } from "@/lib/firebase";
 import { 
@@ -91,7 +90,7 @@ export default function NotificationsPage() {
       console.log("NotificationsPage: Using notifications from UserContext for UID:", loggedInUserDetails.uid);
       const combinedNotifications = [
         ...contextNotifications,
-        ...staticNotifications.filter(n => !["friend_request", "friend_request_firestore", "like_post", "comment_post", "share_post", "friend_request_accepted"].includes(n.type)),
+        ...staticNotifications.filter(n => !["friend_request", "friend_request_firestore", "like_post", "comment_post", "share_post", "friend_request_accepted", "friend_request_declined"].includes(n.type)),
       ];
       combinedNotifications.sort((a, b) => getEpochMillis(b.timestamp) - getEpochMillis(a.timestamp));
       setDisplayedNotifications(combinedNotifications);
@@ -133,6 +132,7 @@ export default function NotificationsPage() {
       case "share": return <Share2 className="h-5 w-5 text-green-500" />;
       case "share_post": return <Share2 className="h-5 w-5 text-green-500" />;
       case "friend_request_accepted": return <UserCheck className="h-5 w-5 text-green-500" />;
+      case "friend_request_declined": return <XCircle className="h-5 w-5 text-red-500" />;
       case "friend_accept": return <UserCheck className="h-5 w-5 text-blue-500" />;
       case "friend_accept_confirmation": return <CheckCircle className="h-5 w-5 text-green-500" />;
       case "friend_request_sent_confirmation": return <UserPlus className="h-5 w-5 text-blue-500" />;
@@ -149,7 +149,7 @@ export default function NotificationsPage() {
     }
 
     const acceptorUid = loggedInUserDetails.uid;
-    const senderUid = notification.user.uid; // This is the UID of the person who SENT the friend request
+    const senderUid = notification.user.uid;
     const db = getFirestore(app, "poker");
     const batch = writeBatch(db);
 
@@ -180,19 +180,20 @@ export default function NotificationsPage() {
     const notificationForSenderRef = collection(db, "users", senderUid, "notifications");
     const notificationForSenderData = {
       type: "friend_request_accepted",
-      senderId: acceptorUid, // The user who accepted the request
+      senderId: acceptorUid,
       senderUsername: loggedInUserDetails.username || "Anonymous",
       senderAvatar: loggedInUserDetails.avatar || `https://placehold.co/40x40.png?text=${(loggedInUserDetails.username || "A").substring(0,1)}`,
-      receiverId: senderUid, // The user who originally sent the request
+      receiverId: senderUid,
       createdAt: serverTimestamp(),
       read: false,
     };
-    const newNotificationDocRef = doc(notificationForSenderRef); // Create a new doc reference
-    batch.set(newNotificationDocRef, notificationForSenderData); // Add to batch
-
+    const newNotificationDocRef = doc(notificationForSenderRef);
+    batch.set(newNotificationDocRef, notificationForSenderData);
+    console.log("NotificationsPage: Creating friend_request_accepted notification for senderUid:", senderUid, "with data:", notificationForSenderData);
 
     try {
       await batch.commit();
+      console.log("NotificationsPage: Batch commit successful for friend request acceptance");
       toast({ title: "Friend Request Accepted!", description: `You are now friends with ${notification.user.name}. A notification has been sent to them.` });
       setDisplayedNotifications(prev => prev.filter(n => n.id !== notification.id));
     } catch (error) {
@@ -206,14 +207,42 @@ export default function NotificationsPage() {
     }
   };
 
-  const handleDeclineFirestoreRequest = async (notificationId: string) => {
-    if (!loggedInUserDetails) return;
+  const handleDeclineFirestoreRequest = async (notification: AppNotification) => {
+    if (!loggedInUserDetails || !notification.user?.uid) {
+      toast({ title: "Error", description: "Missing user data for declining request.", variant: "destructive" });
+      console.error("NotificationsPage: Aborted decline - missing user data. loggedInUserDetails:", loggedInUserDetails, "Notification User:", notification.user);
+      return;
+    }
+
+    const declinerUid = loggedInUserDetails.uid;
+    const senderUid = notification.user.uid;
     const db = getFirestore(app, "poker");
-    const requestRef = doc(db, "friendRequests", notificationId);
+    const batch = writeBatch(db);
+
+    // Update the friend request status to declined
+    const requestRef = doc(db, "friendRequests", notification.id);
+    batch.update(requestRef, { status: "declined", updatedAt: serverTimestamp() });
+
+    // Create notification for the original sender (User A) that their request was declined by User B
+    const notificationForSenderRef = collection(db, "users", senderUid, "notifications");
+    const notificationForSenderData = {
+      type: "friend_request_declined",
+      senderId: declinerUid,
+      senderUsername: loggedInUserDetails.username || "Anonymous",
+      senderAvatar: loggedInUserDetails.avatar || `https://placehold.co/40x40.png?text=${(loggedInUserDetails.username || "A").substring(0,1)}`,
+      receiverId: senderUid,
+      createdAt: serverTimestamp(),
+      read: false,
+    };
+    const newNotificationDocRef = doc(notificationForSenderRef);
+    batch.set(newNotificationDocRef, notificationForSenderData);
+    console.log("NotificationsPage: Creating friend_request_declined notification for senderUid:", senderUid, "with data:", notificationForSenderData);
+
     try {
-      await updateDoc(requestRef, { status: "declined", updatedAt: serverTimestamp() });
-      toast({ title: "Friend Request Declined", variant: "destructive" });
-      setDisplayedNotifications(prev => prev.filter(n => n.id !== notificationId));
+      await batch.commit();
+      console.log("NotificationsPage: Batch commit successful for friend request decline");
+      toast({ title: "Friend Request Declined", description: `You have declined the friend request from ${notification.user.name}. A notification has been sent to them.`, variant: "destructive" });
+      setDisplayedNotifications(prev => prev.filter(n => n.id !== notification.id));
     } catch (error) {
       console.error("NotificationsPage: Error declining friend request in Firestore:", error);
       toast({ 
@@ -225,7 +254,7 @@ export default function NotificationsPage() {
   };
 
   const handleMarkAsRead = async (notification: AppNotification) => {
-    if (notification.read || !loggedInUserDetails || !["like_post", "comment_post", "share_post", "friend_request_accepted"].includes(notification.type)) return;
+    if (notification.read || !loggedInUserDetails || !["like_post", "comment_post", "share_post", "friend_request_accepted", "friend_request_declined"].includes(notification.type)) return;
 
     const db = getFirestore(app, "poker");
     const notificationRef = doc(db, "users", loggedInUserDetails.uid, "notifications", notification.id);
@@ -259,7 +288,7 @@ export default function NotificationsPage() {
 
     const db = getFirestore(app, "poker");
     const unreadNotifications = displayedNotifications.filter(n =>
-      ["like_post", "comment_post", "share_post", "friend_request_accepted"].includes(n.type) && !n.read
+      ["like_post", "comment_post", "share_post", "friend_request_accepted", "friend_request_declined"].includes(n.type) && !n.read
     );
     if (unreadNotifications.length === 0) {
       toast({ title: "No Unread Notifications", description: "All notifications are already read." });
@@ -307,7 +336,7 @@ export default function NotificationsPage() {
   if (isLoading) { 
     return (
       <div className="container mx-auto max-w-2xl text-center py-10">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <Loader2 className="h-8 w-5 animate-spin text-primary" />
         <p className="mt-2">Loading notifications...</p>
       </div>
     );
@@ -317,7 +346,7 @@ export default function NotificationsPage() {
     <div className="container mx-auto max-w-2xl">
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-3xl font-bold">Notifications</h1>
-        {displayedNotifications.some(n => ["friend_request_firestore", "like_post", "comment_post", "share_post", "friend_request_accepted"].includes(n.type) && !n.read) && (
+        {displayedNotifications.some(n => ["friend_request_firestore", "like_post", "comment_post", "share_post", "friend_request_accepted", "friend_request_declined"].includes(n.type) && !n.read) && (
           <Button variant="outline" size="sm" onClick={handleMarkAllAsRead}>Mark All as Read</Button>
         )}
       </div>
@@ -374,7 +403,7 @@ export default function NotificationsPage() {
               {notification.type === "friend_request_firestore" && notification.user && loggedInUserDetails && (
                 <div className="flex gap-2 ml-auto">
                   <Button size="sm" onClick={(e) => { e.stopPropagation(); handleAcceptFirestoreRequest(notification); }}>Accept</Button>
-                  <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); handleDeclineFirestoreRequest(notification.id); }}>Decline</Button>
+                  <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); handleDeclineFirestoreRequest(notification); }}>Decline</Button>
                 </div>
               )}
             </CardContent>
@@ -384,5 +413,3 @@ export default function NotificationsPage() {
     </div>
   );
 }
-
-    
