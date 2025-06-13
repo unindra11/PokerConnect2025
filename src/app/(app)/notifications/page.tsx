@@ -153,9 +153,11 @@ export default function NotificationsPage() {
     const db = getFirestore(app, "poker");
     const batch = writeBatch(db);
 
+    // Update the friend request status to accepted
     const requestRef = doc(db, "friendRequests", notification.id);
     batch.update(requestRef, { status: "accepted", updatedAt: serverTimestamp() });
 
+    // Add the sender to the acceptor's friends list
     const acceptorFriendsRef = doc(db, "users", acceptorUid, "friends", senderUid);
     const acceptorFriendData = {
       friendUserId: senderUid, 
@@ -166,6 +168,7 @@ export default function NotificationsPage() {
     };
     batch.set(acceptorFriendsRef, acceptorFriendData);
 
+    // Add the acceptor to the sender's friends list
     const senderFriendsRef = doc(db, "users", senderUid, "friends", acceptorUid);
     const senderFriendData = {
       friendUserId: acceptorUid, 
@@ -190,6 +193,10 @@ export default function NotificationsPage() {
     const newNotificationDocRef = doc(notificationForSenderRef);
     batch.set(newNotificationDocRef, notificationForSenderData);
     console.log("NotificationsPage: Creating friend_request_accepted notification for senderUid:", senderUid, "with data:", notificationForSenderData);
+
+    // Delete the friend request notification from the acceptor's notifications
+    const notificationRef = doc(db, "users", acceptorUid, "notifications", notification.id);
+    batch.delete(notificationRef);
 
     try {
       await batch.commit();
@@ -237,6 +244,10 @@ export default function NotificationsPage() {
     const newNotificationDocRef = doc(notificationForSenderRef);
     batch.set(newNotificationDocRef, notificationForSenderData);
     console.log("NotificationsPage: Creating friend_request_declined notification for senderUid:", senderUid, "with data:", notificationForSenderData);
+
+    // Delete the friend request notification from the decliner's notifications
+    const notificationRef = doc(db, "users", declinerUid, "notifications", notification.id);
+    batch.delete(notificationRef);
 
     try {
       await batch.commit();

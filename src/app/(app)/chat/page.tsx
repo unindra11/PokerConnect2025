@@ -1,6 +1,7 @@
-"use client";
+'use client';
 
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { app, auth } from "@/lib/firebase";
 import {
@@ -8,44 +9,46 @@ import {
   collection,
   query,
   where,
-  onSnapshot,
-  doc,
   getDoc,
+  doc,
+  onSnapshot,
+  getDocs,
 } from "firebase/firestore";
 import type { User as FirebaseUser } from "firebase/auth";
+import { useToast } from "@/hooks/use-toast";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Loader2, MessageSquare } from "lucide-react";
-import { useToast } from "@/hooks/use-toast";
-import Link from "next/link";
+import { Separator } from "@/components/ui/separator";
+import { MessageCircle } from "lucide-react";
 
-interface ChatSummary {
+interface Chat {
   id: string;
-  otherParticipant: {
-    id: string;
-    username: string;
-    name: string;
-    avatar: string;
-  };
+  participants: string[];
   lastMessage: {
     text: string;
     senderId: string;
     timestamp: any;
   };
-  unreadCount: number;
+  unreadCounts: { [key: string]: number };
+  otherUser: {
+    uid: string;
+    username: string;
+    fullName: string;
+    avatar: string;
+  };
 }
 
 export default function ChatsPage() {
   const router = useRouter();
-  const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
-  const [chats, setChats] = useState<ChatSummary[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
   const { toast } = useToast();
+  const [currentUserAuth, setCurrentUserAuth] = useState<FirebaseUser | null>(null);
+  const [chats, setChats] = useState<Chat[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const db = getFirestore(app, "poker");
 
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged((user) => {
-      setCurrentUser(user);
+      setCurrentUserAuth(user);
       if (!user) {
         router.push("/login");
         setChats([]);
@@ -56,150 +59,257 @@ export default function ChatsPage() {
   }, [router]);
 
   useEffect(() => {
-    if (!currentUser) return;
+    if (!currentUserAuth) return;
 
-    setIsLoading(true);
-    const chatsQuery = query(
-      collection(db, "chats"),
-      where("participants", "array-contains", currentUser.uid)
-    );
+    const fetchChats = async () => {
+      try {
+        setIsLoading(true);
+        console.log("ChatsPage: Fetching chats for user:", currentUserAuth.uid);
+        currentUserAuth.getIdToken().then(token => {
+          console.log("ChatsPage: Current user token:", token);
+        }).catch(error => {
+          console.error("ChatsPage: Error fetching user token:", error);
+        });
+        await currentUserAuth.getIdToken(true);
+        console.log("ChatsPage: Token refreshed successfully");
 
-    const unsubscribe = onSnapshot(chatsQuery, async (snapshot) => {
-      const chatsData: ChatSummary[] = [];
-      for (const chatDoc of snapshot.docs) {
-        const chatData = chatDoc.data();
-        const otherParticipantId = chatData.participants.find(
-          (id: string) => id !== currentUser.uid
+        // Step 1: Fetch chat IDs where the user is a participant
+        const chatsQuery = query(
+          collection(db, "chats"),
+          where("participants", "array-contains", currentUserAuth.uid)
         );
 
-        if (!otherParticipantId) continue;
-
-        const friendDocRef = doc(db, "users", currentUser.uid, "friends", otherParticipantId);
-        const friendDocSnap = await getDoc(friendDocRef);
-        if (!friendDocSnap.exists()) {
-          console.warn(`ChatsPage: Skipping chat ${chatDoc.id} - not friends with ${otherParticipantId}`);
-          continue;
+        let chatDocs = [];
+        try {
+          const snapshot = await getDocs(chatsQuery);
+          chatDocs = snapshot.docs;
+        } catch (error) {
+          console.error("ChatsPage: Initial query failed:", error);
+          // If the query fails due to permissions, proceed to fetch documents individually
         }
 
-        const otherUserRef = doc(db, "users", otherParticipantId);
-        const otherUserSnap = await getDoc(otherUserRef);
-        let otherParticipant;
-        if (!otherUserSnap.exists()) {
-          otherParticipant = {
-            id: otherParticipantId,
-            username: "unknown_user",
-            name: "Unknown User",
-            avatar: `https://placehold.co/40x40.png?text=U`,
-          };
-        } else {
-          const otherUserData = otherUserSnap.data();
-          otherParticipant = {
-            id: otherParticipantId,
-            username: otherUserData.username || "unknown_user",
-            name: otherUserData.fullName || otherUserData.username || "Unknown User",
-            avatar: otherUserData.avatar || `https://placehold.co/40x40.png?text=${(otherUserData.username || "U").substring(0, 1)}`,
-          };
+        const chatsData: Chat[] = [];
+        // Step 2: Fetch each chat document individually
+        for (const chatDoc of chatDocs) {
+          try {
+            const chatData = chatDoc.data();
+            if (!chatData.participants || !Array.isArray(chatData.participants)) {
+              console.warn(`ChatsPage: Invalid participants for chat ${chatDoc.id}`, chatData);
+              continue;
+            }
+
+            const otherUserId = chatData.participants.find(
+              (uid: string) => uid !== currentUserAuth.uid
+            );
+
+            if (!otherUserId) {
+              console.warn(`ChatsPage: No other user found in participants for chat ${chatDoc.id}`, chatData);
+              continue;
+            }
+
+            // Check friendship status
+            const friendshipRef1 = doc(db, "users", currentUserAuth.uid, "friends", otherUserId);
+            const friendshipRef2 = doc(db, "users", otherUserId, "friends", currentUserAuth.uid);
+
+            const [friendshipSnap1, friendshipSnap2] = await Promise.all([
+              getDoc(friendshipRef1),
+              getDoc(friendshipRef2),
+            ]);
+
+            console.log(`ChatsPage: Debug for chat ${chatDoc.id} - Are friends: ${friendshipSnap1.exists()} && ${friendshipSnap2.exists()}`);
+
+            const areFriends = friendshipSnap1.exists() && friendshipSnap2.exists();
+
+            if (!areFriends) {
+              console.warn(
+                `ChatsPage: Skipping chat ${chatDoc.id} - Are friends: ${areFriends}`
+              );
+              continue;
+            }
+
+            const userDocRef = doc(db, "users", otherUserId);
+            const userDoc = await getDoc(userDocRef);
+            if (!userDoc.exists()) {
+              console.warn(`ChatsPage: User ${otherUserId} not found for chat ${chatDoc.id}`);
+              continue;
+            }
+
+            const userData = userDoc.data();
+
+            chatsData.push({
+              id: chatDoc.id,
+              participants: chatData.participants,
+              lastMessage: chatData.lastMessage || { text: "", senderId: "", timestamp: null },
+              unreadCounts: chatData.unreadCounts || { [currentUserAuth.uid]: 0 },
+              otherUser: {
+                uid: otherUserId,
+                username: userData.username || "Unknown",
+                fullName: userData.fullName || userData.username || "Unknown",
+                avatar: userData.avatar || "",
+              },
+            });
+          } catch (error) {
+            console.warn(`ChatsPage: Failed to fetch chat ${chatDoc.id}:`, error);
+            continue; // Skip chats that fail due to permissions
+          }
         }
 
-        chatsData.push({
-          id: chatDoc.id,
-          otherParticipant,
-          lastMessage: chatData.lastMessage,
-          unreadCount: chatData.unreadCounts[currentUser.uid] || 0,
+        chatsData.sort((a, b) => {
+          const aTimestamp = a.lastMessage?.timestamp?.toMillis() || 0;
+          const bTimestamp = b.lastMessage?.timestamp?.toMillis() || 0;
+          return bTimestamp - aTimestamp;
         });
+
+        setChats(chatsData);
+        setIsLoading(false);
+
+        // Set up a listener for real-time updates
+        const unsubscribe = onSnapshot(chatsQuery, async (snapshot) => {
+          const updatedChats: Chat[] = [];
+          for (const chatDoc of snapshot.docs) {
+            try {
+              const chatData = chatDoc.data();
+              if (!chatData.participants || !Array.isArray(chatData.participants)) {
+                console.warn(`ChatsPage: Invalid participants for chat ${chatDoc.id}`, chatData);
+                continue;
+              }
+
+              const otherUserId = chatData.participants.find(
+                (uid: string) => uid !== currentUserAuth.uid
+              );
+
+              if (!otherUserId) {
+                console.warn(`ChatsPage: No other user found in participants for chat ${chatDoc.id}`, chatData);
+                continue;
+              }
+
+              const friendshipRef1 = doc(db, "users", currentUserAuth.uid, "friends", otherUserId);
+              const friendshipRef2 = doc(db, "users", otherUserId, "friends", currentUserAuth.uid);
+
+              const [friendshipSnap1, friendshipSnap2] = await Promise.all([
+                getDoc(friendshipRef1),
+                getDoc(friendshipRef2),
+              ]);
+
+              const areFriends = friendshipSnap1.exists() && friendshipSnap2.exists();
+
+              if (!areFriends) {
+                console.warn(`ChatsPage: Skipping chat ${chatDoc.id} - Are friends: ${areFriends}`);
+                continue;
+              }
+
+              const userDocRef = doc(db, "users", otherUserId);
+              const userDoc = await getDoc(userDocRef);
+              if (!userDoc.exists()) {
+                console.warn(`ChatsPage: User ${otherUserId} not found for chat ${chatDoc.id}`);
+                continue;
+              }
+
+              const userData = userDoc.data();
+
+              updatedChats.push({
+                id: chatDoc.id,
+                participants: chatData.participants,
+                lastMessage: chatData.lastMessage || { text: "", senderId: "", timestamp: null },
+                unreadCounts: chatData.unreadCounts || { [currentUserAuth.uid]: 0 },
+                otherUser: {
+                  uid: otherUserId,
+                  username: userData.username || "Unknown",
+                  fullName: userData.fullName || userData.username || "Unknown",
+                  avatar: userData.avatar || "",
+                },
+              });
+            } catch (error) {
+              console.warn(`ChatsPage: Failed to fetch updated chat ${chatDoc.id}:`, error);
+              continue;
+            }
+          }
+
+          updatedChats.sort((a, b) => {
+            const aTimestamp = a.lastMessage?.timestamp?.toMillis() || 0;
+            const bTimestamp = b.lastMessage?.timestamp?.toMillis() || 0;
+            return bTimestamp - aTimestamp;
+          });
+
+          setChats(updatedChats);
+        }, (error) => {
+          console.error("ChatsPage: Error in listener:", error);
+          // Listener errors are logged but don't affect the initial load
+        });
+
+        return () => unsubscribe();
+      } catch (error) {
+        console.error("ChatsPage: Error setting up chats listener:", error);
+        toast({
+          title: "Error",
+          description: "Could not load chats.",
+          variant: "destructive",
+        });
+        setChats([]);
+        setIsLoading(false);
       }
+    };
 
-      setChats(chatsData.sort((a, b) => {
-        const aTime = a.lastMessage.timestamp?.toDate?.() || new Date(0);
-        const bTime = b.lastMessage.timestamp?.toDate?.() || new Date(0);
-        return bTime - aTime;
-      }));
-      setIsLoading(false);
-    }, (error) => {
-      console.error("ChatsPage: Error fetching chats:", error);
-      toast({
-        title: "Error",
-        description: "Could not load your chats. Please try again.",
-        variant: "destructive",
-      });
-      setIsLoading(false);
-    });
+    fetchChats();
+  }, [currentUserAuth, toast, db]);
 
-    return () => unsubscribe();
-  }, [currentUser, toast, db]);
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <div className="text-center">
+          <p className="text-lg">Loading chats...</p>
+        </div>
+      </div>
+    );
+  }
 
-  const formatTimestamp = (timestamp: any) => {
-    if (!timestamp || !timestamp.toDate) return "Unknown";
-    const date = timestamp.toDate();
-    const now = new Date();
-    const diffInMs = now.getTime() - date.getTime();
-    const diffInDays = Math.floor(diffInMs / (1000 * 60 * 60 * 24));
-
-    if (diffInDays === 0) {
-      return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-    } else if (diffInDays === 1) {
-      return "Yesterday";
-    } else if (diffInDays < 7) {
-      return date.toLocaleDateString([], { weekday: "short" });
-    } else {
-      return date.toLocaleDateString();
-    }
-  };
+  if (!currentUserAuth) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <div className="text-center">
+          <p className="text-lg">Please log in to view your chats.</p>
+          <Link href="/login" className="text-blue-500 underline">
+            Log In
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="container mx-auto">
-      <Card className="mb-8 shadow-lg rounded-xl">
+    <div className="container mx-auto px-4 py-8">
+      <Card className="shadow-lg rounded-xl">
         <CardHeader>
-          <div className="flex items-center gap-2">
-            <MessageSquare className="h-6 w-6 text-primary" />
-            <CardTitle className="text-xl">Messages</CardTitle>
-          </div>
+          <CardTitle className="text-2xl">Chats</CardTitle>
         </CardHeader>
         <CardContent>
-          {isLoading && (
-            <div className="text-center py-6">
-              <Loader2 className="h-8 w-8 animate-spin text-primary mx-auto" />
-              <p className="mt-2">Loading your chats...</p>
-            </div>
-          )}
-          {!isLoading && chats.length === 0 && (
-            <Card className="text-center p-6 shadow-md rounded-lg">
-              <CardHeader>
-                <CardTitle className="text-lg">No Chats Yet!</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="mb-3 text-muted-foreground">
-                  Start a conversation with a friend from the Friends page.
-                </p>
-              </CardContent>
-            </Card>
-          )}
-          {!isLoading && chats.length > 0 && (
+          {chats.length === 0 ? (
+            <p className="text-center text-muted-foreground">
+              No chats yet. Start a conversation with a friend!
+            </p>
+          ) : (
             <div className="space-y-4">
               {chats.map((chat) => (
-                <Link href={`/chat/${chat.id}`} key={chat.id} passHref>
-                  <Card className="p-4 flex items-center gap-3 hover:bg-accent transition-colors cursor-pointer">
-                    <Avatar className="h-10 w-10">
-                      <AvatarImage src={chat.otherParticipant.avatar} alt={chat.otherParticipant.name} />
-                      <AvatarFallback>{chat.otherParticipant.name.substring(0, 1).toUpperCase()}</AvatarFallback>
+                <Link key={chat.id} href={`/chat/${chat.id}`}>
+                  <div className="flex items-center gap-4 p-4 rounded-lg hover:bg-gray-100 transition-colors">
+                    <Avatar className="h-12 w-12">
+                      <AvatarImage src={chat.otherUser.avatar} alt={chat.otherUser.fullName} />
+                      <AvatarFallback>{chat.otherUser.fullName.charAt(0)}</AvatarFallback>
                     </Avatar>
                     <div className="flex-1">
-                      <div className="flex justify-between items-baseline">
-                        <p className="font-semibold">{chat.otherParticipant.name}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {formatTimestamp(chat.lastMessage.timestamp)}
-                        </p>
-                      </div>
-                      <p className="text-sm text-muted-foreground truncate">
-                        {chat.lastMessage.text}
+                      <p className="font-semibold">{chat.otherUser.fullName}</p>
+                      <p className="text-sm text-muted-foreground">@{chat.otherUser.username}</p>
+                      <p className="text-sm">
+                        {chat.lastMessage?.text || "No messages yet"}
                       </p>
                     </div>
-                    {chat.unreadCount > 0 && (
-                      <span className="bg-primary text-primary-foreground rounded-full px-2 py-1 text-xs">
-                        {chat.unreadCount}
+                    {chat.unreadCounts[currentUserAuth.uid] > 0 && (
+                      <span className="bg-blue-500 text-white text-xs font-bold px-2 py-1 rounded-full">
+                        {chat.unreadCounts[currentUserAuth.uid]}
                       </span>
                     )}
-                  </Card>
+                  </div>
+                  <Separator />
                 </Link>
               ))}
             </div>

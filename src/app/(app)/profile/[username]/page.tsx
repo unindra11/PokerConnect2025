@@ -1,900 +1,670 @@
 'use client';
 
 import { useEffect, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
-import { doc, collection, query, where, getDocs, getDoc, onSnapshot, writeBatch, serverTimestamp, increment, limit, getFirestore, setDoc } from "firebase/firestore";
-import { app } from "@/lib/firebase";
-import { User } from "@/lib/types";
+import { useRouter, useParams } from "next/navigation";
+import Link from "next/link";
+import { app, auth } from "@/lib/firebase";
+import {
+  getFirestore,
+  collection,
+  query,
+  where,
+  getDocs,
+  getDoc,
+  doc,
+  onSnapshot,
+  setDoc,
+  addDoc,
+  updateDoc,
+  deleteDoc,
+  serverTimestamp,
+} from "firebase/firestore";
+import type { User as FirebaseUser } from "firebase/auth";
 import { useToast } from "@/hooks/use-toast";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { MapPin, Users, MessageCircle, UserMinus, UserPlus, Check, X, Clock } from "lucide-react";
-import { PostCard } from "@/components/post-card";
 import { Separator } from "@/components/ui/separator";
-import { useUser } from "@/context/UserContext";
-import Link from "next/link";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { MapPin, MoreHorizontal, UserMinus, UserPlus, Share2, MessageCircle, Heart } from "lucide-react";
 
-// Global error handler for unhandled promise rejections
-if (typeof window !== 'undefined') {
-  window.addEventListener('unhandledrejection', event => {
-    console.error('Unhandled promise rejection:', event.reason);
-  });
+interface UserProfile {
+  uid: string;
+  email: string;
+  fullName: string;
+  username: string;
+  avatar: string;
+  bio: string;
+  location: { country: string; state: string; city: string } | null;
+  locationCoords?: { lat: number; lng: number };
+  createdAt: any;
+}
+
+interface Friend {
+  friendUserId: string;
+  username: string;
+  name: string;
+  avatar: string;
+  since: any;
+}
+
+interface Post {
+  id: string;
+  userId: string;
+  user: {
+    name: string;
+    handle: string;
+    avatar: string;
+  };
+  content: string;
+  image?: string;
+  imageAiHint?: string;
+  likes: number;
+  comments: number;
+  shares: number;
+  createdAt: any;
+  updatedAt?: any;
+  originalPostId?: string;
+  likedByCurrentUser: boolean;
+  commentsData?: Comment[];
+}
+
+interface Comment {
+  id: string;
+  userId: string;
+  username: string;
+  avatar: string;
+  text: string;
+  createdAt: any;
 }
 
 export default function UserProfilePage() {
-  const params = useParams();
-  const username = params?.username as string;
   const router = useRouter();
+  const { username } = useParams();
   const { toast } = useToast();
-
-  const { currentUserAuth, loggedInUserDetails, isLoadingAuth, isLoadingUserDetails } = useUser();
-  const [profileUser, setProfileUser] = useState<User | null>(null);
-  const [relationshipStatus, setRelationshipStatus] = useState<"not_friends" | "friends" | "pending_sent" | "pending_received">("not_friends");
-  const [posts, setPosts] = useState<any[]>([]);
-  const [friends, setFriends] = useState<any[]>([]);
-  const [isProcessingAction, setIsProcessingAction] = useState(false);
+  const [currentUserAuth, setCurrentUserAuth] = useState<FirebaseUser | null>(null);
+  const [loggedInUserDetails, setLoggedInUserDetails] = useState<UserProfile | null>(null);
+  const [profileUser, setProfileUser] = useState<UserProfile | null>(null);
+  const [posts, setPosts] = useState<Post[]>([]);
+  const [friends, setFriends] = useState<Friend[]>([]);
+  const [relationshipStatus, setRelationshipStatus] = useState<
+    "self" | "friends" | "pending_sent" | "pending_received" | "not_friends"
+  >("not_friends");
+  const [isLoadingAuth, setIsLoadingAuth] = useState(true);
   const [isLoadingProfile, setIsLoadingProfile] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [authTimeout, setAuthTimeout] = useState(false);
-
+  const [isLoadingPosts, setIsLoadingPosts] = useState(true);
+  const [isLoadingFriends, setIsLoadingFriends] = useState(true);
+  const [displayLocation, setDisplayLocation] = useState<string | null>(null);
   const db = getFirestore(app, "poker");
 
   useEffect(() => {
-    console.log('UserProfilePage: Checking authentication state', { isLoadingAuth, currentUserAuth });
-    if (!isLoadingAuth && !currentUserAuth) {
-      console.log('UserProfilePage: Redirecting to /login due to no currentUserAuth');
-      router.push("/login");
-    }
-  }, [isLoadingAuth, currentUserAuth, router]);
-
-  useEffect(() => {
-    if (isLoadingAuth || isLoadingUserDetails) {
-      const timeout = setTimeout(() => {
-        console.log('UserProfilePage: Authentication or user details loading timed out');
-        setAuthTimeout(true);
-        setError('Loading user data took too long. Please try refreshing the page.');
-        setIsLoadingProfile(false);
-      }, 10000);
-
-      return () => clearTimeout(timeout);
-    }
-  }, [isLoadingAuth, isLoadingUserDetails]);
-
-  useEffect(() => {
-    let isMounted = true;
-
-    async function fetchProfileUser() {
-      console.log('fetchProfileUser: Starting fetch at', new Date().toISOString());
-      console.log('fetchProfileUser: Current state', { username, currentUserAuth, loggedInUserDetails });
-      setIsLoadingProfile(true);
-      setError(null);
-
-      if (!username) {
-        console.log('fetchProfileUser: username is missing');
-        if (isMounted) {
-          setError('Username is missing');
-          setIsLoadingProfile(false);
-        }
-        return;
-      }
-
-      if (!currentUserAuth) {
-        console.log('fetchProfileUser: currentUserAuth is null');
-        if (isMounted) {
-          setError('User not authenticated');
-          setIsLoadingProfile(false);
-        }
-        return;
-      }
-
-      try {
-        if (loggedInUserDetails?.username === username) {
-          console.log('fetchProfileUser: Using loggedInUserDetails for own profile', loggedInUserDetails);
-          if (isMounted) {
-            setProfileUser({
-              uid: loggedInUserDetails.uid,
-              username: loggedInUserDetails.username,
-              fullName: loggedInUserDetails.fullName || '',
-              bio: loggedInUserDetails.bio || '',
-              avatar: loggedInUserDetails.avatar || '',
-              location: loggedInUserDetails.location || '',
-            });
-            setIsLoadingProfile(false);
-          }
-          return;
-        }
-
-        console.log('fetchProfileUser: Fetching profile for username:', username);
-        const usersQuery = query(
-          collection(db, 'users'),
-          where('username', '==', username.toLowerCase())
-        );
-        console.log('fetchProfileUser: Executing query for username:', username.toLowerCase());
-        const querySnapshot = await getDocs(usersQuery);
-        console.log('fetchProfileUser: Query snapshot size:', querySnapshot.size);
-        console.log('fetchProfileUser: Query snapshot docs:', querySnapshot.docs.map(doc => doc.data()));
-
-        if (!querySnapshot.empty) {
-          const userData = querySnapshot.docs[0].data() as User;
-          userData.uid = querySnapshot.docs[0].id;
-          console.log('fetchProfileUser: Found user by username query:', userData);
-          if (isMounted) {
-            setProfileUser(userData);
-            setIsLoadingProfile(false);
-          }
-        } else {
-          console.log('fetchProfileUser: No user found with username:', username.toLowerCase());
-          if (isMounted) {
-            setError('User not found');
-            router.push('/404');
-          }
-        }
-      } catch (error) {
-        console.error('fetchProfileUser: Error fetching user:', error);
-        if (isMounted) {
-          setError('Could not load user profile: ' + (error.message || 'Unknown error'));
-          toast({ 
-            title: "Error", 
-            description: "Could not load user profile.", 
-            variant: "destructive" 
-          });
-        }
-      } finally {
-        if (isMounted) {
-          console.log('fetchProfileUser: Finally block reached, setting isLoadingProfile to false');
-          setIsLoadingProfile(false);
-        }
-      }
-    }
-
-    if (!isLoadingAuth && !isLoadingUserDetails && currentUserAuth) {
-      console.log('fetchProfileUser: Triggering fetchProfileUser');
-      fetchProfileUser();
-    } else {
-      console.log('fetchProfileUser: Skipping fetch due to loading auth, user details, or no currentUserAuth', { isLoadingAuth, isLoadingUserDetails, currentUserAuth });
-      if (isMounted && !isLoadingAuth && !currentUserAuth) {
-        setError('Authentication required');
-        setIsLoadingProfile(false);
-      }
-    }
-
-    return () => {
-      isMounted = false;
-      console.log('fetchProfileUser: Cleanup - Component unmounted');
-    };
-  }, [username, currentUserAuth, loggedInUserDetails, router, toast, isLoadingAuth, isLoadingUserDetails, db]);
-
-  useEffect(() => {
-    if (profileUser && loggedInUserDetails && profileUser.uid === loggedInUserDetails.uid) {
-      console.log('UserProfilePage: Syncing profileUser with loggedInUserDetails:', loggedInUserDetails);
-      setProfileUser({
-        uid: loggedInUserDetails.uid,
-        username: loggedInUserDetails.username,
-        fullName: loggedInUserDetails.fullName || '',
-        bio: loggedInUserDetails.bio || '',
-        avatar: loggedInUserDetails.avatar || '',
-        location: loggedInUserDetails.location || '',
+    const unsubscribe = auth.onAuthStateChanged(async (user) => {
+      console.log("UserProfilePage: Checking authentication state", {
+        isLoadingAuth,
+        currentUserAuth: user,
       });
-    }
-  }, [loggedInUserDetails, profileUser]);
-
-  useEffect(() => {
-    if (!profileUser) return;
-
-    console.log('UserProfilePage: Setting up posts listener for user:', profileUser);
-    console.log('UserProfilePage: Querying posts with userId:', profileUser.uid);
-    const postsQuery = query(
-      collection(db, 'posts'),
-      where('userId', '==', profileUser.uid),
-      limit(10)
-    );
-
-    const unsubscribe = onSnapshot(postsQuery, async (snapshot) => {
-      console.log('Posts query snapshot size:', snapshot.size);
-      console.log('Posts query snapshot docs:', snapshot.docs.map(postDoc => ({ id: postDoc.id, data: postDoc.data() })));
-      if (snapshot.empty) {
-        console.log('UserProfilePage: No posts found for userId:', profileUser.uid);
-        setPosts([]);
+      setCurrentUserAuth(user);
+      if (!user) {
+        router.push("/login");
+        setIsLoadingAuth(false);
+        setIsLoadingProfile(false);
         return;
       }
 
-      try {
-        const postsDataPromises = snapshot.docs.map(async (postDoc) => {
-          const postData = postDoc.data();
-          console.log('Processing post ID:', postDoc.id, 'data:', postData);
-
-          // Validate postData.userId
-          if (!postData.userId || typeof postData.userId !== 'string') {
-            console.error('Invalid userId in post data:', postData);
-            return {
-              id: postDoc.id,
-              ...postData,
-              user: {
-                name: 'Unknown User',
-                username: 'unknown',
-                handle: '@unknown',
-                avatar: '',
-              },
-              likedByCurrentUser: false,
-              fetchedComments: [],
-            };
-          }
-
-          // Fetch user data for the post author
-          const userRef = doc(db, 'users', postData.userId);
-          const userSnap = await getDoc(userRef);
-          const userData = userSnap.exists() ? userSnap.data() : null;
-          console.log('Fetched user data for post author:', userData);
-
-          // Check if the current user liked this post
-          let likedByCurrentUser = false;
-          if (currentUserAuth) {
-            const likeRef = doc(db, 'likes', `${currentUserAuth.uid}_${postDoc.id}`);
-            const likeSnap = await getDoc(likeRef);
-            likedByCurrentUser = likeSnap.exists();
-            console.log('Liked by current user:', likedByCurrentUser);
-          }
-
-          // Fetch comments for the post
-          const commentsQuery = query(
-            collection(db, 'posts', postDoc.id, 'comments'),
-            limit(5)
-          );
-          const commentsSnap = await getDocs(commentsQuery);
-          const fetchedComments = commentsSnap.docs.map(commentDoc => ({
-            id: commentDoc.id,
-            ...commentDoc.data(),
-          }));
-          console.log('Fetched comments for post:', fetchedComments);
-
-          return {
-            id: postDoc.id,
-            ...postData,
-            user: userData
-              ? {
-                  name: userData.fullName || userData.username,
-                  username: userData.username,
-                  handle: `@${userData.username}`,
-                  avatar: userData.avatar || '',
-                }
-              : {
-                  name: 'Unknown User',
-                  username: 'unknown',
-                  handle: '@unknown',
-                  avatar: '',
-                },
-            likedByCurrentUser,
-            fetchedComments,
-          };
-        });
-
-        const postsData = await Promise.all(postsDataPromises);
-        console.log('UserProfilePage: Fetched posts:', postsData);
-        setPosts(postsData);
-      } catch (error) {
-        console.error('UserProfilePage: Error processing posts snapshot:', error);
-        toast({ 
-          title: "Error", 
-          description: "Could not load posts. Please try again: " + error.message,
-          variant: "destructive" 
-        });
-        setPosts([]);
+      const userDocRef = doc(db, "users", user.uid);
+      const userDocSnap = await getDoc(userDocRef);
+      if (userDocSnap.exists()) {
+        setLoggedInUserDetails(userDocSnap.data() as UserProfile);
       }
-    }, (error) => {
-      console.error('UserProfilePage: Error fetching posts:', error);
-      toast({ 
-        title: "Error", 
-        description: "Could not load posts: " + error.message,
-        variant: "destructive" 
-      });
-      setPosts([]);
+      setIsLoadingAuth(false);
     });
+    return () => unsubscribe();
+  }, [router, db]);
+
+  const fetchProfileUser = async () => {
+    console.log("fetchProfileUser: Triggering fetchProfileUser");
+    try {
+      const startTime = new Date();
+      console.log(`fetchProfileUser: Starting fetch at ${startTime.toISOString()}`);
+      console.log("fetchProfileUser: Current state", {
+        username,
+        currentUserAuth,
+        loggedInUserDetails,
+      });
+
+      if (!username || typeof username !== "string") {
+        toast({
+          title: "Error",
+          description: "Invalid username in URL.",
+          variant: "destructive",
+        });
+        router.push("/");
+        return;
+      }
+
+      console.log(`fetchProfileUser: Fetching profile for username: ${username}`);
+      const usersRef = collection(db, "users");
+      const q = query(usersRef, where("username", "==", username));
+      console.log(`fetchProfileUser: Executing query for username: ${username}`);
+      const querySnapshot = await getDocs(q);
+
+      console.log(`fetchProfileUser: Query snapshot size: ${querySnapshot.size}`);
+      console.log(`fetchProfileUser: Query snapshot docs:`, querySnapshot.docs);
+
+      if (querySnapshot.empty) {
+        toast({
+          title: "User Not Found",
+          description: `No user found with username ${username}.`,
+          variant: "destructive",
+        });
+        router.push("/");
+        return;
+      }
+
+      const userData = querySnapshot.docs[0].data() as UserProfile;
+      userData.uid = querySnapshot.docs[0].id;
+      console.log("fetchProfileUser: Found user by username query:", userData);
+      setProfileUser(userData);
+    } catch (error) {
+      console.error("fetchProfileUser: Error fetching user profile:", error);
+      toast({
+        title: "Error",
+        description: "Could not load user profile. Please try again later.",
+        variant: "destructive",
+      });
+      router.push("/");
+    } finally {
+      console.log("fetchProfileUser: Finally block reached, setting isLoadingProfile to false");
+      setIsLoadingProfile(false);
+    }
 
     return () => {
-      console.log('UserProfilePage: Cleaning up posts listener');
-      unsubscribe();
+      console.log("fetchProfileUser: Cleanup - Component unmounted");
     };
-  }, [profileUser, currentUserAuth, toast, db]);
+  };
 
   useEffect(() => {
-    if (!profileUser || !currentUserAuth) return;
+    if (!isLoadingAuth) {
+      fetchProfileUser();
+    }
+  }, [isLoadingAuth, username]);
 
-    if (currentUserAuth.uid !== profileUser.uid && relationshipStatus !== 'friends') {
-      console.log('UserProfilePage: Skipping friends fetch due to lack of permission', {
-        currentUserUid: currentUserAuth.uid,
-        profileUserUid: profileUser.uid,
-        relationshipStatus,
-      });
-      setFriends([]);
+  useEffect(() => {
+    if (!profileUser || !profileUser.location) {
+      setDisplayLocation(null);
       return;
     }
+    const { city, state, country } = profileUser.location;
+    setDisplayLocation(`${city}, ${state}, ${country}`);
+  }, [profileUser]);
 
-    console.log('UserProfilePage: Fetching friends for user:', profileUser.uid);
-    const friendsCollection = collection(db, 'users', profileUser.uid, 'friends');
-    const unsubscribe = onSnapshot(friendsCollection, (snapshot) => {
+  useEffect(() => {
+    if (!currentUserAuth || !profileUser) return;
+
+    const fetchPosts = async () => {
       try {
-        const friendsData = snapshot.docs.map((doc) => doc.data());
-        console.log('UserProfilePage: Fetched friends:', friendsData);
-        setFriends(friendsData);
-      } catch (error) {
-        console.error('UserProfilePage: Error processing friends snapshot:', error);
-        toast({ 
-          title: "Error", 
-          description: "Could not load friends list.",
-          variant: "destructive" 
-        });
-      }
-    }, (error) => {
-      console.error('UserProfilePage: Permission denied accessing friends:', error);
-      toast({ 
-        title: "Error", 
-        description: "Could not load friends list.",
-        variant: "destructive" 
-      });
-    });
+        setIsLoadingPosts(true);
+        console.log("UserProfilePage: Setting up posts listener for user:", profileUser);
+        console.log("UserProfilePage: Querying posts with userId:", profileUser.uid);
+        const postsQuery = query(
+          collection(db, "posts"),
+          where("userId", "==", profileUser.uid)
+        );
 
-    return () => {
-      console.log('UserProfilePage: Cleaning up friends listener');
-      unsubscribe();
+        const unsubscribe = onSnapshot(postsQuery, async (snapshot) => {
+          console.log(`Posts query snapshot size: ${snapshot.size}`);
+          console.log("Posts query snapshot docs:", snapshot.docs);
+
+          const postsData: Post[] = [];
+          for (const docSnap of snapshot.docs) {
+            const postData = docSnap.data();
+            console.log(`Processing post ID: ${docSnap.id} data:`, postData);
+
+            const userDocRef = doc(db, "users", postData.userId);
+            const userDocSnap = await getDoc(userDocRef);
+            let userData = postData.user;
+            if (userDocSnap.exists()) {
+              userData = userDocSnap.data();
+              console.log("Fetched user data for post author:", userData);
+            }
+
+            const likesQuery = query(
+              collection(db, "likes"),
+              where("postId", "==", docSnap.id),
+              where("userId", "==", currentUserAuth.uid)
+            );
+            const likesSnapshot = await getDocs(likesQuery);
+            console.log(`Liked by current user: ${!likesSnapshot.empty}`);
+
+            const commentsQuery = query(
+              collection(db, "posts", docSnap.id, "comments")
+            );
+            const commentsSnapshot = await getDocs(commentsQuery);
+            const commentsData = commentsSnapshot.docs.map((commentDoc) => ({
+              id: commentDoc.id,
+              ...commentDoc.data(),
+            })) as Comment[];
+            console.log("Fetched comments for post:", commentsData);
+
+            postsData.push({
+              id: docSnap.id,
+              userId: postData.userId,
+              user: {
+                name: userData.fullName || userData.username || "Unknown",
+                handle: userData.username || "unknown",
+                avatar: userData.avatar || "",
+              },
+              content: postData.content,
+              image: postData.image || null,
+              imageAiHint: postData.imageAiHint || null,
+              likes: postData.likes || 0,
+              comments: postData.comments || 0,
+              shares: postData.shares || 0,
+              createdAt: postData.createdAt,
+              updatedAt: postData.updatedAt || null,
+              originalPostId: postData.originalPostId || null,
+              likedByCurrentUser: !likesSnapshot.empty,
+              commentsData,
+            });
+          }
+
+          postsData.sort((a, b) => b.createdAt.toMillis() - a.createdAt.toMillis());
+          console.log("UserProfilePage: Fetched posts:", postsData);
+          setPosts(postsData);
+          setIsLoadingPosts(false);
+        });
+
+        return () => unsubscribe();
+      } catch (error) {
+        console.error("UserProfilePage: Error fetching posts:", error);
+        setPosts([]);
+        setIsLoadingPosts(false);
+      }
     };
-  }, [profileUser, currentUserAuth, relationshipStatus, toast, db]);
+
+    fetchPosts();
+  }, [currentUserAuth, profileUser, db, toast]);
 
   useEffect(() => {
     if (!currentUserAuth || !profileUser) return;
 
     const checkRelationship = async () => {
-      console.log('Checking relationship between', currentUserAuth.uid, 'and', profileUser.uid);
-      const friendsQuery = query(
-        collection(db, 'users', currentUserAuth.uid, 'friends'),
-        where('friendUserId', '==', profileUser.uid)
+      if (currentUserAuth.uid === profileUser.uid) {
+        setRelationshipStatus("self");
+        return;
+      }
+
+      console.log(
+        `Checking relationship between ${currentUserAuth.uid} and ${profileUser.uid}`
+      );
+      const friendRequestSentQuery = query(
+        collection(db, "friendRequests"),
+        where("senderId", "==", currentUserAuth.uid),
+        where("receiverId", "==", profileUser.uid),
+        where("status", "==", "pending")
       );
 
-      const unsubscribeFriends = onSnapshot(friendsQuery, async (snapshot) => {
-        try {
-          console.log(
-            `Friends query snapshot for ${currentUserAuth.uid}:`,
-            snapshot.docs.map(doc => doc.data())
-          );
-          if (!snapshot.empty) {
-            console.log('Users are friends. Setting relationshipStatus to "friends"');
-            setRelationshipStatus('friends');
-            return;
-          }
+      const friendRequestReceivedQuery = query(
+        collection(db, "friendRequests"),
+        where("senderId", "==", profileUser.uid),
+        where("receiverId", "==", currentUserAuth.uid),
+        where("status", "==", "pending")
+      );
 
-          console.log('No friendship found. Checking for pending friend requests...');
-          const sentRequestId = `${currentUserAuth.uid}_${profileUser.uid}`;
-          const sentRequestRef = doc(db, 'friendRequests', sentRequestId);
-          const sentDoc = await getDoc(sentRequestRef);
-          if (sentDoc.exists() && sentDoc.data().status === 'pending') {
-            console.log('Found a pending sent request:', sentDoc.data());
-            setRelationshipStatus('pending_sent');
-            return;
-          }
+      const [sentSnapshot, receivedSnapshot, friendSnapshot] = await Promise.all([
+        getDocs(friendRequestSentQuery),
+        getDocs(friendRequestReceivedQuery),
+        getDoc(doc(db, "users", currentUserAuth.uid, "friends", profileUser.uid)),
+      ]);
 
-          const receivedRequestId = `${profileUser.uid}_${currentUserAuth.uid}`;
-          const receivedRequestRef = doc(db, 'friendRequests', receivedRequestId);
-          const receivedDoc = await getDoc(receivedRequestRef);
-          if (receivedDoc.exists() && receivedDoc.data().status === 'pending') {
-            console.log('Found a pending received request:', receivedDoc.data());
-            setRelationshipStatus('pending_received');
-            return;
-          }
-
-          console.log('No relationship found. Setting to not_friends');
-          setRelationshipStatus('not_friends');
-        } catch (error) {
-          console.error('UserProfilePage: Error processing relationship check:', error);
-          toast({ 
-            title: "Error", 
-            description: "Could not load relationship status.",
-            variant: "destructive" 
-          });
-          setRelationshipStatus('not_friends');
-        }
-      }, (error) => {
-        console.error('Error checking friends:', error);
-        toast({ 
-          title: "Error", 
-          description: "Could not load relationship status.",
-          variant: "destructive" 
-        });
-        setRelationshipStatus('not_friends');
-      });
-
-      return () => {
-        unsubscribeFriends();
-        console.log('UserProfilePage: Cleaned up relationship listeners');
-      };
-    };
-
-    checkRelationship().catch((error) => {
-      console.error('UserProfilePage: Failed to check relationship:', error);
-      toast({ 
-        title: "Error", 
-        description: "Could not load relationship status.",
-        variant: "destructive" 
-      });
-      setRelationshipStatus('not_friends');
-    });
-
-    return () => {
-      console.log('UserProfilePage: Cleaned up relationship check');
-    };
-  }, [currentUserAuth, profileUser, toast, db]);
-
-  const handleLikePost = async (postId: string) => {
-    if (!currentUserAuth || !loggedInUserDetails) {
-      toast({ title: "Authentication Error", description: "You must be logged in to like a post.", variant: "destructive" });
-      return;
-    }
-
-    try {
-      console.log('UserProfilePage: Liking post', postId, 'by user', currentUserAuth.uid);
-      const likeId = `${currentUserAuth.uid}_${postId}`;
-      const likeRef = doc(db, 'likes', likeId);
-      const postRef = doc(db, 'posts', postId);
-
-      const likeSnap = await getDoc(likeRef);
-      const batch = writeBatch(db);
-
-      if (likeSnap.exists()) {
-        batch.delete(likeRef);
-        batch.update(postRef, { likes: increment(-1) });
-        setPosts(posts.map(post => post.id === postId ? { ...post, likes: (post.likes || 0) - 1, likedByCurrentUser: false } : post));
-        toast({ title: "Success", description: "Post unliked." });
-        console.log('UserProfilePage: Post unliked successfully');
+      if (friendSnapshot.exists()) {
+        console.log("Users are friends. Setting relationshipStatus to 'friends'");
+        setRelationshipStatus("friends");
+      } else if (!sentSnapshot.empty) {
+        setRelationshipStatus("pending_sent");
+      } else if (!receivedSnapshot.empty) {
+        setRelationshipStatus("pending_received");
       } else {
-        batch.set(likeRef, {
-          userId: currentUserAuth.uid,
-          postId: postId,
-          createdAt: serverTimestamp(),
-        });
-        batch.update(postRef, { likes: increment(1) });
+        setRelationshipStatus("not_friends");
+      }
+    };
 
-        if (profileUser.uid !== currentUserAuth.uid) {
-          const notificationRef = doc(collection(db, 'users', profileUser.uid, 'notifications'));
-          batch.set(notificationRef, {
-            type: 'like_post',
-            senderId: currentUserAuth.uid,
-            senderUsername: loggedInUserDetails.username || currentUserAuth.email?.split('@')[0],
-            senderAvatar: loggedInUserDetails.avatar || `https://placehold.co/40x40.png?text=${(loggedInUserDetails.username || "U").substring(0,1)}`,
-            postId: postId,
-            createdAt: serverTimestamp(),
-            read: false,
+    const fetchFriends = async () => {
+      try {
+        if (
+          relationshipStatus !== "friends" &&
+          relationshipStatus !== "self" &&
+          currentUserAuth.uid !== profileUser.uid
+        ) {
+          console.log("UserProfilePage: Skipping friends fetch due to lack of permission", {
+            currentUserUid: currentUserAuth.uid,
+            profileUserUid: profileUser.uid,
+            relationshipStatus,
           });
-          console.log('UserProfilePage: Created like_post notification for user', profileUser.uid);
+          setFriends([]);
+          setIsLoadingFriends(false);
+          return;
         }
 
-        setPosts(posts.map(post => post.id === postId ? { ...post, likes: (post.likes || 0) + 1, likedByCurrentUser: true } : post));
-        toast({ title: "Success", description: "Post liked." });
-        console.log('UserProfilePage: Post liked successfully');
-      }
+        setIsLoadingFriends(true);
+        console.log(`UserProfilePage: Fetching friends for user: ${profileUser.uid}`);
+        const friendsRef = collection(db, "users", profileUser.uid, "friends");
+        const friendsQuery = query(friendsRef);
+        const friendsSnapshot = await getDocs(friendsQuery);
 
-      await batch.commit();
-    } catch (error) {
-      console.error('UserProfilePage: Error liking post:', error);
-      toast({ title: "Error", description: "Could not like the post.", variant: "destructive" });
-    }
-  };
+        const friendsList: Friend[] = [];
+        for (const docSnap of friendsSnapshot.docs) {
+          const friendData = docSnap.data();
+          friendsList.push({
+            friendUserId: friendData.friendUserId,
+            username: friendData.username,
+            name: friendData.name,
+            avatar: friendData.avatar,
+            since: friendData.since,
+          });
+        }
 
-  const handleCommentPost = async (postId: string, commentText: string) => {
-    if (!currentUserAuth || !loggedInUserDetails) {
-      toast({ title: "Authentication Error", description: "You must be logged in to comment on a post.", variant: "destructive" });
-      return;
-    }
+        console.log("UserProfilePage: Fetched friends:", friendsList);
+        setFriends(friendsList);
+        setIsLoadingFriends(false);
 
-    try {
-      console.log('UserProfilePage: Adding comment to post', postId, 'by user', currentUserAuth.uid);
-      const postRef = doc(db, 'posts', postId);
-      const commentRef = doc(collection(db, 'posts', postId, 'comments'));
-      const batch = writeBatch(db);
-
-      const commentData = {
-        userId: currentUserAuth.uid,
-        username: loggedInUserDetails.username || currentUserAuth.email?.split('@')[0],
-        avatar: loggedInUserDetails.avatar || `https://placehold.co/40x40.png?text=${(loggedInUserDetails.username || "U").substring(0,1)}`,
-        text: commentText,
-        createdAt: serverTimestamp(),
-      };
-
-      batch.set(commentRef, commentData);
-      batch.update(postRef, { comments: increment(1) });
-
-      if (profileUser.uid !== currentUserAuth.uid) {
-        const notificationRef = doc(collection(db, 'users', profileUser.uid, 'notifications'));
-        batch.set(notificationRef, {
-          type: 'comment_post',
-          senderId: currentUserAuth.uid,
-          senderUsername: loggedInUserDetails.username || currentUserAuth.email?.split('@')[0],
-          senderAvatar: loggedInUserDetails.avatar || `https://placehold.co/40x40.png?text=${(loggedInUserDetails.username || "U").substring(0,1)}`,
-          postId: postId,
-          commentText: commentText,
-          createdAt: serverTimestamp(),
-          read: false,
+        const unsubscribe = onSnapshot(friendsQuery, (snapshot) => {
+          const updatedFriends: Friend[] = [];
+          snapshot.forEach((docSnap) => {
+            const friendData = docSnap.data();
+            updatedFriends.push({
+              friendUserId: friendData.friendUserId,
+              username: friendData.username,
+              name: friendData.name,
+              avatar: friendData.avatar,
+              since: friendData.since,
+            });
+          });
+          setFriends(updatedFriends);
         });
-        console.log('UserProfilePage: Created comment_post notification for user', profileUser.uid);
+
+        return () => unsubscribe();
+      } catch (error) {
+        console.error("UserProfilePage: Error fetching friends:", error);
+        setFriends([]);
+        setIsLoadingFriends(false);
       }
+    };
 
-      await batch.commit();
-
-      setPosts(posts.map(post => {
-        if (post.id === postId) {
-          return {
-            ...post,
-            comments: (post.comments || 0) + 1,
-            fetchedComments: [
-              ...(post.fetchedComments || []),
-              { id: commentRef.id, ...commentData },
-            ],
-          };
-        }
-        return post;
-      }));
-
-      toast({ title: "Comment Added", description: "Your comment has been posted." });
-      console.log('UserProfilePage: Comment added successfully');
-    } catch (error) {
-      console.error('UserProfilePage: Error commenting on post:', error);
-      toast({ title: "Error", description: "Could not add your comment.", variant: "destructive" });
-    }
-  };
-
-  const handleDeletePost = async (postId: string) => {
-    if (!currentUserAuth) {
-      toast({ title: "Authentication Error", description: "You must be logged in to delete a post.", variant: "destructive" });
-      return;
-    }
-
-    try {
-      console.log('UserProfilePage: Deleting post', postId);
-      const postRef = doc(db, 'posts', postId);
-      const batch = writeBatch(db);
-
-      batch.delete(postRef);
-
-      const likesQuery = query(collection(db, 'likes'), where('postId', '==', postId));
-      const likesSnap = await getDocs(likesQuery);
-      likesSnap.forEach(doc => batch.delete(doc.ref));
-
-      const commentsQuery = query(collection(db, 'posts', postId, 'comments'));
-      const commentsSnap = await getDocs(commentsQuery);
-      commentsSnap.forEach(doc => batch.delete(doc.ref));
-
-      const notificationsQuery = query(
-        collection(db, 'users', profileUser.uid, 'notifications'),
-        where('postId', '==', postId)
-      );
-      const notificationsSnap = await getDocs(notificationsQuery);
-      notificationsSnap.forEach(doc => batch.delete(doc.ref));
-
-      await batch.commit();
-
-      setPosts(posts.filter(post => post.id !== postId));
-      toast({ title: "Post Deleted", description: "The post has been deleted." });
-      console.log('UserProfilePage: Post deleted successfully');
-    } catch (error) {
-      console.error('UserProfilePage: Error deleting post:', error);
-      toast({ title: "Error", description: "Could not delete the post.", variant: "destructive" });
-    }
-  };
+    checkRelationship().then(() => {
+      fetchFriends();
+    });
+  }, [currentUserAuth, profileUser, relationshipStatus, db]);
 
   const handleAddFriend = async () => {
-    if (!currentUserAuth || !profileUser) {
-      toast({ title: "Authentication Error", description: "You must be logged in to send requests.", variant: "destructive" });
-      return;
-    }
-
-    setIsProcessingAction(true);
+    if (!currentUserAuth || !profileUser || !loggedInUserDetails) return;
 
     try {
-      console.log('UserProfilePage: Sending friend request from', currentUserAuth.uid, 'to', profileUser.uid);
-      console.log('UserProfilePage: Current user auth UID:', currentUserAuth.uid);
-
-      // Fetch sender's data directly from Firestore
-      const senderRef = doc(db, "users", currentUserAuth.uid);
-      const senderSnap = await getDoc(senderRef);
-      if (!senderSnap.exists()) {
-        console.error('UserProfilePage: Sender user data not found for UID:', currentUserAuth.uid);
-        throw new Error("Sender user data not found in Firestore");
-      }
-      const senderData = senderSnap.data();
-      console.log('UserProfilePage: Sender data fetched:', senderData);
-
-      // Ensure senderUsername and senderAvatar are always defined with fallbacks
-      const senderUsername = senderData.username || (currentUserAuth.email?.split('@')[0]) || "UnknownUser";
-      const senderAvatar = senderData.avatar || `https://placehold.co/40x40.png?text=${(senderData.username || senderData.email?.charAt(0) || "U").substring(0,1).toUpperCase()}`;
-      
-      // Log the values to verify
-      console.log('UserProfilePage: Sender details for notification:', { senderUsername, senderAvatar });
-
+      // Use a deterministic ID for the friend request
       const friendRequestId = `${currentUserAuth.uid}_${profileUser.uid}`;
-      const requestRef = doc(db, "friendRequests", friendRequestId);
-      const requestData = {
+      const friendRequestRef = doc(db, "friendRequests", friendRequestId);
+
+      // Check for existing friend request
+      const existingRequestSnap = await getDoc(friendRequestRef);
+      if (existingRequestSnap.exists() && existingRequestSnap.data().status === "pending") {
+        toast({
+          title: "Request Already Sent",
+          description: "You have already sent a friend request to this user.",
+        });
+        return;
+      }
+
+      // Create the friend request
+      await setDoc(friendRequestRef, {
         senderId: currentUserAuth.uid,
         receiverId: profileUser.uid,
         status: "pending",
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
-        senderUsername, // Add senderUsername to requestData for debugging
-        senderAvatar,   // Add senderAvatar to requestData for debugging
-      };
+      });
 
-      const requestSnap = await getDoc(requestRef);
-      if (requestSnap.exists()) {
-        console.log('UserProfilePage: Friend request already exists:', requestSnap.data());
-        toast({ title: "Request Already Sent", description: "You have already sent a friend request to this user.", variant: "default" });
-        setRelationshipStatus("pending_sent");
-        setIsProcessingAction(false);
-        return;
-      }
-
-      console.log('UserProfilePage: Writing friend request data:', requestData);
-      await setDoc(requestRef, requestData);
-      console.log('UserProfilePage: Friend request write succeeded');
-
-      try {
-        const notificationRef = doc(collection(db, "users", profileUser.uid, "notifications"));
-        const notificationData = {
-          type: "friend_request",
-          senderId: currentUserAuth.uid,
-          senderUsername: senderUsername,
-          senderAvatar: senderAvatar,
-          createdAt: serverTimestamp(),
-          read: false,
-        };
-        console.log('UserProfilePage: Writing notification data:', notificationData);
-        await setDoc(notificationRef, notificationData);
-        console.log('UserProfilePage: Notification write succeeded for notification ID:', notificationRef.id);
-      } catch (notificationError) {
-        console.warn("UserProfilePage: Failed to write notification (friend request still sent):", notificationError);
-        toast({ title: "Warning", description: "Friend request sent, but notification could not be delivered.", variant: "default" });
-      }
+      // Create a notification for the receiver with the same ID as the friend request
+      const notificationRef = doc(db, "users", profileUser.uid, "notifications", friendRequestId);
+      await setDoc(notificationRef, {
+        type: "friend_request_firestore", // Updated to match expected type
+        senderId: currentUserAuth.uid,
+        senderUsername: loggedInUserDetails.username || "Unknown User",
+        senderAvatar: loggedInUserDetails.avatar || "",
+        createdAt: serverTimestamp(),
+        read: false,
+      });
 
       setRelationshipStatus("pending_sent");
-      toast({ title: "Friend Request Sent!", description: `Request sent to ${profileUser.username}.` });
-      console.log('UserProfilePage: Friend request sent successfully');
+      toast({
+        title: "Friend Request Sent",
+        description: `Friend request sent to ${profileUser.fullName}.`,
+      });
     } catch (error) {
-      console.error("UserProfilePage (handleAddFriend): Error sending friend request:", error);
-      toast({ title: "Error", description: `Could not send friend request: ${error.message}`, variant: "destructive" });
-    } finally {
-      setIsProcessingAction(false);
-    }
-  };
-
-  const handleCancelFriendRequest = async () => {
-    if (!currentUserAuth || !profileUser) {
-      toast({ title: "Authentication Error", description: "You must be logged in to cancel requests.", variant: "destructive" });
-      return;
-    }
-
-    setIsProcessingAction(true);
-
-    try {
-      console.log('UserProfilePage: Cancelling friend request from', currentUserAuth.uid, 'to', profileUser.uid);
-      const friendRequestId = `${currentUserAuth.uid}_${profileUser.uid}`;
-      const requestRef = doc(db, "friendRequests", friendRequestId);
-      const docSnap = await getDoc(requestRef);
-      if (docSnap.exists()) {
-        const batch = writeBatch(db);
-        batch.delete(requestRef);
-        const notificationsQuery = query(
-          collection(db, "users", profileUser.uid, "notifications"),
-          where("senderId", "==", currentUserAuth.uid),
-          where("type", "==", "friend_request")
-        );
-        const notificationsSnapshot = await getDocs(notificationsQuery);
-        notificationsSnapshot.forEach((notificationDoc) => {
-          batch.delete(notificationDoc.ref);
-        });
-        await batch.commit();
-      }
-
-      toast({ title: "Friend Request Cancelled", description: `Request to ${profileUser.username} has been cancelled.` });
-      setRelationshipStatus("not_friends");
-      console.log('UserProfilePage: Friend request cancelled successfully');
-    } catch (error) {
-      console.error("UserProfilePage (handleCancelFriendRequest): Error cancelling friend request:", error);
-      toast({ title: "Error", description: "Could not cancel friend request.", variant: "destructive" });
-    } finally {
-      setIsProcessingAction(false);
+      console.error("UserProfilePage: Error sending friend request:", error);
+      toast({
+        title: "Error",
+        description: "Could not send friend request. Please try again.",
+        variant: "destructive",
+      });
     }
   };
 
   const handleAcceptFriendRequest = async () => {
-    if (!currentUserAuth || !profileUser) {
-      toast({ title: "Authentication Error", description: "You must be logged in to accept requests.", variant: "destructive" });
-      return;
-    }
-
-    setIsProcessingAction(true);
+    if (!currentUserAuth || !profileUser || !loggedInUserDetails) return;
 
     try {
-      console.log('UserProfilePage: Accepting friend request from', profileUser.uid, 'to', currentUserAuth.uid);
-
-      // Fetch acceptor's data directly from Firestore
-      const acceptorRef = doc(db, "users", currentUserAuth.uid);
-      const acceptorSnap = await getDoc(acceptorRef);
-      if (!acceptorSnap.exists()) {
-        throw new Error("Acceptor user data not found in Firestore");
-      }
-      const acceptorData = acceptorSnap.data();
-      const acceptorUsername = acceptorData.username || currentUserAuth.email?.split('@')[0] || "User";
-      const acceptorName = acceptorData.fullName || acceptorUsername;
-      const acceptorAvatar = acceptorData.avatar || `https://placehold.co/40x40.png?text=${(acceptorUsername || "U").substring(0,1)}`;
-
-      const friendRequestId = `${profileUser.uid}_${currentUserAuth.uid}`;
-      const requestRef = doc(db, "friendRequests", friendRequestId);
-      const batch = writeBatch(db);
-
-      const requestUpdateData = { status: "accepted", updatedAt: serverTimestamp() };
-      batch.update(requestRef, requestUpdateData);
-
-      const acceptorFriendsRef = doc(db, "users", currentUserAuth.uid, "friends", profileUser.uid);
-      const acceptorFriendData = {
-        friendUserId: profileUser.uid,
-        username: profileUser.username,
-        name: profileUser.fullName || profileUser.username,
-        avatar: profileUser.avatar || `https://placehold.co/40x40.png?text=${(profileUser.username || "F").substring(0,1)}`,
-        since: serverTimestamp()
-      };
-      batch.set(acceptorFriendsRef, acceptorFriendData);
-
-      const senderFriendsRef = doc(db, "users", profileUser.uid, "friends", currentUserAuth.uid);
-      const senderFriendData = {
-        friendUserId: currentUserAuth.uid,
-        username: acceptorUsername,
-        name: acceptorName,
-        avatar: acceptorAvatar,
-        since: serverTimestamp()
-      };
-      batch.set(senderFriendsRef, senderFriendData);
-
-      const notificationsQuery = query(
-        collection(db, "users", currentUserAuth.uid, "notifications"),
+      const friendRequestsQuery = query(
+        collection(db, "friendRequests"),
         where("senderId", "==", profileUser.uid),
-        where("type", "==", "friend_request")
+        where("receiverId", "==", currentUserAuth.uid),
+        where("status", "==", "pending")
       );
-      const notificationsSnapshot = await getDocs(notificationsQuery);
-      notificationsSnapshot.forEach((notificationDoc) => {
-        batch.delete(notificationDoc.ref);
+      const friendRequestsSnapshot = await getDocs(friendRequestsQuery);
+
+      if (friendRequestsSnapshot.empty) {
+        toast({
+          title: "Error",
+          description: "No pending friend request found.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const friendRequestDoc = friendRequestsSnapshot.docs[0];
+      const friendRequestRef = doc(db, "friendRequests", friendRequestDoc.id);
+      await updateDoc(friendRequestRef, {
+        status: "accepted",
+        updatedAt: serverTimestamp(),
       });
 
-      await batch.commit();
-      toast({ title: "Friend Request Accepted!", description: `You are now friends with ${profileUser.username}.` });
-      console.log('UserProfilePage: Friend request accepted successfully');
+      const friendRef = doc(db, "users", currentUserAuth.uid, "friends", profileUser.uid);
+      const userFriendRef = doc(db, "users", profileUser.uid, "friends", currentUserAuth.uid);
+
+      await Promise.all([
+        setDoc(friendRef, {
+          friendUserId: profileUser.uid,
+          username: profileUser.username,
+          name: profileUser.fullName,
+          avatar: profileUser.avatar,
+          since: serverTimestamp(),
+        }),
+        setDoc(userFriendRef, {
+          friendUserId: currentUserAuth.uid,
+          username: loggedInUserDetails.username,
+          name: loggedInUserDetails.fullName,
+          avatar: loggedInUserDetails.avatar,
+          since: serverTimestamp(),
+        }),
+        addDoc(collection(db, "users", profileUser.uid, "notifications"), {
+          type: "friend_request_accepted",
+          senderId: currentUserAuth.uid,
+          senderUsername: loggedInUserDetails.username,
+          senderAvatar: loggedInUserDetails.avatar,
+          receiverId: profileUser.uid,
+          createdAt: serverTimestamp(),
+          read: false,
+        }),
+      ]);
+
+      setRelationshipStatus("friends");
+      toast({
+        title: "Friend Request Accepted",
+        description: `You are now friends with ${profileUser.fullName}!`,
+      });
     } catch (error) {
-      console.error("UserProfilePage (handleAcceptFriendRequest): Error accepting friend request:", error);
-      toast({ title: "Error", description: "Could not accept friend request.", variant: "destructive" });
-    } finally {
-      setIsProcessingAction(false);
+      console.error("UserProfilePage: Error accepting friend request:", error);
+      toast({
+        title: "Error",
+        description: "Could not accept friend request. Please try again.",
+        variant: "destructive",
+      });
     }
   };
 
   const handleDeclineFriendRequest = async () => {
-    if (!currentUserAuth || !profileUser) {
-      toast({ title: "Authentication Error", description: "You must be logged in to decline requests.", variant: "destructive" });
-      return;
-    }
-
-    setIsProcessingAction(true);
+    if (!currentUserAuth || !profileUser || !loggedInUserDetails) return;
 
     try {
-      console.log('UserProfilePage: Declining friend request from', profileUser.uid, 'to', currentUserAuth.uid);
-      const friendRequestId = `${profileUser.uid}_${currentUserAuth.uid}`;
-      const requestRef = doc(db, "friendRequests", friendRequestId);
-      const batch = writeBatch(db);
-
-      const requestUpdateData = { status: "declined", updatedAt: serverTimestamp() };
-      batch.update(requestRef, requestUpdateData);
-
-      const notificationsQuery = query(
-        collection(db, "users", currentUserAuth.uid, "notifications"),
+      const friendRequestsQuery = query(
+        collection(db, "friendRequests"),
         where("senderId", "==", profileUser.uid),
-        where("type", "==", "friend_request")
+        where("receiverId", "==", currentUserAuth.uid),
+        where("status", "==", "pending")
       );
-      const notificationsSnapshot = await getDocs(notificationsQuery);
-      notificationsSnapshot.forEach((notificationDoc) => {
-        batch.delete(notificationDoc.ref);
+      const friendRequestsSnapshot = await getDocs(friendRequestsQuery);
+
+      if (friendRequestsSnapshot.empty) {
+        toast({
+          title: "Error",
+          description: "No pending friend request found.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const friendRequestDoc = friendRequestsSnapshot.docs[0];
+      const friendRequestRef = doc(db, "friendRequests", friendRequestDoc.id);
+      await updateDoc(friendRequestRef, {
+        status: "declined",
+        updatedAt: serverTimestamp(),
       });
 
-      await batch.commit();
-      toast({ title: "Friend Request Declined", description: `You have declined the request from ${profileUser.username}.` });
+      await addDoc(collection(db, "users", profileUser.uid, "notifications"), {
+        type: "friend_request_declined",
+        senderId: currentUserAuth.uid,
+        senderUsername: loggedInUserDetails.username,
+        senderAvatar: loggedInUserDetails.avatar,
+        receiverId: profileUser.uid,
+        createdAt: serverTimestamp(),
+        read: false,
+      });
+
       setRelationshipStatus("not_friends");
-      console.log('UserProfilePage: Friend request declined successfully');
+      toast({
+        title: "Friend Request Declined",
+        description: `You have declined the friend request from ${profileUser.fullName}.`,
+      });
     } catch (error) {
-      console.error("UserProfilePage (handleDeclineFriendRequest): Error declining friend request:", error);
-      toast({ title: "Error", description: "Could not decline friend request.", variant: "destructive" });
-    } finally {
-      setIsProcessingAction(false);
+      console.error("UserProfilePage: Error declining friend request:", error);
+      toast({
+        title: "Error",
+        description: "Could not decline friend request. Please try again.",
+        variant: "destructive",
+      });
     }
   };
 
   const handleUnfriend = async () => {
-    if (!currentUserAuth || !profileUser) {
-      toast({ title: "Authentication Error", description: "You must be logged in to unfriend users.", variant: "destructive" });
-      return;
-    }
-
-    setIsProcessingAction(true);
+    if (!currentUserAuth || !profileUser) return;
 
     try {
-      console.log('UserProfilePage: Unfriending user', profileUser.uid, 'by', currentUserAuth.uid);
-      const batch = writeBatch(db);
+      const friendRef = doc(db, "users", currentUserAuth.uid, "friends", profileUser.uid);
+      const userFriendRef = doc(db, "users", profileUser.uid, "friends", currentUserAuth.uid);
 
-      const currentUserFriendRef = doc(db, "users", currentUserAuth.uid, "friends", profileUser.uid);
-      const profileUserFriendRef = doc(db, "users", profileUser.uid, "friends", currentUserAuth.uid);
-
-      batch.delete(currentUserFriendRef);
-      batch.delete(profileUserFriendRef);
-
-      const friendRequestId = `${currentUserAuth.uid}_${profileUser.uid}`;
-      const reverseFriendRequestId = `${profileUser.uid}_${currentUserAuth.uid}`;
-      const friendRequestRef = doc(db, "friendRequests", friendRequestId);
-      const reverseFriendRequestRef = doc(db, "friendRequests", reverseFriendRequestId);
-
-      const friendRequestDoc = await getDoc(friendRequestRef);
-      if (friendRequestDoc.exists()) {
-        batch.delete(friendRequestRef);
-      }
-
-      const reverseFriendRequestDoc = await getDoc(reverseFriendRequestRef);
-      if (reverseFriendRequestDoc.exists()) {
-        batch.delete(reverseFriendRequestRef);
-      }
-
-      // Delete any existing chat between the users
       const chatId = [currentUserAuth.uid, profileUser.uid].sort().join("_");
       const chatRef = doc(db, "chats", chatId);
-      const chatDoc = await getDoc(chatRef);
-      if (chatDoc.exists()) {
-        batch.delete(chatRef);
-      }
+      const chatSnap = await getDoc(chatRef);
 
-      await batch.commit();
-      toast({ title: "Unfriended", description: `You are no longer friends with ${profileUser.username}.` });
+      await Promise.all([
+        deleteDoc(friendRef),
+        deleteDoc(userFriendRef),
+        chatSnap.exists() ? deleteDoc(chatRef) : Promise.resolve(),
+      ]);
+
       setRelationshipStatus("not_friends");
-      console.log('UserProfilePage: Unfriended successfully');
+      setFriends([]);
+      toast({
+        title: "Friend Removed",
+        description: `You have unfriended ${profileUser.fullName}.`,
+      });
     } catch (error) {
-      console.error("UserProfilePage (handleUnfriend): Error unfriending user:", error);
-      toast({ title: "Error", description: "Could not unfriend user.", variant: "destructive" });
-    } finally {
-      setIsProcessingAction(false);
+      console.error("UserProfilePage: Error unfriending user:", error);
+      toast({
+        title: "Error",
+        description: "Could not unfriend the user. Please try again.",
+        variant: "destructive",
+      });
     }
   };
 
   const handleMessage = async () => {
     if (!currentUserAuth || !profileUser) {
-      toast({ title: "Authentication Error", description: "You must be logged in to send messages.", variant: "destructive" });
-      return;
-    }
-
-    // Check if the users are friends
-    if (relationshipStatus !== "friends") {
       toast({
-        title: "Cannot Start Chat",
-        description: "You can only chat with friends. Send a friend request to start chatting!",
+        title: "Authentication Error",
+        description: "You must be logged in to send messages.",
         variant: "destructive",
       });
       return;
     }
 
     try {
-      // Create a unique chat ID by sorting UIDs alphabetically
+      const friendshipRef1 = doc(db, "users", currentUserAuth.uid, "friends", profileUser.uid);
+      const friendshipRef2 = doc(db, "users", profileUser.uid, "friends", currentUserAuth.uid);
+      const [friendshipSnap1, friendshipSnap2] = await Promise.all([
+        getDoc(friendshipRef1),
+        getDoc(friendshipRef2),
+      ]);
+
+      if (!friendshipSnap1.exists() || !friendshipSnap2.exists()) {
+        toast({
+          title: "Cannot Start Chat",
+          description: `You must be friends with ${profileUser.fullName} to start a chat.`,
+          variant: "destructive",
+        });
+        return;
+      }
+
       const chatId = [currentUserAuth.uid, profileUser.uid].sort().join("_");
       const chatRef = doc(db, "chats", chatId);
-
-      // Check if the chat already exists
       const chatSnap = await getDoc(chatRef);
       if (!chatSnap.exists()) {
-        // Create a new chat document
+        const [finalCheck1, finalCheck2] = await Promise.all([
+          getDoc(friendshipRef1),
+          getDoc(friendshipRef2),
+        ]);
+
+        if (!finalCheck1.exists() || !finalCheck2.exists()) {
+          console.error("UserProfilePage (handleMessage): Friendship status changed before creating chat");
+          toast({
+            title: "Cannot Start Chat",
+            description: `Friendship status with ${profileUser.fullName} changed. Please try again.`,
+            variant: "destructive",
+          });
+          return;
+        }
+
         const chatData = {
           participants: [currentUserAuth.uid, profileUser.uid],
           lastMessage: {
-            text: "Chat started!",
-            senderId: currentUserAuth.uid,
-            timestamp: serverTimestamp(),
+            text: "",
+            senderId: "",
+            timestamp: null,
           },
           unreadCounts: {
             [currentUserAuth.uid]: 0,
@@ -902,14 +672,12 @@ export default function UserProfilePage() {
           },
         };
         await setDoc(chatRef, chatData);
-        console.log(`UserProfilePage: Created new chat with ID ${chatId}`);
       }
 
-      // Navigate to the chat page
       router.push(`/chat/${chatId}`);
       toast({
         title: "Starting Chat",
-        description: `Opening conversation with ${profileUser.username}.`,
+        description: `Opening conversation with ${profileUser.fullName}.`,
       });
     } catch (error) {
       console.error("UserProfilePage (handleMessage): Error starting chat:", error);
@@ -921,207 +689,429 @@ export default function UserProfilePage() {
     }
   };
 
-  if (isLoadingProfile && !authTimeout) {
-    console.log('UserProfilePage: Rendering loading state', { profileUser, isLoadingProfile });
-    return (
-      <div className="flex items-center justify-center h-screen">
-        <div className="text-center">
-          <p className="text-lg">Loading profile...</p>
-        </div>
-      </div>
-    );
-  }
+  const handleLike = async (postId: string, loved: boolean) => {
+    if (!currentUserAuth) {
+      toast({
+        title: "Authentication Error",
+        description: "You must be logged in to like posts.",
+        variant: "destructive",
+      });
+      return;
+    }
 
-  if (error) {
-    console.log('UserProfilePage: Rendering error state', { error });
+    try {
+      const postRef = doc(db, "posts", postId);
+      const likeRef = doc(db, "likes", `${currentUserAuth.uid}_${postId}`);
+
+      if (loved) {
+        await Promise.all([
+          deleteDoc(likeRef),
+          updateDoc(postRef, {
+            likes: posts.find((p) => p.id === postId)!.likes - 1,
+          }),
+        ]);
+      } else {
+        await Promise.all([
+          setDoc(likeRef, {
+            userId: currentUserAuth.uid,
+            postId: postId,
+            createdAt: serverTimestamp(),
+          }),
+          updateDoc(postRef, {
+            likes: posts.find((p) => p.id === postId)!.likes + 1,
+          }),
+          addDoc(collection(db, "users", profileUser!.uid, "notifications"), {
+            type: "like_post",
+            senderId: currentUserAuth.uid,
+            senderUsername: loggedInUserDetails?.username,
+            senderAvatar: loggedInUserDetails?.avatar,
+            postId: postId,
+            createdAt: serverTimestamp(),
+            read: false,
+          }),
+        ]);
+      }
+    } catch (error) {
+      console.error("UserProfilePage: Error liking/unliking post:", error);
+      toast({
+        title: "Error",
+        description: "Could not like/unlike the post. Please try again.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleShare = async (post: Post) => {
+    if (!currentUserAuth || !profileUser || !loggedInUserDetails) return;
+
+    try {
+      const newPostRef = await addDoc(collection(db, "posts"), {
+        userId: currentUserAuth.uid,
+        user: {
+          name: loggedInUserDetails.fullName,
+          handle: loggedInUserDetails.username,
+          avatar: loggedInUserDetails.avatar,
+        },
+        content: post.content,
+        image: post.image || null,
+        imageAiHint: post.imageAiHint || null,
+        likes: 0,
+        comments: 0,
+        shares: 0,
+        createdAt: serverTimestamp(),
+        originalPostId: post.id,
+      });
+
+      const originalPostRef = doc(db, "posts", post.id);
+      await Promise.all([
+        updateDoc(originalPostRef, {
+          shares: post.shares + 1,
+        }),
+        addDoc(collection(db, "users", post.userId, "notifications"), {
+          type: "share_post",
+          senderId: currentUserAuth.uid,
+          senderUsername: loggedInUserDetails.username,
+          senderAvatar: loggedInUserDetails.avatar,
+          postId: newPostRef.id,
+          caption: post.content,
+          createdAt: serverTimestamp(),
+          read: false,
+        }),
+      ]);
+
+      toast({
+        title: "Post Shared",
+        description: "The post has been shared successfully.",
+      });
+    } catch (error) {
+      console.error("UserProfilePage: Error sharing post:", error);
+      toast({
+        title: "Error",
+        description: "Could not share the post. Please try again.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  if (isLoadingAuth || isLoadingProfile) {
+    console.log("UserProfilePage: Rendering loading state", {
+      profileUser,
+      isLoadingProfile,
+    });
     return (
-      <div className="flex items-center justify-center h-screen">
+      <div className="flex items-center justify-center h-screen bg-gradient-to-b from-green-900 to-green-700">
         <div className="text-center">
-          <p className="text-lg text-red-500">{error}</p>
+          <p className="text-lg font-medium text-white">Loading profile...</p>
         </div>
       </div>
     );
   }
 
   if (!profileUser) {
-    console.log('UserProfilePage: Rendering user not found state');
     return (
-      <div className="flex items-center justify-center h-screen">
+      <div className="flex items-center justify-center h-screen bg-gradient-to-b from-green-900 to-green-700">
         <div className="text-center">
-          <p className="text-lg">User not found</p>
+          <p className="text-lg font-medium text-white">User not found.</p>
+          <Link href="/" className="text-yellow-400 hover:underline font-semibold">
+            Go back to home
+          </Link>
         </div>
       </div>
     );
   }
 
-  console.log('UserProfilePage: Rendering profile page', { profileUser });
-  const isOwnProfile = currentUserAuth?.uid === profileUser.uid;
+  console.log("UserProfilePage: Rendering profile page", { profileUser });
 
   return (
-    <div className="container mx-auto px-4 py-8">
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <Card className="md:col-span-1 shadow-lg rounded-xl">
-          <CardHeader>
-            <div className="h-32 bg-gradient-to-r from-blue-500 to-purple-500 rounded-t-lg"></div>
-          </CardHeader>
-          <CardContent className="pt-0 text-center">
-            <div className="flex justify-center -mt-12">
-              <Avatar className="h-24 w-24 border-4 border-white">
-                <AvatarImage src={profileUser.avatar} alt={profileUser.username} />
-                <AvatarFallback>{profileUser.username?.charAt(0).toUpperCase()}</AvatarFallback>
-              </Avatar>
-            </div>
-            <div className="mt-4 p-4 border border-gray-200 rounded-lg bg-gray-50">
-              <CardTitle className="text-xl">{profileUser.fullName || profileUser.username}</CardTitle>
-              <p className="text-muted-foreground">@{profileUser.username}</p>
-              <div className="mt-2 flex items-center justify-center text-muted-foreground">
-                <MapPin className="h-4 w-4 mr-1" />
-                <span>{profileUser.location || "Unknown location"}</span>
+    <div className="min-h-screen bg-gradient-to-b from-green-900 to-green-700">
+      <div className="container mx-auto px-4 py-6 sm:py-8 max-w-4xl">
+        <div className="mx-4 sm:mx-6">
+          <Card className="shadow-xl rounded-xl bg-white/90 border border-red-600">
+            <CardHeader className="relative flex flex-col sm:flex-row items-center sm:items-start gap-4 sm:gap-6 p-4 sm:p-6 bg-gradient-to-r from-black to-gray-800 rounded-t-xl">
+              <div className="relative flex-shrink-0">
+                <Avatar className="h-28 w-28 sm:h-36 sm:w-36 border-4 border-yellow-500 shadow-md">
+                  <AvatarImage src={profileUser.avatar} alt={profileUser.fullName} />
+                  <AvatarFallback className="text-3xl sm:text-4xl font-bold bg-gray-700 text-white">
+                    {profileUser.fullName.charAt(0)}
+                  </AvatarFallback>
+                </Avatar>
               </div>
-              <p className="mt-2 text-sm">{profileUser.bio || "No bio yet."}</p>
-            </div>
-
-            {!isOwnProfile && (
-              <div className="mt-4 flex flex-col sm:flex-row justify-center gap-2">
-                {relationshipStatus === "not_friends" && (
-                  <Button onClick={handleAddFriend} disabled={isProcessingAction}>
-                    <UserPlus className="mr-2 h-4 w-4" /> Add Friend
-                  </Button>
-                )}
-                {relationshipStatus === "pending_sent" && (
-                  <>
-                    <Button disabled>
-                      <Clock className="mr-2 h-4 w-4" /> Request Sent
-                    </Button>
-                    <Button
-                      variant="outline"
-                      onClick={handleCancelFriendRequest}
-                      disabled={isProcessingAction}
-                    >
-                      <X className="mr-2 h-4 w-4" /> Cancel Request
-                    </Button>
-                  </>
-                )}
-                {relationshipStatus === "pending_received" && (
-                  <>
-                    <Button onClick={handleAcceptFriendRequest} disabled={isProcessingAction}>
-                      <Check className="mr-2 h-4 w-4" /> Accept
-                    </Button>
-                    <Button
-                      variant="outline"
-                      onClick={handleDeclineFriendRequest}
-                      disabled={isProcessingAction}
-                    >
-                      <X className="mr-2 h-4 w-4" /> Decline
-                    </Button>
-                  </>
-                )}
-                {relationshipStatus === "friends" && (
-                  <div className="flex flex-wrap items-center justify-center space-x-0.5 p-2 border border-gray-200 rounded-lg bg-gray-50 w-full">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="text-green-700 hover:bg-green-100"
-                      disabled
-                    >
-                      <Users className="mr-2 h-4 w-4" /> Friends
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="hover:bg-gray-200"
-                      onClick={handleMessage}
-                    >
-                      <MessageCircle className="mr-2 h-4 w-4" /> Message
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="hover:bg-red-100 text-red-600"
-                      onClick={handleUnfriend}
-                    >
-                      <UserMinus className="mr-2 h-4 w-4" /> Unfriend
-                    </Button>
+              <div className="flex-1 text-center sm:text-left">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <h2 className="text-2xl sm:text-3xl font-bold text-white">{profileUser.fullName}</h2>
+                    <p className="text-sm sm:text-base text-yellow-400">@{profileUser.username}</p>
                   </div>
+                </div>
+                {profileUser.bio && (
+                  <p className="mt-2 text-white text-sm sm:text-base leading-relaxed">{profileUser.bio}</p>
                 )}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        <div className="md:col-span-2">
-          <Tabs defaultValue="posts" className="w-full">
-            <TabsList className="grid w-full grid-cols-2">
-              <TabsTrigger value="posts">Posts</TabsTrigger>
-              <TabsTrigger value="connections">Connections</TabsTrigger>
-            </TabsList>
-            
-            <TabsContent value="posts">
-              <Card>
-                <CardHeader>
-                  <CardTitle>Posts ({posts.length})</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  {posts.length > 0 ? (
-                    posts.map((post) => (
-                      <div key={post.id}>
-                        <PostCard
-                          post={post}
-                          currentUserId={currentUserAuth?.uid}
-                          showManagementControls={isOwnProfile}
-                          onDeletePost={handleDeletePost}
-                          onLikePost={handleLikePost}
-                          onCommentPost={handleCommentPost}
-                        />
-                        <Separator className="my-4" />
-                      </div>
-                    ))
-                  ) : (
-                    <p className="text-muted-foreground">
-                      {isOwnProfile ? "You haven't posted yet. Share your first post!" : "No posts yet."}
-                      {isOwnProfile && (
-                        <Button asChild className="ml-2">
-                          <Link href="/create-post">Create Post</Link>
-                        </Button>
-                      )}
+                <div className="mt-2 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 text-yellow-400 text-sm">
+                  {displayLocation && (
+                    <p className="flex items-center gap-1">
+                      <MapPin className="h-4 w-4 text-red-500" />
+                      {displayLocation}
                     </p>
                   )}
-                </CardContent>
-              </Card>
-            </TabsContent>
-
-            <TabsContent value="connections">
-              <Card>
-                <CardHeader>
-                  <CardTitle>Connections</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  {(isOwnProfile || relationshipStatus === 'friends') ? (
-                    friends.length > 0 ? (
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        {friends.map((friend) => (
-                          <div key={friend.friendUserId} className="flex items-center space-x-4">
-                            <Avatar>
-                              <AvatarImage src={friend.avatar} alt={friend.username} />
-                              <AvatarFallback>{friend.username?.charAt(0).toUpperCase()}</AvatarFallback>
-                            </Avatar>
-                            <div>
-                              <p className="font-medium">{friend.name}</p>
-                              <p className="text-sm text-muted-foreground">@{friend.username}</p>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <p className="text-muted-foreground">No connections yet.</p>
-                    )
+                  <p>
+                    Joined{" "}
+                    {profileUser.createdAt
+                      ? new Date(profileUser.createdAt.toDate()).toLocaleDateString()
+                      : "Unknown"}
+                  </p>
+                </div>
+                <div className="mt-4 flex flex-wrap gap-2 justify-center sm:justify-start">
+                  {relationshipStatus === "self" ? (
+                    <Button
+                      variant="default"
+                      className="bg-red-600 hover:bg-red-700 text-white font-semibold rounded-full px-4 py-2 transition-colors border border-yellow-500"
+                      onClick={() => router.push("/settings")}
+                    >
+                      Edit Profile
+                    </Button>
+                  ) : relationshipStatus === "friends" ? (
+                    <>
+                      <Button
+                        variant="default"
+                        className="bg-red-600 hover:bg-red-700 text-white font-semibold rounded-full px-4 py-2 transition-colors border border-yellow-500"
+                        onClick={handleMessage}
+                      >
+                        <MessageCircle className="mr-2 h-4 w-4" />
+                        Message
+                      </Button>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="rounded-full border-yellow-500 text-white hover:bg-gray-700 transition-colors"
+                          >
+                            <MoreHorizontal className="h-5 w-5 text-yellow-400" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent className="bg-gray-800 border border-yellow-500">
+                          <DropdownMenuItem
+                            onClick={handleUnfriend}
+                            className="text-red-500 hover:bg-gray-700"
+                          >
+                            <UserMinus className="mr-2 h-4 w-4" />
+                            Unfriend
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </>
+                  ) : relationshipStatus === "pending_sent" ? (
+                    <Button
+                      variant="outline"
+                      disabled
+                      className="rounded-full border-yellow-500 text-gray-400 cursor-not-allowed"
+                    >
+                      Request Sent
+                    </Button>
+                  ) : relationshipStatus === "pending_received" ? (
+                    <>
+                      <Button
+                        variant="default"
+                        className="bg-yellow-500 hover:bg-yellow-600 text-black font-semibold rounded-full px-4 py-2 transition-colors border border-black"
+                        onClick={handleAcceptFriendRequest}
+                      >
+                        Accept Friend Request
+                      </Button>
+                      <Button
+                        variant="destructive"
+                        className="bg-red-600 hover:bg-red-700 text-white font-semibold rounded-full px-4 py-2 transition-colors border border-black"
+                        onClick={handleDeclineFriendRequest}
+                      >
+                        Decline
+                      </Button>
+                    </>
                   ) : (
-                    <p className="text-muted-foreground">Friends list is private.</p>
+                    <Button
+                      variant="default"
+                      className="bg-red-600 hover:bg-red-700 text-white font-semibold rounded-full px-4 py-2 transition-colors border border-yellow-500"
+                      onClick={handleAddFriend}
+                    >
+                      <UserPlus className="mr-2 h-4 w-4" />
+                      Add Friend
+                    </Button>
                   )}
-                </CardContent>
-              </Card>
-            </TabsContent>
-          </Tabs>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="p-4 sm:p-6 bg-white/90">
+              <Tabs defaultValue="posts" className="mt-4">
+                <TabsList className="flex justify-center sm:justify-start bg-gray-800 rounded-full p-2 gap-4">
+                  <TabsTrigger
+                    value="posts"
+                    className="rounded-full px-6 py-3 font-semibold text-white data-[state=active]:bg-red-600 data-[state=active]:text-white transition-all border border-yellow-500"
+                  >
+                    Posts
+                  </TabsTrigger>
+                  <TabsTrigger
+                    value="friends"
+                    className="rounded-full px-6 py-3 font-semibold text-white data-[state=active]:bg-red-600 data-[state=active]:text-white transition-all border border-yellow-500"
+                  >
+                    Friends
+                  </TabsTrigger>
+                </TabsList>
+                <TabsContent value="posts" className="mt-6">
+                  {isLoadingPosts ? (
+                    <p className="text-center text-gray-700 font-medium">Loading posts...</p>
+                  ) : posts.length === 0 ? (
+                    <p className="text-center text-gray-700 font-medium">No posts yet.</p>
+                  ) : (
+                    <div className="space-y-6">
+                      {posts.map((post) => (
+                        <Card
+                          key={post.id}
+                          className="shadow-md rounded-xl bg-white border border-red-600 hover:shadow-lg transition-shadow duration-300"
+                        >
+                          <CardHeader className="p-4 bg-gray-100 rounded-t-xl">
+                            <div className="flex items-center gap-3">
+                              <Link href={`/profile/${post.user.handle}`}>
+                                <Avatar className="h-10 w-10 border-2 border-yellow-500">
+                                  <AvatarImage src={post.user.avatar} alt={post.user.name} />
+                                  <AvatarFallback className="bg-gray-700 text-white">{post.user.name.charAt(0)}</AvatarFallback>
+                                </Avatar>
+                              </Link>
+                              <div className="flex-1">
+                                <Link href={`/profile/${post.user.handle}`}>
+                                  <p className="font-semibold text-gray-900 hover:underline">{post.user.name}</p>
+                                </Link>
+                                <p className="text-sm text-gray-600">
+                                  @{post.user.handle} •{" "}
+                                  {new Date(post.createdAt.toDate()).toLocaleDateString()}
+                                </p>
+                              </div>
+                            </div>
+                          </CardHeader>
+                          <CardContent className="p-4 pt-0">
+                            <p className="text-gray-900 leading-relaxed">{post.content}</p>
+                            {post.image && (
+                              <img
+                                src={post.image}
+                                alt={post.imageAiHint || "Post image"}
+                                className="mt-4 rounded-md max-w-full h-auto shadow-sm border border-gray-300"
+                              />
+                            )}
+                            {post.originalPostId && (
+                              <p className="text-sm text-gray-600 mt-2 italic">
+                                Shared from original post
+                              </p>
+                            )}
+                            <div className="flex gap-3 mt-4">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleLike(post.id, post.likedByCurrentUser)}
+                                className={`flex items-center gap-1 ${
+                                  post.likedByCurrentUser ? "text-red-600" : "text-gray-600"
+                                } hover:bg-gray-200 rounded-full transition-colors`}
+                              >
+                                <Heart
+                                  className={`h-5 w-5 ${
+                                    post.likedByCurrentUser ? "fill-current" : ""
+                                  }`}
+                                />
+                                <span>{post.likes}</span>
+                              </Button>
+                              <Link href={`/post/${post.id}`}>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="flex items-center gap-1 text-gray-600 hover:bg-gray-200 rounded-full transition-colors"
+                                >
+                                  <MessageCircle className="h-5 w-5" />
+                                  <span>{post.comments}</span>
+                                </Button>
+                              </Link>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleShare(post)}
+                                className="flex items-center gap-1 text-gray-600 hover:bg-gray-200 rounded-full transition-colors"
+                              >
+                                <Share2 className="h-5 w-5" />
+                                <span>{post.shares}</span>
+                              </Button>
+                            </div>
+                            {post.commentsData && post.commentsData.length > 0 && (
+                              <div className="mt-4">
+                                <h4 className="text-sm font-semibold text-gray-900">Comments</h4>
+                                <div className="space-y-3 mt-2">
+                                  {post.commentsData.map((comment) => (
+                                    <div
+                                      key={comment.id}
+                                      className="flex items-start gap-3 border-t border-gray-300 pt-3"
+                                    >
+                                      <Link href={`/profile/${comment.username}`}>
+                                        <Avatar className="h-8 w-8 border border-yellow-500">
+                                          <AvatarImage src={comment.avatar} alt={comment.username} />
+                                          <AvatarFallback className="bg-gray-700 text-white">{comment.username.charAt(0)}</AvatarFallback>
+                                        </Avatar>
+                                      </Link>
+                                      <div className="flex-1">
+                                        <Link href={`/profile/${comment.username}`}>
+                                          <p className="text-sm font-semibold text-gray-900 hover:underline">
+                                            {comment.username}
+                                          </p>
+                                        </Link>
+                                        <p className="text-sm text-gray-900">{comment.text}</p>
+                                        <p className="text-xs text-gray-600">
+                                          {new Date(comment.createdAt.toDate()).toLocaleDateString()}
+                                        </p>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </CardContent>
+                        </Card>
+                      ))}
+                    </div>
+                  )}
+                </TabsContent>
+                <TabsContent value="friends" className="mt-6">
+                  {isLoadingFriends ? (
+                    <p className="text-center text-gray-700 font-medium">Loading friends...</p>
+                  ) : friends.length === 0 ? (
+                    <p className="text-center text-gray-700 font-medium">
+                      {relationshipStatus === "self"
+                        ? "You have no friends yet."
+                        : "No friends to display."}
+                    </p>
+                  ) : (
+                    <div className="space-y-4">
+                      {friends.map((friend) => (
+                        <div key={friend.friendUserId}>
+                          <Link href={`/profile/${friend.username}`}>
+                            <div className="flex items-center gap-4 p-4 rounded-xl bg-white border border-red-600 hover:bg-gray-100 transition-colors shadow-sm">
+                              <Avatar className="h-10 w-10 border border-yellow-500">
+                                <AvatarImage src={friend.avatar} alt={friend.name} />
+                                <AvatarFallback className="bg-gray-700 text-white">{friend.name.charAt(0)}</AvatarFallback>
+                              </Avatar>
+                              <div className="flex-1">
+                                <p className="font-semibold text-gray-900 hover:underline">{friend.name}</p>
+                                <p className="text-sm text-gray-600">@{friend.username}</p>
+                                <p className="text-sm text-gray-600">
+                                  Friends since{" "}
+                                  {friend.since
+                                    ? new Date(friend.since.toDate()).toLocaleDateString()
+                                    : "Unknown"}
+                                </p>
+                              </div>
+                            </div>
+                          </Link>
+                          <Separator className="bg-gray-300" />
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </TabsContent>
+              </Tabs>
+            </CardContent>
+          </Card>
         </div>
       </div>
     </div>

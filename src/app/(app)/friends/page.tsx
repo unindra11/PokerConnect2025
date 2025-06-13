@@ -1,21 +1,23 @@
-"use client";
+'use client';
 
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { app, auth } from "@/lib/firebase";
 import {
   getFirestore,
   collection,
   query,
-  onSnapshot,
-  doc,
-  deleteDoc,
   getDoc,
+  getDocs,
+  doc,
+  onSnapshot,
+  deleteDoc,
   setDoc,
-  serverTimestamp,
-  writeBatch,
+  runTransaction,
 } from "firebase/firestore";
 import type { User as FirebaseUser } from "firebase/auth";
+import { useToast } from "@/hooks/use-toast";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -25,16 +27,15 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Loader2, MoreHorizontal, User, MessageSquare } from "lucide-react";
-import { useToast } from "@/hooks/use-toast";
-import Link from "next/link";
+import { Separator } from "@/components/ui/separator";
+import { MoreHorizontal, UserMinus } from "lucide-react";
 
 interface Friend {
   friendUserId: string;
   username: string;
   name: string;
   avatar: string;
-  since: { timestamp: string };
+  since: any;
 }
 
 export default function FriendsPage() {
@@ -60,53 +61,85 @@ export default function FriendsPage() {
   useEffect(() => {
     if (!currentUserAuth) return;
 
-    const friendsQuery = query(collection(db, "users", currentUserAuth.uid, "friends"));
-    const unsubscribe = onSnapshot(friendsQuery, (snapshot) => {
-      const friendsData: Friend[] = snapshot.docs.map((doc) => ({
-        friendUserId: doc.data().friendUserId,
-        username: doc.data().username,
-        name: doc.data().name,
-        avatar: doc.data().avatar,
-        since: doc.data().since,
-      }));
-      setFriends(friendsData);
-      setIsLoading(false);
-    }, (error) => {
-      console.error("FriendsPage: Error fetching friends:", error);
-      toast({
-        title: "Error",
-        description: "Could not load your friends. Please try again.",
-        variant: "destructive",
-      });
-      setIsLoading(false);
-    });
+    const fetchFriends = async () => {
+      try {
+        setIsLoading(true);
+        console.log("FriendsPage: Fetching friends for user", currentUserAuth.uid);
+        const friendsRef = collection(db, "users", currentUserAuth.uid, "friends");
+        const friendsQuery = query(friendsRef);
+        const friendsSnapshot = await getDocs(friendsQuery);
 
-    return () => unsubscribe();
+        const friendsList: Friend[] = [];
+        for (const docSnap of friendsSnapshot.docs) {
+          const friendData = docSnap.data();
+          friendsList.push({
+            friendUserId: friendData.friendUserId,
+            username: friendData.username,
+            name: friendData.name,
+            avatar: friendData.avatar,
+            since: friendData.since,
+          });
+        }
+
+        console.log(`FriendsPage: Found ${friendsList.length} friends`, friendsList);
+        setFriends(friendsList);
+        setIsLoading(false);
+
+        const unsubscribe = onSnapshot(friendsQuery, (snapshot) => {
+          const updatedFriends: Friend[] = [];
+          snapshot.forEach((docSnap) => {
+            const friendData = docSnap.data();
+            updatedFriends.push({
+              friendUserId: friendData.friendUserId,
+              username: friendData.username,
+              name: friendData.name,
+              avatar: friendData.avatar,
+              since: friendData.since,
+            });
+          });
+          setFriends(updatedFriends);
+        });
+
+        return () => unsubscribe();
+      } catch (error) {
+        console.error("FriendsPage: Error fetching friends:", error);
+        toast({
+          title: "Error",
+          description: "Could not load friends. Please try again later.",
+          variant: "destructive",
+        });
+        setFriends([]);
+        setIsLoading(false);
+      }
+    };
+
+    fetchFriends();
   }, [currentUserAuth, toast, db]);
 
   const handleUnfriend = async (friendId: string, friendUsername: string) => {
     if (!currentUserAuth) return;
 
-    const confirmUnfriend = window.confirm(
-      `Are you sure you want to unfriend ${friendUsername}? This will also restrict access to any ongoing chats with them.`
-    );
-    if (!confirmUnfriend) return;
-
     try {
-      const batch = writeBatch(db);
-      const userFriendRef = doc(db, "users", currentUserAuth.uid, "friends", friendId);
-      const friendUserFriendRef = doc(db, "users", friendId, "friends", currentUserAuth.uid);
+      const friendRef = doc(db, "users", currentUserAuth.uid, "friends", friendId);
+      const userFriendRef = doc(db, "users", friendId, "friends", currentUserAuth.uid);
 
-      batch.delete(userFriendRef);
-      batch.delete(friendUserFriendRef);
+      const chatId = [currentUserAuth.uid, friendId].sort().join("_");
+      const chatRef = doc(db, "chats", chatId);
+      const chatSnap = await getDoc(chatRef);
 
-      await batch.commit();
+      await Promise.all([
+        deleteDoc(friendRef),
+        deleteDoc(userFriendRef),
+        chatSnap.exists() ? deleteDoc(chatRef) : Promise.resolve(),
+      ]);
+
+      setFriends(friends.filter((friend) => friend.friendUserId !== friendId));
       toast({
-        title: "Success",
+        title: "Friend Removed",
         description: `You have unfriended ${friendUsername}.`,
       });
     } catch (error) {
-      console.error("FriendsPage (handleUnfriend): Error unfriending user:", error);
+      console.error("FriendsPage: Error unfriending user:", error);
       toast({
         title: "Error",
         description: "Could not unfriend the user. Please try again.",
@@ -117,131 +150,194 @@ export default function FriendsPage() {
 
   const handleMessage = async (friendId: string, friendUsername: string) => {
     if (!currentUserAuth || !friendId) {
-      toast({ title: "Authentication Error", description: "You must be logged in to send messages.", variant: "destructive" });
+      toast({
+        title: "Authentication Error",
+        description: "You must be logged in to send messages.",
+        variant: "destructive",
+      });
       return;
     }
 
-    try {
-      const chatId = [currentUserAuth.uid, friendId].sort().join("_");
-      const chatRef = doc(db, "chats", chatId);
+    const maxRetries = 3;
+    let attempt = 0;
+    let success = false;
+    const chatId = [currentUserAuth.uid, friendId].sort().join("_");
+    const chatRef = doc(db, "chats", chatId);
 
-      const chatSnap = await getDoc(chatRef);
-      if (!chatSnap.exists()) {
-        const chatData = {
-          participants: [currentUserAuth.uid, friendId],
-          lastMessage: {
-            text: "Chat started!",
-            senderId: currentUserAuth.uid,
-            timestamp: serverTimestamp(),
-          },
-          unreadCounts: {
-            [currentUserAuth.uid]: 0,
-            [friendId]: 0,
-          },
-        };
-        await setDoc(chatRef, chatData);
-        console.log(`FriendsPage: Created new chat with ID ${chatId}`);
+    while (attempt < maxRetries && !success) {
+      try {
+        const friendshipRef1 = doc(db, "users", currentUserAuth.uid, "friends", friendId);
+        const friendshipRef2 = doc(db, "users", friendId, "friends", currentUserAuth.uid);
+        const [friendshipSnap1, friendshipSnap2] = await Promise.all([
+          getDoc(friendshipRef1),
+          getDoc(friendshipRef2),
+        ]);
+
+        console.log(`FriendsPage (handleMessage): Debug - Are friends: ${friendshipSnap1.exists()} && ${friendshipSnap2.exists()}`);
+
+        if (!friendshipSnap1.exists() || !friendshipSnap2.exists()) {
+          toast({
+            title: "Cannot Start Chat",
+            description: `You must be mutual friends with ${friendUsername} to start a chat.`,
+            variant: "destructive",
+          });
+          return;
+        }
+
+        console.log(`FriendsPage (handleMessage): Debug - Current user UID: ${currentUserAuth.uid}`);
+        const chatSnap = await getDoc(chatRef);
+        console.log(`FriendsPage (handleMessage): Debug - Chat exists: ${chatSnap.exists()}`);
+        if (!chatSnap.exists()) {
+          await runTransaction(db, async (transaction) => {
+            const [finalCheck1, finalCheck2] = await Promise.all([
+              transaction.get(friendshipRef1),
+              transaction.get(friendshipRef2),
+            ]);
+
+            if (!finalCheck1.exists() || !finalCheck2.exists()) {
+              throw new Error("Friendship status changed before creating chat");
+            }
+
+            const chatData = {
+              participants: [currentUserAuth.uid, friendId],
+              lastMessage: {
+                text: "",
+                senderId: "",
+                timestamp: null,
+              },
+              unreadCounts: {
+                [currentUserAuth.uid]: 0,
+                [friendId]: 0,
+              },
+            };
+            transaction.set(chatRef, chatData);
+          });
+
+          console.log(`FriendsPage (handleMessage): Created new chat with ID ${chatId}`);
+        }
+
+        success = true;
+        router.push(`/chat/${chatId}`);
+        toast({
+          title: "Starting Chat",
+          description: `Opening conversation with ${friendUsername}.`,
+        });
+      } catch (error) {
+        attempt++;
+        console.error(`FriendsPage (handleMessage): Attempt ${attempt} failed:`, error);
+
+        if (error.message === "Friendship status changed before creating chat") {
+          toast({
+            title: "Cannot Start Chat",
+            description: `Friendship status with ${friendUsername} changed. Please try again.`,
+            variant: "destructive",
+          });
+          return;
+        }
+
+        if (attempt === maxRetries) {
+          console.error("FriendsPage (handleMessage): Max retries reached. Failing operation.");
+          toast({
+            title: "Error",
+            description: "Could not start the chat: " + error.message,
+            variant: "destructive",
+          });
+          return;
+        }
+
+        const delay = Math.pow(2, attempt) * 1000;
+        console.log(`FriendsPage (handleMessage): Retrying after ${delay}ms...`);
+        await new Promise((resolve) => setTimeout(resolve, delay));
       }
-
-      router.push(`/chat/${chatId}`);
-      toast({
-        title: "Starting Chat",
-        description: `Opening conversation with ${friendUsername}.`,
-      });
-    } catch (error) {
-      console.error("FriendsPage (handleMessage): Error starting chat:", error);
-      toast({
-        title: "Error",
-        description: "Could not start the chat. Please try again.",
-        variant: "destructive",
-      });
     }
   };
 
-  const handleBlock = (friendId: string, friendUsername: string) => {
-    toast({
-      title: "Feature Not Implemented",
-      description: `Blocking ${friendUsername} is not yet implemented.`,
-      variant: "default",
-    });
-  };
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <div className="text-center">
+          <p className="text-lg">Loading friends...</p>
+        </div>
+      </div>
+    );
+  }
 
-  const handleReport = (friendId: string, friendUsername: string) => {
-    toast({
-      title: "Feature Not Implemented",
-      description: `Reporting ${friendUsername} is not yet implemented.`,
-      variant: "default",
-    });
-  };
+  if (!currentUserAuth) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <div className="text-center">
+          <p className="text-lg">Please log in to view your friends.</p>
+          <Link href="/login" className="text-blue-500 underline">
+            Log In
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="container mx-auto">
-      <Card className="mb-8 shadow-lg rounded-xl">
+    <div className="container mx-auto px-4 py-8">
+      <Card className="shadow-lg rounded-xl">
         <CardHeader>
-          <div className="flex items-center gap-2">
-            <User className="h-6 w-6 text-primary" />
-            <CardTitle className="text-xl">Friends</CardTitle>
-          </div>
+          <CardTitle className="text-2xl">Friends</CardTitle>
         </CardHeader>
         <CardContent>
-          {isLoading && (
-            <div className="text-center py-6">
-              <Loader2 className="h-8 w-8 animate-spin text-primary mx-auto" />
-              <p className="mt-2">Loading your friends...</p>
-            </div>
-          )}
-          {!isLoading && friends.length === 0 && (
+          {friends.length === 0 ? (
             <p className="text-center text-muted-foreground">
-              You don’t have any friends yet. Add some friends to start chatting!
+              No friends yet. Add some friends to start chatting!
             </p>
-          )}
-          {!isLoading && friends.length > 0 && (
-            <div className="grid gap-4">
+          ) : (
+            <div className="space-y-4">
               {friends.map((friend) => (
-                <Card key={friend.friendUserId} className="p-4 flex items-center justify-between shadow-md rounded-lg">
-                  <Link
-                    href={`/profile/${friend.username}`}
-                    className="flex items-center gap-3 hover:bg-gray-100 p-2 rounded-lg transition-colors"
-                  >
-                    <Avatar className="h-10 w-10">
-                      <AvatarImage src={friend.avatar} alt={friend.name} />
-                      <AvatarFallback>{friend.name.charAt(0)}</AvatarFallback>
-                    </Avatar>
-                    <div>
-                      <p className="font-semibold">{friend.name}</p>
-                      <p className="text-sm text-muted-foreground">@{friend.username}</p>
-                    </div>
-                  </Link>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handleMessage(friend.friendUserId, friend.username)}
+                <div key={friend.friendUserId}>
+                  <div className="flex items-center justify-between p-4 rounded-lg hover:bg-gray-100 transition-colors">
+                    <Link
+                      href={`/profile/${friend.username}`}
+                      className="flex items-center gap-4 flex-1"
                     >
-                      <MessageSquare className="h-4 w-4 mr-2" />
-                      Message
-                    </Button>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="sm">
-                          <MoreHorizontal className="h-4 w-4" />
-                          <span className="sr-only">More options</span>
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => handleUnfriend(friend.friendUserId, friend.username)}>
-                          Unfriend
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => handleBlock(friend.friendUserId, friend.username)}>
-                          Block
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => handleReport(friend.friendUserId, friend.username)}>
-                          Report
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
+                      <Avatar className="h-12 w-12">
+                        <AvatarImage src={friend.avatar} alt={friend.name} />
+                        <AvatarFallback>{friend.name.charAt(0)}</AvatarFallback>
+                      </Avatar>
+                      <div>
+                        <p className="font-semibold">{friend.name}</p>
+                        <p className="text-sm text-muted-foreground">@{friend.username}</p>
+                        <p className="text-sm text-muted-foreground">
+                          Friends since{" "}
+                          {friend.since
+                            ? new Date(friend.since.toDate()).toLocaleDateString()
+                            : "Unknown"}
+                        </p>
+                      </div>
+                    </Link>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleMessage(friend.friendUserId, friend.username)}
+                      >
+                        Message
+                      </Button>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="sm">
+                            <MoreHorizontal className="h-5 w-5" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent>
+                          <DropdownMenuItem
+                            onClick={() => handleUnfriend(friend.friendUserId, friend.username)}
+                            className="text-red-500"
+                          >
+                            <UserMinus className="mr-2 h-4 w-4" />
+                            Unfriend
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
                   </div>
-                </Card>
+                  <Separator />
+                </div>
               ))}
             </div>
           )}

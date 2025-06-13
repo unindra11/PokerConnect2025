@@ -1,20 +1,26 @@
-
-// src/app/signup/page.tsx
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import Link from "next/link";
 import { UserPlus, Loader2, MapPin } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/hooks/use-toast";
-import type { MockUserPin } from "@/app/(app)/map/page"; // Assuming this type is still relevant for map user structure
-import { app, auth, firestore as db } from "@/lib/firebase"; // Use 'db' alias for clarity
-import { createUserWithEmailAndPassword, type UserCredential, type AuthError } from "firebase/auth";
-import { getFirestore, doc, setDoc, Timestamp, serverTimestamp } from "firebase/firestore";
+import type { MockUserPin } from "@/app/(app)/map/page";
+import { app, auth, firestore as db } from "@/lib/firebase";
+import { createUserWithEmailAndPassword, type UserCredential } from "firebase/auth";
+import { getFirestore, doc, setDoc, serverTimestamp } from "firebase/firestore";
+import { Country, State, City } from "country-state-city";
+
+// Fetch countries, states, and cities using country-state-city
+const countries = Country.getAllCountries().map((country) => ({
+  name: country.name,
+  code: country.isoCode,
+})).sort((a, b) => a.name.localeCompare(b.name));
 
 export default function SignupPage() {
   const router = useRouter();
@@ -27,17 +33,30 @@ export default function SignupPage() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [location, setLocation] = useState(""); // For text display of location
+  const [selectedCountry, setSelectedCountry] = useState<string>("");
+  const [selectedState, setSelectedState] = useState<string>("");
+  const [selectedCity, setSelectedCity] = useState<string>("");
   const [selectedLocationCoords, setSelectedLocationCoords] = useState<{ lat: number; lng: number } | null>(null);
-  
-  const locationInputRef = useRef<HTMLInputElement>(null);
 
-  // Log the Firestore instance on mount to ensure it's correctly initialized
+  // Derived states and cities based on selections
+  const states = selectedCountry
+    ? State.getStatesOfCountry(
+        countries.find((c) => c.name === selectedCountry)?.code || ""
+      ).map((state) => state.name).sort((a, b) => a.localeCompare(b))
+    : [];
+
+  const cities = selectedCountry && selectedState
+    ? City.getCitiesOfState(
+        countries.find((c) => c.name === selectedCountry)?.code || "",
+        State.getStatesOfCountry(countries.find((c) => c.name === selectedCountry)?.code || "")
+          .find((s) => s.name === selectedState)?.isoCode || ""
+      ).map((city) => city.name).sort((a, b) => a.localeCompare(b))
+    : [];
+
   useEffect(() => {
     const firestoreInstance = getFirestore(app, "poker");
     console.log("SignupPage: Firestore object on mount:", firestoreInstance);
   }, []);
-
 
   const handleGetDeviceLocation = () => {
     if (!navigator.geolocation) {
@@ -57,10 +76,9 @@ export default function SignupPage() {
           lng: position.coords.longitude,
         };
         setSelectedLocationCoords(coords);
-        setLocation(`Current Location (${coords.lat.toFixed(4)}, ${coords.lng.toFixed(4)})`);
         toast({
           title: "Location Retrieved",
-          description: "Your current location has been set.",
+          description: "Your current coordinates have been set.",
         });
         setIsFetchingLocation(false);
         console.log("SignupPage: Fetched device location:", coords);
@@ -102,32 +120,35 @@ export default function SignupPage() {
       return;
     }
 
+    if (!selectedCountry || !selectedState || !selectedCity) {
+      toast({ title: "Signup Error", description: "Please select your country, state, and city.", variant: "destructive" });
+      setIsLoading(false);
+      return;
+    }
+
     try {
       const userCredential: UserCredential = await createUserWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
       console.log("SignupPage: Firebase Auth signup successful. UID:", user.uid);
-      
+
       const userProfile = {
         uid: user.uid,
         fullName: fullName,
-        email: user.email, // Use email from authenticated user for consistency
+        email: user.email,
         username: username,
-        location: location, // The text description of the location
-        locationCoords: selectedLocationCoords, // The lat/lng object, or null
+        location: { country: selectedCountry, state: selectedState, city: selectedCity },
+        locationCoords: selectedLocationCoords,
         bio: "",
-        avatar: "", 
-        coverImage: "", 
+        avatar: "",
+        coverImage: "",
         createdAt: serverTimestamp(),
       };
 
       console.log("SignupPage: Preparing to write to Firestore. UserProfile object:", userProfile);
-      
-      // Explicitly get the Firestore instance for the "poker" database
+
       const firestoreDb = getFirestore(app, "poker");
       console.log("SignupPage: Firestore instance being used for setDoc:", firestoreDb);
       console.log("SignupPage: Firestore database ID for 'poker' DB:", firestoreDb.app.options.projectId, firestoreDb.app.name === "[DEFAULT]" ? "(default)" : firestoreDb.app.name);
-      // The line above might not give the actual DB ID directly; more reliably check the network request.
-
 
       const userDocRefPath = `users/${user.uid}`;
       console.log("SignupPage: Attempting to write to Firestore path:", userDocRefPath);
@@ -166,16 +187,16 @@ export default function SignupPage() {
           try { mapUsers = JSON.parse(existingMapUsersString); if (!Array.isArray(mapUsers)) mapUsers = []; }
           catch (parseError) { console.error("SignupPage: Error parsing pokerConnectMapUsers from localStorage:", parseError); mapUsers = []; }
         }
-        mapUsers = mapUsers.filter(u => u.id !== mapUser.id); // Remove existing if any, then add
+        mapUsers = mapUsers.filter(u => u.id !== mapUser.id);
         mapUsers.push(mapUser);
         localStorage.setItem("pokerConnectMapUsers", JSON.stringify(mapUsers));
         console.log("SignupPage: Added/Updated user in pokerConnectMapUsers localStorage:", mapUser);
       } else {
-         toast({
+        toast({
           title: "Location Notice",
           description: "Location coordinates not available for map. User profile saved without precise map location.",
-          variant: "default"
-        })
+          variant: "default",
+        });
       }
 
       toast({ title: "Signup Successful!", description: `Welcome, ${fullName}! Please log in.`, });
@@ -196,15 +217,14 @@ export default function SignupPage() {
             errorMessage = "The email address is not valid.";
             break;
           default:
-            // Check if it's a Firestore error related to project setup
             if (error.message && (error.message.includes("firestore") || error.message.includes("Firestore") || error.message.includes("RPC") || (typeof error.code === 'string' && error.code.startsWith("permission-denied")) || error.code === 'unavailable' || error.code === 'unimplemented' || error.code === 'internal')) {
               errorMessage = `Failed to save profile. Please ensure Firestore database ('poker') is correctly created, API enabled, and security rules are published in Firebase Console. Details: ${error.message}`;
             } else {
-               errorMessage = `An unexpected error occurred. Code: ${error.code || 'N/A'}, Message: ${error.message || 'Unknown error'}`;
+              errorMessage = `An unexpected error occurred. Code: ${error.code || 'N/A'}, Message: ${error.message || 'Unknown error'}`;
             }
         }
       } else if (error.message) {
-          errorMessage = `An unexpected error occurred: ${error.message}`;
+        errorMessage = `An unexpected error occurred: ${error.message}`;
       }
       toast({ title: "Signup Error", description: errorMessage, variant: "destructive", duration: 15000 });
     } finally {
@@ -282,9 +302,66 @@ export default function SignupPage() {
                 required
               />
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="location-manual">Location (Optional)</Label>
-               <Button
+            <div className="space-y-4">
+              <div>
+                <Label htmlFor="country">Country</Label>
+                <Select onValueChange={(value) => {
+                  setSelectedCountry(value);
+                  setSelectedState(""); // Reset state and city when country changes
+                  setSelectedCity("");
+                }}>
+                  <SelectTrigger className="mt-1">
+                    <SelectValue placeholder="Select a country" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {countries.map((country) => (
+                      <SelectItem key={country.code} value={country.name}>
+                        {country.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label htmlFor="state">State</Label>
+                <Select
+                  onValueChange={(value) => {
+                    setSelectedState(value);
+                    setSelectedCity(""); // Reset city when state changes
+                  }}
+                  disabled={!selectedCountry}
+                >
+                  <SelectTrigger className="mt-1">
+                    <SelectValue placeholder={selectedCountry ? "Select a state" : "Select a country first"} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {states.map((state) => (
+                      <SelectItem key={state} value={state}>
+                        {state}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label htmlFor="city">City</Label>
+                <Select
+                  onValueChange={setSelectedCity}
+                  disabled={!selectedState}
+                >
+                  <SelectTrigger className="mt-1">
+                    <SelectValue placeholder={selectedState ? "Select a city" : "Select a state first"} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {cities.map((city) => (
+                      <SelectItem key={city} value={city}>
+                        {city}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <Button
                 type="button"
                 variant="outline"
                 className="w-full"
@@ -296,24 +373,11 @@ export default function SignupPage() {
                 ) : (
                   <MapPin className="mr-2 h-4 w-4" />
                 )}
-                {isFetchingLocation ? "Fetching Location..." : "Get My Current Location"}
+                {isFetchingLocation ? "Fetching Coordinates..." : "Get My Coordinates"}
               </Button>
-              <Input
-                id="location-manual"
-                ref={locationInputRef}
-                placeholder="Or type city, country (e.g., Mumbai, India)"
-                className="mt-1"
-                value={location} // This will display "Current Location (...)" or manually typed text
-                onChange={(e) => {
-                  setLocation(e.target.value);
-                  // If user types manually after fetching, we might want to clear selectedLocationCoords
-                  // or let the fetched coords persist if they don't select a new place.
-                  // For now, manual typing only updates the text, fetched coords are used if available.
-                }}
-              />
-               {selectedLocationCoords && (
+              {selectedLocationCoords && (
                 <p className="text-xs text-muted-foreground">
-                  Coordinates set: Lat: {selectedLocationCoords.lat.toFixed(4)}, Lng: {selectedLocationCoords.lng.toFixed(4)}
+                  Coordinates: Lat: {selectedLocationCoords.lat.toFixed(4)}, Lng: {selectedLocationCoords.lng.toFixed(4)}
                 </p>
               )}
             </div>
@@ -335,5 +399,3 @@ export default function SignupPage() {
     </div>
   );
 }
-
-    

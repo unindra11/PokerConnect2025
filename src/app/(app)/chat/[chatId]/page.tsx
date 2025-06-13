@@ -57,15 +57,22 @@ export default function ChatConversationPage() {
     return () => unsubscribe();
   }, [router]);
 
-  // Check if two users are friends
+  // Check if two users are mutual friends
   const checkFriendship = async (userId1: string, userId2: string): Promise<boolean> => {
     try {
-      const friendsQuery = query(
+      const friendshipQuery1 = query(
         collection(db, "users", userId1, "friends"),
         where("friendUserId", "==", userId2)
       );
-      const friendsSnapshot = await getDocs(friendsQuery);
-      return !friendsSnapshot.empty;
+      const friendshipQuery2 = query(
+        collection(db, "users", userId2, "friends"),
+        where("friendUserId", "==", userId1)
+      );
+      const [friendshipSnapshot1, friendshipSnapshot2] = await Promise.all([
+        getDocs(friendshipQuery1),
+        getDocs(friendshipQuery2),
+      ]);
+      return !friendshipSnapshot1.empty && !friendshipSnapshot2.empty;
     } catch (error) {
       console.error(`ChatConversationPage: Error checking friendship between ${userId1} and ${userId2}:`, error);
       return false;
@@ -106,13 +113,13 @@ export default function ChatConversationPage() {
           return;
         }
 
-        // Verify friendship
+        // Verify mutual friendship
         const otherParticipantId = chatData.participants.find((uid: string) => uid !== currentUser.uid);
         const areFriends = await checkFriendship(currentUser.uid, otherParticipantId);
         if (!areFriends) {
           toast({
             title: "Access Denied",
-            description: "You can only chat with friends.",
+            description: "You can only chat with mutual friends.",
             variant: "destructive",
           });
           router.push("/chat");
@@ -201,7 +208,7 @@ export default function ChatConversationPage() {
       console.error("ChatConversationPage: Error fetching messages:", error);
       toast({
         title: "Error",
-        description: "Could not load messages. Please try again.",
+        description: "Could not load messages due to permission issues.",
         variant: "destructive",
       });
     });

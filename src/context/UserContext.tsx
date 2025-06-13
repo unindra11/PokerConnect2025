@@ -15,14 +15,21 @@ interface LoggedInUser {
   bio?: string;
   avatar?: string;
   coverImage?: string;
-  location?: string;
+  location?: { country: string; state: string; city: string };
   locationCoords?: { lat: number; lng: number } | null;
+}
+
+interface NotificationUser {
+  name: string;
+  avatar?: string;
+  username: string;
+  uid?: string;
 }
 
 interface AppNotification {
   id: string;
   type: string;
-  user: { name: string; avatar?: string; username: string; uid?: string } | null;
+  user: NotificationUser | null;
   message: string;
   timestamp: string | Timestamp | Date;
   read: boolean;
@@ -45,6 +52,7 @@ interface UserContextType {
   setLoggedInUserDetails: (details: LoggedInUser | null) => void;
   notifications: AppNotification[];
   unreadNotificationsCount: number;
+  unreadMessagesCount: number;
 }
 
 const UserContext = createContext<UserContextType | undefined>(undefined);
@@ -56,6 +64,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   const [isLoadingUserDetails, setIsLoadingUserDetails] = useState(true);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [unreadNotificationsCount, setUnreadNotificationsCount] = useState<number>(0);
+  const [unreadMessagesCount, setUnreadMessagesCount] = useState<number>(0);
 
   const router = useRouter();
   const db = getFirestore(app, "poker");
@@ -70,7 +79,6 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       if (user) {
         setCurrentUserAuth(user);
 
-        // Fetch user details from Firestore
         const userDocRef = doc(db, "users", user.uid);
         try {
           const userDocSnap = await getDoc(userDocRef);
@@ -88,10 +96,9 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
               location: profileData.location,
               locationCoords: profileData.locationCoords,
             };
-            // Only update if the data has actually changed
             setLoggedInUserDetails((prev) => {
               if (prev && JSON.stringify(prev) === JSON.stringify(details)) {
-                return prev; // Avoid updating if the data is the same
+                return prev;
               }
               return details;
             });
@@ -109,6 +116,8 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       } else {
         setCurrentUserAuth(null);
         setLoggedInUserDetails(null);
+        setNotifications([]);
+        setUnreadMessagesCount(0);
         router.push("/login");
       }
 
@@ -132,115 +141,95 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     }
 
     const fetchNotifications = () => {
-      // Fetch friend requests
-      const requestsRef = collection(db, "friendRequests");
-      const friendRequestQuery = query(
-        requestsRef,
-        where("receiverId", "==", currentUserAuth.uid),
-        where("status", "==", "pending"),
+      const notificationsRef = collection(db, "users", currentUserAuth.uid, "notifications");
+      const notificationsQuery = query(
+        notificationsRef,
+        where("type", "in", [
+          "friend_request",
+          "friend_request_firestore",
+          "like_post",
+          "comment_post",
+          "share_post",
+          "friend_request_accepted",
+          "friend_request_declined"
+        ]),
         orderBy("createdAt", "desc")
       );
-      const unsubscribeFriendRequests = onSnapshot(friendRequestQuery, (snapshot) => {
-        const friendRequestNotifications: AppNotification[] = snapshot.docs.map(docSnap => {
+
+      const unsubscribe = onSnapshot(notificationsQuery, (snapshot) => {
+        const allNotifications: AppNotification[] = snapshot.docs.map(docSnap => {
           const data = docSnap.data();
+          let messageText = "";
+          switch (data.type) {
+            case "friend_request":
+            case "friend_request_firestore":
+              messageText = "sent you a friend request.";
+              break;
+            case "like_post":
+              messageText = "liked your post.";
+              break;
+            case "comment_post":
+              messageText = `commented on your post: "${data.commentText || ""}"`;
+              break;
+            case "share_post":
+              messageText = `shared your post: "${data.caption || ""}"`;
+              break;
+            case "friend_request_accepted":
+              messageText = "accepted your friend request.";
+              break;
+            case "friend_request_declined":
+              messageText = "declined your friend request.";
+              break;
+            default:
+              messageText = "interacted with your content.";
+          }
+
           return {
             id: docSnap.id,
-            type: "friend_request_firestore",
+            type: data.type,
             user: {
-              name: data.senderUsername || "Unknown Sender",
-              avatar: data.senderAvatar || `https://placehold.co/100x100.png?text=${(data.senderUsername || "S").substring(0,1)}`,
-              username: data.senderUsername || "unknown_sender",
+              name: data.senderUsername || "Unknown User",
+              avatar: data.senderAvatar || `https://placehold.co/100x100.png?text=${(data.senderUsername || "U").substring(0,1)}`,
+              username: data.senderUsername || "unknown_user",
               uid: data.senderId,
             },
-            message: "sent you a friend request.",
-            timestamp: data.createdAt,
-            read: false,
+            message: messageText,
+            timestamp: data.createdAt || new Date(),
+            read: data.read || false,
             senderId: data.senderId,
             senderUsername: data.senderUsername,
             senderAvatar: data.senderAvatar,
+            receiverId: data.receiverId,
+            postId: data.postId,
+            commentText: data.type === "comment_post" ? data.commentText : undefined,
+            caption: data.type === "share_post" ? data.caption : undefined,
           };
         });
 
-        // Fetch like_post, comment_post, share_post, friend_request_accepted, and friend_request_declined notifications
-        const notificationsRef = collection(db, "users", currentUserAuth.uid, "notifications");
-        const notificationsQuery = query(
-          notificationsRef,
-          where("type", "in", ["like_post", "comment_post", "share_post", "friend_request_accepted", "friend_request_declined"]),
-          orderBy("createdAt", "desc")
-        );
-        const unsubscribeActivity = onSnapshot(notificationsQuery, (notificationsSnapshot) => {
-          const activityNotifications: AppNotification[] = notificationsSnapshot.docs.map(docSnap => {
-            const data = docSnap.data();
-            let messageText = "";
-            switch(data.type) {
-              case "like_post":
-                messageText = "liked your post.";
-                break;
-              case "comment_post":
-                messageText = `commented on your post: "${data.commentText}"`;
-                break;
-              case "share_post":
-                messageText = `shared your post: "${data.caption}"`;
-                break;
-              case "friend_request_accepted":
-                messageText = "accepted your friend request.";
-                break;
-              case "friend_request_declined":
-                messageText = "declined your friend request.";
-                break;
-              default:
-                messageText = "interacted with your content.";
-            }
-
-            return {
-              id: docSnap.id,
-              type: data.type,
-              user: {
-                name: data.senderUsername || "Unknown User",
-                avatar: data.senderAvatar || `https://placehold.co/100x100.png?text=${(data.senderUsername || "U").substring(0,1)}`,
-                username: data.senderUsername || "unknown_user",
-                uid: data.senderId,
-              },
-              message: messageText,
-              timestamp: data.createdAt,
-              read: data.read || false,
-              senderId: data.senderId,
-              senderUsername: data.senderUsername,
-              senderAvatar: data.senderAvatar,
-              postId: data.postId,
-              commentText: data.type === "comment_post" ? data.commentText : undefined,
-              caption: data.type === "share_post" ? data.caption : undefined,
-            };
-          });
-
-          // Combine notifications
-          const combinedNotifications = [...friendRequestNotifications, ...activityNotifications];
-          combinedNotifications.sort((a,b) => {
-             const timeA = a.timestamp instanceof Timestamp ? a.timestamp.toMillis() : new Date(a.timestamp as string | Date).getTime();
-             const timeB = b.timestamp instanceof Timestamp ? b.timestamp.toMillis() : new Date(b.timestamp as string | Date).getTime();
-             return timeB - timeA;
-          });
-          setNotifications(combinedNotifications);
-        }, (error) => {
-          console.error("UserContext: Error listening to activity notifications:", error);
-        });
-
-        return () => unsubscribeActivity();
+        setNotifications(allNotifications.sort((a, b) => {
+          const timeA = a.timestamp instanceof Timestamp ? a.timestamp.toMillis() : new Date(a.timestamp as string | Date).getTime();
+          const timeB = b.timestamp instanceof Timestamp ? b.timestamp.toMillis() : new Date(b.timestamp as string | Date).getTime();
+          return timeB - timeA;
+        }));
       }, (error) => {
-        console.error("UserContext: Error listening to friend requests:", error);
+        console.error("UserContext: Error listening to notifications:", error);
+        setNotifications([]);
       });
 
-      return () => unsubscribeFriendRequests();
+      return unsubscribe;
     };
 
-    const unsubscribe = fetchNotifications();
-    return () => unsubscribe && unsubscribe();
+    const unsubscribeNotifications = fetchNotifications();
+
+    return () => {
+      unsubscribeNotifications && unsubscribeNotifications();
+    };
   }, [currentUserAuth, loggedInUserDetails, db]);
 
   useEffect(() => {
     const count = notifications.reduce((acc, notification) => {
       if (
-        ["friend_request_firestore", "like_post", "comment_post", "share_post", "friend_request_accepted", "friend_request_declined"].includes(notification.type) &&
+        ["friend_request", "friend_request_firestore", "like_post", "comment_post", "share_post", "friend_request_accepted", "friend_request_declined"].includes(notification.type) &&
         !notification.read
       ) {
         return acc + 1;
@@ -250,7 +239,33 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     setUnreadNotificationsCount(count);
   }, [notifications]);
 
-  // Memoize the context value to prevent unnecessary re-renders
+  useEffect(() => {
+    if (!currentUserAuth || !loggedInUserDetails) {
+      setUnreadMessagesCount(0);
+      return;
+    }
+
+    const chatsQuery = query(
+      collection(db, "chats"),
+      where("participants", "array-contains", currentUserAuth.uid)
+    );
+
+    const unsubscribe = onSnapshot(chatsQuery, (snapshot) => {
+      let totalUnread = 0;
+      snapshot.forEach((doc) => {
+        const chatData = doc.data();
+        const unreadCount = chatData.unreadCounts?.[currentUserAuth.uid] || 0;
+        totalUnread += unreadCount;
+      });
+      setUnreadMessagesCount(totalUnread);
+    }, (error) => {
+      console.error("UserContext: Error fetching unread messages count:", error);
+      setUnreadMessagesCount(0);
+    });
+
+    return () => unsubscribe();
+  }, [currentUserAuth, loggedInUserDetails, db]);
+
   const contextValue = useMemo(
     () => ({
       currentUserAuth,
@@ -260,8 +275,9 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       setLoggedInUserDetails,
       notifications,
       unreadNotificationsCount,
+      unreadMessagesCount,
     }),
-    [currentUserAuth, loggedInUserDetails, isLoadingAuth, isLoadingUserDetails, notifications, unreadNotificationsCount]
+    [currentUserAuth, loggedInUserDetails, isLoadingAuth, isLoadingUserDetails, notifications, unreadNotificationsCount, unreadMessagesCount]
   );
 
   return (
