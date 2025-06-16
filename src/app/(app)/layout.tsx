@@ -53,6 +53,14 @@ function AppLayoutContent({ children }: { children: ReactNode }) {
   const { toast } = useToast();
   const [mapUsers, setMapUsers] = useState<MockUserPin[]>([]);
 
+  // Handle redirect to /login using useEffect to avoid rendering phase side effects
+  useEffect(() => {
+    if (!isLoadingAuth && !isLoadingUserDetails && !loggedInUserDetails) {
+      console.log("AppLayout: No loggedInUserDetails, redirecting to /login");
+      router.push("/login");
+    }
+  }, [isLoadingAuth, isLoadingUserDetails, loggedInUserDetails, router]);
+
   useEffect(() => {
     console.log("AppLayout: Current user state - currentUserAuth:", currentUserAuth?.uid, "loggedInUserDetails:", loggedInUserDetails);
     // Fetch map users from Firestore
@@ -80,7 +88,7 @@ function AppLayoutContent({ children }: { children: ReactNode }) {
     };
 
     fetchMapUsers();
-  }, []);
+  }, []); // This useEffect remains unchanged
 
   const handleAvatarChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -149,6 +157,7 @@ function AppLayoutContent({ children }: { children: ReactNode }) {
     }
   };
 
+  // Render loading state while authentication and user details are being fetched
   if (isLoadingAuth || isLoadingUserDetails) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-background text-foreground">
@@ -158,9 +167,8 @@ function AppLayoutContent({ children }: { children: ReactNode }) {
     );
   }
 
+  // If no loggedInUserDetails, return null (redirect is handled in useEffect)
   if (!loggedInUserDetails) {
-    console.log("AppLayout: No loggedInUserDetails, redirecting to /login");
-    router.push("/login");
     return null;
   }
 
@@ -200,7 +208,9 @@ function AppLayoutContent({ children }: { children: ReactNode }) {
               ref={fileInputRef}
             />
             <div className="group-data-[collapsible=icon]:hidden delay-300 flex flex-col">
-              <span className="text-sm font-medium">{userNameToDisplay}</span>
+              <Link href={`/profile/${loggedInUserDetails.username}`}>
+                <span className="text-sm font-medium hover:underline">{userNameToDisplay}</span>
+              </Link>
               <span className="text-xs text-muted-foreground">{userEmailToDisplay}</span>
             </div>
           </div>

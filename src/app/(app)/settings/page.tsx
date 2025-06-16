@@ -1,14 +1,12 @@
-
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { UserCircle, BellDot, Palette, ShieldAlert, Save, Upload, Loader2 } from "lucide-react";
+import { UserCircle, ShieldAlert, Save, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -23,13 +21,13 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { app, auth, firestore, storage } from "@/lib/firebase"; // Import Firestore and Storage
-import { doc, updateDoc, getDoc } from "firebase/firestore"; // Firestore functions
-import { ref, uploadBytesResumable, getDownloadURL } from "firebase/storage"; // Storage functions
-import type { User as FirebaseUser } from "firebase/auth"; // For current Firebase Auth user
+import { app, auth, firestore } from "@/lib/firebase";
+import { doc, updateDoc, getDoc, deleteDoc, collection, getDocs, query, where } from "firebase/firestore";
+import { signOut, deleteUser, EmailAuthProvider, reauthenticateWithCredential } from "firebase/auth";
+import type { User as FirebaseUser } from "firebase/auth";
 
 interface LoggedInUserDetails {
-  uid: string; // Ensure UID is part of this
+  uid: string;
   fullName: string;
   username: string;
   email: string;
@@ -37,9 +35,6 @@ interface LoggedInUserDetails {
   avatar?: string;
   coverImage?: string;
 }
-
-const MAX_COVER_IMAGE_SIZE_MB = 5;
-const MAX_COVER_IMAGE_SIZE_BYTES = MAX_COVER_IMAGE_SIZE_MB * 1024 * 1024;
 
 export default function SettingsPage() {
   const { toast } = useToast();
@@ -49,16 +44,11 @@ export default function SettingsPage() {
   
   const [editableFullName, setEditableFullName] = useState("");
   const [editableBio, setEditableBio] = useState("");
-  const [currentCoverImage, setCurrentCoverImage] = useState<string | undefined>(undefined);
   const [isSavingProfile, setIsSavingProfile] = useState(false);
-  const [isUploadingCover, setIsUploadingCover] = useState(false);
-
-  const [notificationsLikes, setNotificationsLikes] = useState(true);
-  const [notificationsComments, setNotificationsComments] = useState(true);
-  const [notificationsFriendRequests, setNotificationsFriendRequests] = useState(true);
-  const [isDarkMode, setIsDarkMode] = useState(true);
-
-  const coverImageInputRef = useRef<HTMLInputElement>(null);
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
+  const [showReauthDialog, setShowReauthDialog] = useState(false);
+  const [reauthEmail, setReauthEmail] = useState("");
+  const [reauthPassword, setReauthPassword] = useState("");
 
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged(async (user) => {
@@ -68,24 +58,23 @@ export default function SettingsPage() {
         if (loggedInUserString) {
           try {
             const userDetails: LoggedInUserDetails = JSON.parse(loggedInUserString);
-            if (userDetails.uid === user.uid) { // Ensure consistency
+            if (userDetails.uid === user.uid) {
               setCurrentUserDetails(userDetails);
               setEditableFullName(userDetails.fullName || "");
               setEditableBio(userDetails.bio || "");
-              setCurrentCoverImage(userDetails.coverImage);
-            } else { // Mismatch, clear and fetch
+            } else {
               localStorage.removeItem("loggedInUser");
               fetchUserDetailsFromFirestore(user.uid);
             }
           } catch (e) {
             console.error("Error parsing user from localStorage:", e);
-            fetchUserDetailsFromFirestore(user.uid); // Fetch if parsing fails
+            fetchUserDetailsFromFirestore(user.uid);
           }
         } else {
-           fetchUserDetailsFromFirestore(user.uid); // Fetch if not in localStorage
+           fetchUserDetailsFromFirestore(user.uid);
         }
       } else {
-        router.push("/login"); // Redirect if not authenticated
+        router.push("/login");
       }
     });
     return () => unsubscribe();
@@ -96,7 +85,7 @@ export default function SettingsPage() {
       const userDocRef = doc(firestore, "users", uid);
       const userDocSnap = await getDoc(userDocRef);
       if (userDocSnap.exists()) {
-        const data = userDocSnap.data() as Omit<LoggedInUserDetails, 'uid'>; // Assuming Firestore doc doesn't store UID inside
+        const data = userDocSnap.data() as Omit<LoggedInUserDetails, 'uid'>;
         const userDetails: LoggedInUserDetails = { 
           uid, 
           ...data,
@@ -107,7 +96,6 @@ export default function SettingsPage() {
         setCurrentUserDetails(userDetails);
         setEditableFullName(userDetails.fullName);
         setEditableBio(userDetails.bio || "");
-        setCurrentCoverImage(userDetails.coverImage);
         localStorage.setItem("loggedInUser", JSON.stringify(userDetails));
       } else {
         toast({ title: "Error", description: "User profile not found in database.", variant: "destructive" });
@@ -117,7 +105,6 @@ export default function SettingsPage() {
       toast({ title: "Error", description: "Could not load profile details from database.", variant: "destructive"});
     }
   };
-
 
   const handleSaveChanges = async () => {
     if (!currentUserDetails || !firebaseAuthUser) {
@@ -138,14 +125,13 @@ export default function SettingsPage() {
         bio: editableBio,
       };
       localStorage.setItem("loggedInUser", JSON.stringify(updatedUserDetails));
-      setCurrentUserDetails(updatedUserDetails); // Update local state
+      setCurrentUserDetails(updatedUserDetails);
 
       toast({
         title: "Profile Saved!",
         description: "Your profile information has been updated in Firestore.",
       });
-      // Optionally, navigate or give other feedback
-      // router.push(`/profile/${currentUserDetails.username}`);
+      router.push(`/profile/${currentUserDetails.username}`);
     } catch (error) {
       console.error("Error saving profile to Firestore:", error);
       toast({ title: "Firestore Error", description: "Could not save profile changes to database.", variant: "destructive"});
@@ -154,71 +140,175 @@ export default function SettingsPage() {
     }
   };
 
-  const handleCoverImageChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file || !firebaseAuthUser) {
-      toast({ title: "Error", description: "No file selected or user not authenticated.", variant: "destructive"});
-      if (coverImageInputRef.current) coverImageInputRef.current.value = "";
+  const handleReauthAndDelete = async () => {
+    if (!firebaseAuthUser || !currentUserDetails) {
+      toast({ title: "Error", description: "User not authenticated or data not loaded.", variant: "destructive" });
+      setShowReauthDialog(false);
       return;
     }
 
-    if (file.size > MAX_COVER_IMAGE_SIZE_BYTES) {
+    try {
+      // Re-authenticate the user
+      const credential = EmailAuthProvider.credential(reauthEmail, reauthPassword);
+      await reauthenticateWithCredential(firebaseAuthUser, credential);
+      setShowReauthDialog(false);
+      toast({ title: "Authentication Successful", description: "Proceeding with account deletion..." });
+
+      // Proceed with account deletion
+      await performAccountDeletion();
+    } catch (error: any) {
+      console.error("Re-authentication error:", error);
       toast({
-        title: "File Too Large",
-        description: `Image too large (max ${MAX_COVER_IMAGE_SIZE_MB}MB).`,
+        title: "Authentication Failed",
+        description: error.message || "Please enter valid credentials to proceed.",
         variant: "destructive",
       });
-      if (coverImageInputRef.current) coverImageInputRef.current.value = "";
-      return;
-    }
-    if (!file.type.startsWith("image/")) {
-      toast({ title: "Unsupported File Type", description: "Please select an image.", variant: "destructive" });
-      if (coverImageInputRef.current) coverImageInputRef.current.value = "";
-      return;
-    }
-
-    setIsUploadingCover(true);
-    const storageRefPath = `cover_images/${firebaseAuthUser.uid}/${Date.now()}_${file.name}`;
-    const coverImageStorageRef = ref(storage, storageRefPath);
-    
-    try {
-      const uploadTask = uploadBytesResumable(coverImageStorageRef, file);
-      await uploadTask;
-      const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
-
-      const userDocRef = doc(firestore, "users", firebaseAuthUser.uid);
-      await updateDoc(userDocRef, { coverImage: downloadURL });
-
-      if (currentUserDetails) {
-        const updatedUserDetails = { ...currentUserDetails, coverImage: downloadURL };
-        localStorage.setItem("loggedInUser", JSON.stringify(updatedUserDetails));
-        setCurrentUserDetails(updatedUserDetails); // Update local state
-        setCurrentCoverImage(downloadURL); // Update displayed cover image preview if any
-      }
-
-      toast({
-        title: "Cover Image Updated!",
-        description: "New cover image uploaded to Firebase Storage and URL saved to Firestore.",
-      });
-    } catch (error: any) {
-      console.error("Error uploading/saving cover image:", error);
-      toast({ title: "Upload Failed", description: `Could not save cover image: ${error.message}.`, variant: "destructive" });
-    } finally {
-      setIsUploadingCover(false);
-      if (coverImageInputRef.current) coverImageInputRef.current.value = "";
+      setShowReauthDialog(false);
     }
   };
 
-  const handleDeleteAccount = () => {
-    // This should ideally trigger a Firebase function for proper data deletion.
-    // For now, it's simulated.
-    toast({
-      title: "Account Deletion (Simulated)",
-      description: "Account deletion process would start here, involving backend operations.",
-      variant: "destructive"
-    });
-    // localStorage.removeItem("loggedInUser");
-    // firebaseSignOut(auth).then(() => router.push('/login'));
+  const performAccountDeletion = async () => {
+    if (!firebaseAuthUser || !currentUserDetails) {
+      toast({ title: "Error", description: "User not authenticated or data not loaded.", variant: "destructive" });
+      return;
+    }
+
+    setIsDeletingAccount(true);
+    try {
+      const userId = firebaseAuthUser.uid;
+      console.log("performAccountDeletion: userId =", userId);
+
+      // Step 1: Delete user's subcollections (friends, notifications)
+      console.log("performAccountDeletion: Step 1 - Deleting friends and notifications...");
+      const friendsRef = collection(firestore, "users", userId, "friends");
+      const notificationsRef = collection(firestore, "users", userId, "notifications");
+      const [friendsSnapshot, notificationsSnapshot] = await Promise.all([
+        getDocs(friendsRef),
+        getDocs(notificationsRef),
+      ]);
+      console.log("performAccountDeletion: Friends count =", friendsSnapshot.docs.length, "Notifications count =", notificationsSnapshot.docs.length);
+
+      const deleteFriends = friendsSnapshot.docs.map(doc => deleteDoc(doc.ref));
+      const deleteNotifications = notificationsSnapshot.docs.map(doc => deleteDoc(doc.ref));
+      await Promise.all([...deleteFriends, ...deleteNotifications]);
+      console.log("performAccountDeletion: Step 1 - Friends and notifications deleted.");
+
+      // Step 2: Delete user's posts and their comments
+      console.log("performAccountDeletion: Step 2 - Deleting posts and comments...");
+      const postsQuery = query(collection(firestore, "posts"), where("userId", "==", userId));
+      const postsSnapshot = await getDocs(postsQuery);
+      console.log("performAccountDeletion: Posts count =", postsSnapshot.docs.length);
+      const deletePostsTasks = postsSnapshot.docs.map(async (postDoc) => {
+        console.log("performAccountDeletion: Deleting comments for post", postDoc.id);
+        const commentsRef = collection(firestore, "posts", postDoc.id, "comments");
+        const commentsSnapshot = await getDocs(commentsRef);
+        console.log("performAccountDeletion: Comments count for post", postDoc.id, "=", commentsSnapshot.docs.length);
+        const deleteComments = commentsSnapshot.docs.map(commentDoc => deleteDoc(commentDoc.ref));
+        await Promise.all(deleteComments);
+        console.log("performAccountDeletion: Comments deleted for post", postDoc.id);
+        await deleteDoc(postDoc.ref);
+        console.log("performAccountDeletion: Post deleted", postDoc.id);
+      });
+      await Promise.all(deletePostsTasks);
+      console.log("performAccountDeletion: Step 2 - Posts and comments deleted.");
+
+      // Step 3: Delete user's likes
+      console.log("performAccountDeletion: Step 3 - Deleting likes...");
+      const likesQuery = query(collection(firestore, "likes"), where("userId", "==", userId));
+      const likesSnapshot = await getDocs(likesQuery);
+      console.log("performAccountDeletion: Likes count =", likesSnapshot.docs.length);
+      const deleteLikes = likesSnapshot.docs.map(doc => deleteDoc(doc.ref));
+      await Promise.all(deleteLikes);
+      console.log("performAccountDeletion: Step 3 - Likes deleted.");
+
+      // Step 4: Delete friend requests (sent and received)
+      console.log("performAccountDeletion: Step 4 - Deleting friend requests...");
+      const sentFriendRequestsQuery = query(
+        collection(firestore, "friendRequests"),
+        where("senderId", "==", userId)
+      );
+      const receivedFriendRequestsQuery = query(
+        collection(firestore, "friendRequests"),
+        where("receiverId", "==", userId)
+      );
+      const [sentFriendRequestsSnapshot, receivedFriendRequestsSnapshot] = await Promise.all([
+        getDocs(sentFriendRequestsQuery),
+        getDocs(receivedFriendRequestsQuery),
+      ]);
+      console.log("performAccountDeletion: Sent friend requests count =", sentFriendRequestsSnapshot.docs.length);
+      console.log("performAccountDeletion: Received friend requests count =", receivedFriendRequestsSnapshot.docs.length);
+      const deleteSentFriendRequests = sentFriendRequestsSnapshot.docs.map(doc => deleteDoc(doc.ref));
+      const deleteReceivedFriendRequests = receivedFriendRequestsSnapshot.docs.map(doc => deleteDoc(doc.ref));
+      await Promise.all([...deleteSentFriendRequests, ...deleteReceivedFriendRequests]);
+      console.log("performAccountDeletion: Step 4 - Friend requests deleted.");
+
+      // Step 5: Delete chats and remove user from friends' friends lists
+      console.log("performAccountDeletion: Step 5 - Deleting chats...");
+      const chatsQuery = query(
+        collection(firestore, "chats"),
+        where("participants", "array-contains", userId)
+      );
+      const chatsSnapshot = await getDocs(chatsQuery);
+      console.log("performAccountDeletion: Chats count =", chatsSnapshot.docs.length);
+      const deleteChatsTasks = chatsSnapshot.docs.map(async (chatDoc) => {
+        console.log("performAccountDeletion: Processing chat", chatDoc.id);
+        const chatData = chatDoc.data();
+        const otherParticipant = chatData.participants.find((id: string) => id !== userId);
+        if (otherParticipant) {
+          console.log("performAccountDeletion: Removing user from friend list of", otherParticipant);
+          const friendRef = doc(firestore, "users", otherParticipant, "friends", userId);
+          await deleteDoc(friendRef);
+          console.log("performAccountDeletion: Removed user from friend list of", otherParticipant);
+        }
+        await deleteDoc(chatDoc.ref);
+        console.log("performAccountDeletion: Chat deleted", chatDoc.id);
+      });
+      await Promise.all(deleteChatsTasks);
+      console.log("performAccountDeletion: Step 5 - Chats deleted.");
+
+      // Step 6: Delete the user's main document
+      console.log("performAccountDeletion: Step 6 - Deleting user document...");
+      const userDocRef = doc(firestore, "users", userId);
+      await deleteDoc(userDocRef);
+      console.log("performAccountDeletion: Step 6 - User document deleted.");
+
+      // Step 7: Delete the Firebase Auth user
+      console.log("performAccountDeletion: Step 7 - Deleting Firebase Auth user...");
+      await deleteUser(firebaseAuthUser);
+      console.log("performAccountDeletion: Step 7 - Firebase Auth user deleted.");
+
+      // Step 8: Clear local storage and redirect
+      console.log("performAccountDeletion: Step 8 - Clearing local storage and redirecting...");
+      localStorage.removeItem("loggedInUser");
+      await signOut(auth);
+      toast({
+        title: "Account Deleted",
+        description: "Your account and all associated data have been permanently deleted.",
+        variant: "destructive",
+      });
+      router.push("/login");
+      console.log("performAccountDeletion: Step 8 - Completed.");
+    } catch (error: any) {
+      console.error("performAccountDeletion: Error deleting account:", error);
+      toast({
+        title: "Error",
+        description: error.message || "Failed to delete account. Please try again.",
+        variant: "destructive",
+      });
+      setIsDeletingAccount(false);
+    }
+  };
+
+  const handleDeleteAccount = async () => {
+    if (!firebaseAuthUser || !currentUserDetails) {
+      toast({ title: "Error", description: "User not authenticated or data not loaded.", variant: "destructive" });
+      return;
+    }
+
+    // Show re-authentication dialog
+    setReauthEmail(currentUserDetails.email || "");
+    setReauthPassword("");
+    setShowReauthDialog(true);
   };
   
   if (!currentUserDetails) {
@@ -286,103 +376,16 @@ export default function SettingsPage() {
               disabled={isSavingProfile}
             />
           </div>
-           {currentUserDetails && currentUserDetails.username && (
+          {currentUserDetails && currentUserDetails.username && (
             <Link href={`/profile/${currentUserDetails.username}`} passHref>
               <Button variant="outline" className="w-full">
                 View Full Profile Page
               </Button>
             </Link>
           )}
-          <div>
-            <Label htmlFor="cover-image-upload-settings">Cover Image</Label>
-             <Button
-                variant="outline"
-                className="w-full mt-1"
-                onClick={() => coverImageInputRef.current?.click()}
-                disabled={isUploadingCover}
-            >
-                {isUploadingCover ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}
-                {isUploadingCover ? "Uploading..." : "Change Cover Image"}
-            </Button>
-            <input
-              id="cover-image-upload-settings"
-              type="file"
-              className="sr-only"
-              accept="image/*"
-              onChange={handleCoverImageChange}
-              ref={coverImageInputRef}
-            />
-            {currentCoverImage && (
-              <div className="mt-2 text-center">
-                <p className="text-sm text-muted-foreground">Current Cover Image:</p>
-                <img src={currentCoverImage} alt="Current cover" className="mt-1 rounded-md max-h-40 mx-auto border" data-ai-hint="cover image preview"/>
-              </div>
-            )}
-          </div>
         </CardContent>
       </Card>
 
-      {/* Notification Preferences */}
-      <Card className="shadow-lg rounded-xl">
-        <CardHeader>
-          <div className="flex items-center gap-3">
-            <BellDot className="h-6 w-6 text-primary" />
-            <CardTitle className="text-xl">Notification Preferences (Simulated)</CardTitle>
-          </div>
-          <CardDescription>Choose what you want to be notified about. (These settings are local).</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex items-center justify-between p-3 rounded-md border hover:bg-muted/50">
-            <Label htmlFor="notif-likes" className="flex-1 cursor-pointer">Likes on your posts</Label>
-            <Switch
-              id="notif-likes"
-              checked={notificationsLikes}
-              onCheckedChange={setNotificationsLikes}
-            />
-          </div>
-          <div className="flex items-center justify-between p-3 rounded-md border hover:bg-muted/50">
-            <Label htmlFor="notif-comments" className="flex-1 cursor-pointer">Comments on your posts</Label>
-            <Switch
-              id="notif-comments"
-              checked={notificationsComments}
-              onCheckedChange={setNotificationsComments}
-            />
-          </div>
-          <div className="flex items-center justify-between p-3 rounded-md border hover:bg-muted/50">
-            <Label htmlFor="notif-friend-requests" className="flex-1 cursor-pointer">New friend requests</Label>
-            <Switch
-              id="notif-friend-requests"
-              checked={notificationsFriendRequests}
-              onCheckedChange={setNotificationsFriendRequests}
-            />
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Appearance Settings */}
-      <Card className="shadow-lg rounded-xl">
-        <CardHeader>
-          <div className="flex items-center gap-3">
-            <Palette className="h-6 w-6 text-primary" />
-            <CardTitle className="text-xl">Appearance (Simulated)</CardTitle>
-          </div>
-          <CardDescription>Customize the look and feel of the app. (Dark mode is default).</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="flex items-center justify-between p-3 rounded-md border hover:bg-muted/50">
-            <Label htmlFor="dark-mode" className="flex-1 cursor-pointer">Dark Mode</Label>
-            <Switch
-              id="dark-mode"
-              checked={isDarkMode}
-              onCheckedChange={setIsDarkMode}
-              disabled 
-            />
-          </div>
-          <p className="text-xs text-muted-foreground mt-2 text-center">App is currently in Dark Mode by default.</p>
-        </CardContent>
-      </Card>
-
-      {/* Account Settings */}
       <Card className="shadow-lg rounded-xl border-destructive">
         <CardHeader>
           <div className="flex items-center gap-3">
@@ -392,34 +395,80 @@ export default function SettingsPage() {
           <CardDescription>Manage your account settings and data.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-            <Button variant="outline" className="w-full" onClick={() => toast({title: "Change Password (Simulated)", description: "Password change flow would start here. This needs Firebase Auth functions."})}>
-              Change Password
-            </Button>
-            <AlertDialog>
-              <AlertDialogTrigger asChild>
-                <Button variant="destructive" className="w-full">Delete Account</Button>
-              </AlertDialogTrigger>
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
-                  <AlertDialogDescription>
-                    This action cannot be undone. This will (simulate) permanently deleting your
-                    account and remove your data from our servers.
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel>Cancel</AlertDialogCancel>
-                  <AlertDialogAction onClick={handleDeleteAccount} className="bg-destructive hover:bg-destructive/90 text-destructive-foreground">
-                    Yes, delete account
-                  </AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
+          <Button variant="outline" className="w-full" onClick={() => toast({title: "Change Password (Simulated)", description: "Password change flow would start here. This needs Firebase Auth functions."})}>
+            Change Password
+          </Button>
+          <AlertDialog open={showReauthDialog} onOpenChange={setShowReauthDialog}>
+            <AlertDialogTrigger asChild>
+              <Button variant="destructive" className="w-full" disabled={isDeletingAccount}>
+                {isDeletingAccount ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                {isDeletingAccount ? "Deleting Account..." : "Delete Account"}
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              {showReauthDialog && !isDeletingAccount ? (
+                <>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Confirm Your Identity</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      To delete your account, please re-enter your credentials for security purposes.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <div className="space-y-4">
+                    <div>
+                      <Label htmlFor="reauth-email">Email</Label>
+                      <Input
+                        id="reauth-email"
+                        type="email"
+                        value={reauthEmail}
+                        onChange={(e) => setReauthEmail(e.target.value)}
+                        className="mt-1"
+                        placeholder="Enter your email"
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="reauth-password">Password</Label>
+                      <Input
+                        id="reauth-password"
+                        type="password"
+                        value={reauthPassword}
+                        onChange={(e) => setReauthPassword(e.target.value)}
+                        className="mt-1"
+                        placeholder="Enter your password"
+                      />
+                    </div>
+                  </div>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction onClick={handleReauthAndDelete} className="bg-destructive hover:bg-destructive/90 text-destructive-foreground">
+                      Continue
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </>
+              ) : (
+                <>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      This action cannot be undone. This will permanently delete your
+                      account and remove your data from our servers.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction onClick={handleDeleteAccount} className="bg-destructive hover:bg-destructive/90 text-destructive-foreground">
+                      Yes, delete account
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </>
+              )}
+            </AlertDialogContent>
+          </AlertDialog>
         </CardContent>
       </Card>
 
       <div className="flex justify-end pt-4">
-        <Button onClick={handleSaveChanges} size="lg" disabled={isSavingProfile || isUploadingCover}>
+        <Button onClick={handleSaveChanges} size="lg" disabled={isSavingProfile}>
           {isSavingProfile ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-5 w-5" />}
           {isSavingProfile ? "Saving Profile..." : "Save Profile Changes"}
         </Button>
@@ -427,5 +476,3 @@ export default function SettingsPage() {
     </div>
   );
 }
-
-    

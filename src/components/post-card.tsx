@@ -144,7 +144,15 @@ export function PostCard({
   };
 
   const handleEdit = () => {
-    router.push(`/create-post?editPostId=${post.id}`);
+    if (!currentUserId) {
+      toast({
+        title: "Authentication Required",
+        description: "Please log in to edit this post.",
+        variant: "destructive",
+      });
+      return;
+    }
+    router.push(`/create-post?editPostId=${post.id}&redirect=/my-posts`);
   };
 
   const handleDelete = () => {

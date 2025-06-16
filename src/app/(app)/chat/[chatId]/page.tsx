@@ -11,7 +11,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
-import { Send, ArrowLeft } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Send, ArrowLeft, Trash2 } from "lucide-react";
 
 interface Message {
   id: string;
@@ -19,6 +20,7 @@ interface Message {
   text: string;
   timestamp: any; // Firestore Timestamp
   read: boolean;
+  deleted?: boolean; // Added to track deleted messages
 }
 
 interface Chat {
@@ -231,6 +233,7 @@ export default function ChatConversationPage() {
         text: newMessage.trim(),
         timestamp: serverTimestamp(),
         read: false,
+        deleted: false, // Initialize deleted as false
       };
 
       const chatRef = doc(db, "chats", chatId);
@@ -258,6 +261,60 @@ export default function ChatConversationPage() {
       toast({
         title: "Error",
         description: "Could not send the message. Please try again.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  // Handle message deletion
+  const handleDeleteMessage = async (messageId: string) => {
+    try {
+      const messageRef = doc(db, "chats", chatId, "messages", messageId);
+      const chatRef = doc(db, "chats", chatId);
+      const batch = writeBatch(db);
+
+      // Mark the message as deleted
+      batch.update(messageRef, {
+        deleted: true,
+        text: "",
+      });
+
+      // Check if this message was the last message in the chat
+      const lastMessage = messages[messages.length - 1];
+      if (lastMessage.id === messageId) {
+        // Find the previous non-deleted message to set as the last message
+        const previousMessages = messages.slice(0, -1).reverse();
+        const lastNonDeletedMessage = previousMessages.find((msg) => !msg.deleted);
+
+        if (lastNonDeletedMessage) {
+          batch.update(chatRef, {
+            lastMessage: {
+              text: lastNonDeletedMessage.text,
+              senderId: lastNonDeletedMessage.senderId,
+              timestamp: lastNonDeletedMessage.timestamp,
+            },
+          });
+        } else {
+          batch.update(chatRef, {
+            lastMessage: {
+              text: "This message was deleted",
+              senderId: currentUser!.uid,
+              timestamp: serverTimestamp(),
+            },
+          });
+        }
+      }
+
+      await batch.commit();
+      toast({
+        title: "Message Deleted",
+        description: "The message has been deleted for both users.",
+      });
+    } catch (error) {
+      console.error("ChatConversationPage: Error deleting message:", error);
+      toast({
+        title: "Error",
+        description: "Could not delete the message. Please try again.",
         variant: "destructive",
       });
     }
@@ -357,22 +414,68 @@ export default function ChatConversationPage() {
                     <div
                       className={`flex ${
                         isCurrentUser ? "justify-end" : "justify-start"
-                      } mb-2`}
+                      } mb-2 items-center`}
                     >
-                      <div
-                        className={`max-w-[70%] rounded-lg p-3 ${
-                          isCurrentUser
-                            ? "bg-primary text-primary-foreground"
-                            : "bg-muted"
-                        }`}
-                      >
-                        <p>{message.text}</p>
-                        <div className="flex justify-end mt-1">
-                          <span className="text-xs opacity-70">
-                            {formatTimestamp(message.timestamp)}
-                          </span>
+                      {message.deleted ? (
+                        <div
+                          className={`max-w-[70%] rounded-lg p-3 italic text-muted-foreground ${
+                            isCurrentUser ? "bg-primary/10" : "bg-muted"
+                          }`}
+                        >
+                          <p>This message was deleted</p>
+                          <div className="flex justify-end mt-1">
+                            <span className="text-xs opacity-70">
+                              {formatTimestamp(message.timestamp)}
+                            </span>
+                          </div>
                         </div>
-                      </div>
+                      ) : (
+                        <>
+                          <div
+                            className={`max-w-[70%] rounded-lg p-3 ${
+                              isCurrentUser
+                                ? "bg-primary text-primary-foreground"
+                                : "bg-muted"
+                            }`}
+                          >
+                            <p>{message.text}</p>
+                            <div className="flex justify-end mt-1">
+                              <span className="text-xs opacity-70">
+                                {formatTimestamp(message.timestamp)}
+                              </span>
+                            </div>
+                          </div>
+                          {isCurrentUser && (
+                            <Popover>
+                              <PopoverTrigger asChild>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="ml-2 h-6 w-6"
+                                >
+                                  <Trash2 className="h-4 w-4 text-destructive" />
+                                  <span className="sr-only">Delete message</span>
+                                </Button>
+                              </PopoverTrigger>
+                              <PopoverContent className="w-80">
+                                <div className="space-y-4">
+                                  <h4 className="font-medium">Delete Message</h4>
+                                  <p className="text-sm text-muted-foreground">
+                                    Are you sure you want to delete this message? This action cannot be undone and will be deleted for both users.
+                                  </p>
+                                  <Button
+                                    variant="destructive"
+                                    className="w-full"
+                                    onClick={() => handleDeleteMessage(message.id)}
+                                  >
+                                    Delete
+                                  </Button>
+                                </div>
+                              </PopoverContent>
+                            </Popover>
+                          )}
+                        </>
+                      )}
                     </div>
                   </div>
                 );

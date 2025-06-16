@@ -799,9 +799,9 @@ export default function UserProfilePage() {
       isLoadingProfile,
     });
     return (
-      <div className="flex items-center justify-center h-screen bg-gradient-to-b from-green-900 to-green-700">
+      <div className="flex items-center justify-center h-screen bg-gradient-to-b from-gray-100 to-gray-200">
         <div className="text-center">
-          <p className="text-lg font-medium text-white">Loading profile...</p>
+          <p className="text-lg font-medium text-gray-800">Loading profile...</p>
         </div>
       </div>
     );
@@ -809,10 +809,10 @@ export default function UserProfilePage() {
 
   if (!profileUser) {
     return (
-      <div className="flex items-center justify-center h-screen bg-gradient-to-b from-green-900 to-green-700">
+      <div className="flex items-center justify-center h-screen bg-gradient-to-b from-gray-100 to-gray-200">
         <div className="text-center">
-          <p className="text-lg font-medium text-white">User not found.</p>
-          <Link href="/" className="text-yellow-400 hover:underline font-semibold">
+          <p className="text-lg font-medium text-gray-800">User not found.</p>
+          <Link href="/" className="text-blue-500 hover:underline font-semibold">
             Go back to home
           </Link>
         </div>
@@ -823,15 +823,15 @@ export default function UserProfilePage() {
   console.log("UserProfilePage: Rendering profile page", { profileUser });
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-green-900 to-green-700">
+    <div className="min-h-screen bg-gradient-to-b from-gray-100 to-gray-200">
       <div className="container mx-auto px-4 py-6 sm:py-8 max-w-4xl">
         <div className="mx-4 sm:mx-6">
-          <Card className="shadow-xl rounded-xl bg-white/90 border border-red-600">
-            <CardHeader className="relative flex flex-col sm:flex-row items-center sm:items-start gap-4 sm:gap-6 p-4 sm:p-6 bg-gradient-to-r from-black to-gray-800 rounded-t-xl">
+          <Card className="shadow-md rounded-xl bg-white border border-gray-300">
+            <CardHeader className="relative flex flex-col sm:flex-row items-center sm:items-start gap-4 sm:gap-6 p-4 sm:p-6 bg-gradient-to-r from-gray-800 to-gray-900 rounded-t-xl">
               <div className="relative flex-shrink-0">
-                <Avatar className="h-28 w-28 sm:h-36 sm:w-36 border-4 border-yellow-500 shadow-md">
+                <Avatar className="h-28 w-28 sm:h-36 sm:w-36 border-2 border-gray-300 shadow-sm">
                   <AvatarImage src={profileUser.avatar} alt={profileUser.fullName} />
-                  <AvatarFallback className="text-3xl sm:text-4xl font-bold bg-gray-700 text-white">
+                  <AvatarFallback className="text-3xl sm:text-4xl font-bold bg-gray-600 text-white">
                     {profileUser.fullName.charAt(0)}
                   </AvatarFallback>
                 </Avatar>
@@ -840,16 +840,16 @@ export default function UserProfilePage() {
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
                   <div>
                     <h2 className="text-2xl sm:text-3xl font-bold text-white">{profileUser.fullName}</h2>
-                    <p className="text-sm sm:text-base text-yellow-400">@{profileUser.username}</p>
+                    <p className="text-sm sm:text-base text-blue-400">@{profileUser.username}</p>
                   </div>
                 </div>
                 {profileUser.bio && (
-                  <p className="mt-2 text-white text-sm sm:text-base leading-relaxed">{profileUser.bio}</p>
+                  <p className="mt-2 text-gray-200 text-sm sm:text-base leading-relaxed">{profileUser.bio}</p>
                 )}
-                <div className="mt-2 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 text-yellow-400 text-sm">
+                <div className="mt-2 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 text-blue-400 text-sm">
                   {displayLocation && (
                     <p className="flex items-center gap-1">
-                      <MapPin className="h-4 w-4 text-red-500" />
+                      <MapPin className="h-4 w-4 text-gray-500" />
                       {displayLocation}
                     </p>
                   )}
@@ -864,7 +864,7 @@ export default function UserProfilePage() {
                   {relationshipStatus === "self" ? (
                     <Button
                       variant="default"
-                      className="bg-red-600 hover:bg-red-700 text-white font-semibold rounded-full px-4 py-2 transition-colors border border-yellow-500"
+                      className="bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-full px-4 py-2 transition-colors border border-gray-300"
                       onClick={() => router.push("/settings")}
                     >
                       Edit Profile
@@ -873,7 +873,7 @@ export default function UserProfilePage() {
                     <>
                       <Button
                         variant="default"
-                        className="bg-red-600 hover:bg-red-700 text-white font-semibold rounded-full px-4 py-2 transition-colors border border-yellow-500"
+                        className="bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-full px-4 py-2 transition-colors border border-gray-300"
                         onClick={handleMessage}
                       >
                         <MessageCircle className="mr-2 h-4 w-4" />
@@ -884,15 +884,15 @@ export default function UserProfilePage() {
                           <Button
                             variant="outline"
                             size="sm"
-                            className="rounded-full border-yellow-500 text-white hover:bg-gray-700 transition-colors"
+                            className="rounded-full border-gray-300 text-white hover:bg-gray-700 transition-colors"
                           >
-                            <MoreHorizontal className="h-5 w-5 text-yellow-400" />
+                            <MoreHorizontal className="h-5 w-5 text-gray-400" />
                           </Button>
                         </DropdownMenuTrigger>
-                        <DropdownMenuContent className="bg-gray-800 border border-yellow-500">
+                        <DropdownMenuContent className="bg-gray-700 border border-gray-300">
                           <DropdownMenuItem
                             onClick={handleUnfriend}
-                            className="text-red-500 hover:bg-gray-700"
+                            className="text-red-400 hover:bg-gray-600"
                           >
                             <UserMinus className="mr-2 h-4 w-4" />
                             Unfriend
@@ -904,7 +904,7 @@ export default function UserProfilePage() {
                     <Button
                       variant="outline"
                       disabled
-                      className="rounded-full border-yellow-500 text-gray-400 cursor-not-allowed"
+                      className="rounded-full border-gray-300 text-gray-400 cursor-not-allowed"
                     >
                       Request Sent
                     </Button>
@@ -912,14 +912,14 @@ export default function UserProfilePage() {
                     <>
                       <Button
                         variant="default"
-                        className="bg-yellow-500 hover:bg-yellow-600 text-black font-semibold rounded-full px-4 py-2 transition-colors border border-black"
+                        className="bg-blue-500 hover:bg-blue-600 text-white font-semibold rounded-full px-4 py-2 transition-colors border border-gray-300"
                         onClick={handleAcceptFriendRequest}
                       >
                         Accept Friend Request
                       </Button>
                       <Button
                         variant="destructive"
-                        className="bg-red-600 hover:bg-red-700 text-white font-semibold rounded-full px-4 py-2 transition-colors border border-black"
+                        className="bg-red-500 hover:bg-red-600 text-white font-semibold rounded-full px-4 py-2 transition-colors border border-gray-300"
                         onClick={handleDeclineFriendRequest}
                       >
                         Decline
@@ -928,7 +928,7 @@ export default function UserProfilePage() {
                   ) : (
                     <Button
                       variant="default"
-                      className="bg-red-600 hover:bg-red-700 text-white font-semibold rounded-full px-4 py-2 transition-colors border border-yellow-500"
+                      className="bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-full px-4 py-2 transition-colors border border-gray-300"
                       onClick={handleAddFriend}
                     >
                       <UserPlus className="mr-2 h-4 w-4" />
@@ -938,47 +938,47 @@ export default function UserProfilePage() {
                 </div>
               </div>
             </CardHeader>
-            <CardContent className="p-4 sm:p-6 bg-white/90">
+            <CardContent className="p-4 sm:p-6 bg-white">
               <Tabs defaultValue="posts" className="mt-4">
-                <TabsList className="flex justify-center sm:justify-start bg-gray-800 rounded-full p-2 gap-4">
+                <TabsList className="flex justify-center sm:justify-start bg-gray-200 rounded-full p-2 gap-4">
                   <TabsTrigger
                     value="posts"
-                    className="rounded-full px-6 py-3 font-semibold text-white data-[state=active]:bg-red-600 data-[state=active]:text-white transition-all border border-yellow-500"
+                    className="rounded-full px-6 py-3 font-semibold text-gray-800 data-[state=active]:bg-blue-600 data-[state=active]:text-white transition-all border border-gray-300"
                   >
                     Posts
                   </TabsTrigger>
                   <TabsTrigger
                     value="friends"
-                    className="rounded-full px-6 py-3 font-semibold text-white data-[state=active]:bg-red-600 data-[state=active]:text-white transition-all border border-yellow-500"
+                    className="rounded-full px-6 py-3 font-semibold text-gray-800 data-[state=active]:bg-blue-600 data-[state=active]:text-white transition-all border border-gray-300"
                   >
                     Friends
                   </TabsTrigger>
                 </TabsList>
                 <TabsContent value="posts" className="mt-6">
                   {isLoadingPosts ? (
-                    <p className="text-center text-gray-700 font-medium">Loading posts...</p>
+                    <p className="text-center text-gray-600 font-medium">Loading posts...</p>
                   ) : posts.length === 0 ? (
-                    <p className="text-center text-gray-700 font-medium">No posts yet.</p>
+                    <p className="text-center text-gray-600 font-medium">No posts yet.</p>
                   ) : (
                     <div className="space-y-6">
                       {posts.map((post) => (
                         <Card
                           key={post.id}
-                          className="shadow-md rounded-xl bg-white border border-red-600 hover:shadow-lg transition-shadow duration-300"
+                          className="shadow-sm rounded-xl bg-white border border-gray-300 hover:shadow-md transition-shadow duration-300"
                         >
-                          <CardHeader className="p-4 bg-gray-100 rounded-t-xl">
+                          <CardHeader className="p-4 bg-gray-50 rounded-t-xl">
                             <div className="flex items-center gap-3">
                               <Link href={`/profile/${post.user.handle}`}>
-                                <Avatar className="h-10 w-10 border-2 border-yellow-500">
+                                <Avatar className="h-10 w-10 border-2 border-gray-300">
                                   <AvatarImage src={post.user.avatar} alt={post.user.name} />
-                                  <AvatarFallback className="bg-gray-700 text-white">{post.user.name.charAt(0)}</AvatarFallback>
+                                  <AvatarFallback className="bg-gray-600 text-white">{post.user.name.charAt(0)}</AvatarFallback>
                                 </Avatar>
                               </Link>
                               <div className="flex-1">
                                 <Link href={`/profile/${post.user.handle}`}>
-                                  <p className="font-semibold text-gray-900 hover:underline">{post.user.name}</p>
+                                  <p className="font-semibold text-gray-800 hover:underline">{post.user.name}</p>
                                 </Link>
-                                <p className="text-sm text-gray-600">
+                                <p className="text-sm text-gray-500">
                                   @{post.user.handle} •{" "}
                                   {new Date(post.createdAt.toDate()).toLocaleDateString()}
                                 </p>
@@ -986,16 +986,16 @@ export default function UserProfilePage() {
                             </div>
                           </CardHeader>
                           <CardContent className="p-4 pt-0">
-                            <p className="text-gray-900 leading-relaxed">{post.content}</p>
+                            <p className="text-gray-800 leading-relaxed">{post.content}</p>
                             {post.image && (
                               <img
                                 src={post.image}
                                 alt={post.imageAiHint || "Post image"}
-                                className="mt-4 rounded-md max-w-full h-auto shadow-sm border border-gray-300"
+                                className="mt-4 rounded-md max-w-full h-auto shadow-sm border border-gray-200"
                               />
                             )}
                             {post.originalPostId && (
-                              <p className="text-sm text-gray-600 mt-2 italic">
+                              <p className="text-sm text-gray-500 mt-2 italic">
                                 Shared from original post
                               </p>
                             )}
@@ -1005,8 +1005,8 @@ export default function UserProfilePage() {
                                 size="sm"
                                 onClick={() => handleLike(post.id, post.likedByCurrentUser)}
                                 className={`flex items-center gap-1 ${
-                                  post.likedByCurrentUser ? "text-red-600" : "text-gray-600"
-                                } hover:bg-gray-200 rounded-full transition-colors`}
+                                  post.likedByCurrentUser ? "text-blue-600" : "text-gray-500"
+                                } hover:bg-gray-100 rounded-full transition-colors`}
                               >
                                 <Heart
                                   className={`h-5 w-5 ${
@@ -1019,7 +1019,7 @@ export default function UserProfilePage() {
                                 <Button
                                   variant="ghost"
                                   size="sm"
-                                  className="flex items-center gap-1 text-gray-600 hover:bg-gray-200 rounded-full transition-colors"
+                                  className="flex items-center gap-1 text-gray-500 hover:bg-gray-100 rounded-full transition-colors"
                                 >
                                   <MessageCircle className="h-5 w-5" />
                                   <span>{post.comments}</span>
@@ -1029,7 +1029,7 @@ export default function UserProfilePage() {
                                 variant="ghost"
                                 size="sm"
                                 onClick={() => handleShare(post)}
-                                className="flex items-center gap-1 text-gray-600 hover:bg-gray-200 rounded-full transition-colors"
+                                className="flex items-center gap-1 text-gray-500 hover:bg-gray-100 rounded-full transition-colors"
                               >
                                 <Share2 className="h-5 w-5" />
                                 <span>{post.shares}</span>
@@ -1037,27 +1037,27 @@ export default function UserProfilePage() {
                             </div>
                             {post.commentsData && post.commentsData.length > 0 && (
                               <div className="mt-4">
-                                <h4 className="text-sm font-semibold text-gray-900">Comments</h4>
+                                <h4 className="text-sm font-semibold text-gray-800">Comments</h4>
                                 <div className="space-y-3 mt-2">
                                   {post.commentsData.map((comment) => (
                                     <div
                                       key={comment.id}
-                                      className="flex items-start gap-3 border-t border-gray-300 pt-3"
+                                      className="flex items-start gap-3 border-t border-gray-200 pt-3"
                                     >
                                       <Link href={`/profile/${comment.username}`}>
-                                        <Avatar className="h-8 w-8 border border-yellow-500">
+                                        <Avatar className="h-8 w-8 border border-gray-300">
                                           <AvatarImage src={comment.avatar} alt={comment.username} />
-                                          <AvatarFallback className="bg-gray-700 text-white">{comment.username.charAt(0)}</AvatarFallback>
+                                          <AvatarFallback className="bg-gray-600 text-white">{comment.username.charAt(0)}</AvatarFallback>
                                         </Avatar>
                                       </Link>
                                       <div className="flex-1">
                                         <Link href={`/profile/${comment.username}`}>
-                                          <p className="text-sm font-semibold text-gray-900 hover:underline">
+                                          <p className="text-sm font-semibold text-gray-800 hover:underline">
                                             {comment.username}
                                           </p>
                                         </Link>
-                                        <p className="text-sm text-gray-900">{comment.text}</p>
-                                        <p className="text-xs text-gray-600">
+                                        <p className="text-sm text-gray-800">{comment.text}</p>
+                                        <p className="text-xs text-gray-500">
                                           {new Date(comment.createdAt.toDate()).toLocaleDateString()}
                                         </p>
                                       </div>
@@ -1074,9 +1074,9 @@ export default function UserProfilePage() {
                 </TabsContent>
                 <TabsContent value="friends" className="mt-6">
                   {isLoadingFriends ? (
-                    <p className="text-center text-gray-700 font-medium">Loading friends...</p>
+                    <p className="text-center text-gray-600 font-medium">Loading friends...</p>
                   ) : friends.length === 0 ? (
-                    <p className="text-center text-gray-700 font-medium">
+                    <p className="text-center text-gray-600 font-medium">
                       {relationshipStatus === "self"
                         ? "You have no friends yet."
                         : "No friends to display."}
@@ -1086,15 +1086,15 @@ export default function UserProfilePage() {
                       {friends.map((friend) => (
                         <div key={friend.friendUserId}>
                           <Link href={`/profile/${friend.username}`}>
-                            <div className="flex items-center gap-4 p-4 rounded-xl bg-white border border-red-600 hover:bg-gray-100 transition-colors shadow-sm">
-                              <Avatar className="h-10 w-10 border border-yellow-500">
+                            <div className="flex items-center gap-4 p-4 rounded-xl bg-white border border-gray-300 hover:bg-gray-50 transition-colors shadow-sm">
+                              <Avatar className="h-10 w-10 border border-gray-300">
                                 <AvatarImage src={friend.avatar} alt={friend.name} />
-                                <AvatarFallback className="bg-gray-700 text-white">{friend.name.charAt(0)}</AvatarFallback>
+                                <AvatarFallback className="bg-gray-600 text-white">{friend.name.charAt(0)}</AvatarFallback>
                               </Avatar>
                               <div className="flex-1">
-                                <p className="font-semibold text-gray-900 hover:underline">{friend.name}</p>
-                                <p className="text-sm text-gray-600">@{friend.username}</p>
-                                <p className="text-sm text-gray-600">
+                                <p className="font-semibold text-gray-800 hover:underline">{friend.name}</p>
+                                <p className="text-sm text-gray-500">@{friend.username}</p>
+                                <p className="text-sm text-gray-500">
                                   Friends since{" "}
                                   {friend.since
                                     ? new Date(friend.since.toDate()).toLocaleDateString()
@@ -1103,7 +1103,7 @@ export default function UserProfilePage() {
                               </div>
                             </div>
                           </Link>
-                          <Separator className="bg-gray-300" />
+                          <Separator className="bg-gray-200" />
                         </div>
                       ))}
                     </div>
