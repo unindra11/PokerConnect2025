@@ -1,15 +1,12 @@
-
-// src/app/quiz/page.tsx
 "use client";
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Terminal } from "lucide-react";
 
 type GameType = "texas_holdem" | "omaha" | "pineapple";
 
@@ -41,44 +38,44 @@ const quizQuestions: Record<GameType, Question[]> = {
       correctAnswer: "Sixth Street",
     },
   ],
-  omaha: [ // Placeholder questions for Omaha
+  omaha: [
     {
       id: "om_q1",
-      text: "Omaha Question 1: How many hole cards?",
+      text: "In Omaha poker, how many hole cards does each player receive?",
       options: ["2", "3", "4", "5"],
       correctAnswer: "4",
     },
     {
       id: "om_q2",
-      text: "Omaha Question 2: How many hole cards MUST you use?",
-      options: ["1", "2", "3", "Any"],
+      text: "In Omaha, how many hole cards must you use to make your final hand?",
+      options: ["1", "2", "3", "4"],
       correctAnswer: "2",
     },
     {
       id: "om_q3",
-      text: "Omaha Question 3: True or False: You can play the board.",
-      options: ["True", "False"],
-      correctAnswer: "False",
+      text: "What is the maximum number of community cards you can use in Omaha to make your hand?",
+      options: ["2", "3", "4", "5"],
+      correctAnswer: "3",
     },
   ],
-  pineapple: [ // Placeholder questions for Pineapple
+  pineapple: [
     {
       id: "pa_q1",
-      text: "Pineapple Question 1: How many cards initially dealt?",
+      text: "In Pineapple poker, how many hole cards are initially dealt to each player?",
       options: ["2", "3", "4", "5"],
       correctAnswer: "3",
     },
     {
       id: "pa_q2",
-      text: "Pineapple Question 2: How many cards do you discard pre-flop?",
-      options: ["0", "1", "2", "3"],
-      correctAnswer: "1",
+      text: "In standard Pineapple poker, when do you discard one of your hole cards?",
+      options: ["Before the flop", "After the flop", "After the turn", "After the river"],
+      correctAnswer: "Before the flop",
     },
     {
       id: "pa_q3",
-      text: "Pineapple Question 3: Is 'Crazy Pineapple' the same as 'Pineapple'?",
-      options: ["Yes", "No"],
-      correctAnswer: "No",
+      text: "In Crazy Pineapple, when do you discard one of your hole cards?",
+      options: ["Before the flop", "After the flop", "After the turn", "After the river"],
+      correctAnswer: "After the flop",
     },
   ],
 };
@@ -112,18 +109,13 @@ export default function QuizPage() {
 
     if (correctCount === questions.length) {
       setQuizPassed(true);
-      router.push("/signup");
+      localStorage.setItem("quizPassed", "true"); // Set quizPassed flag
+      router.push("/protocols");
     } else {
       setQuizPassed(false);
+      localStorage.setItem("quizPassed", "false"); // Set quizPassed flag to false
     }
   };
-  
-  const getButtonText = () => {
-    if (selectedGame === "omaha" || selectedGame === "pineapple") {
-      return "Game Not Yet Available";
-    }
-    return "Submit Answers";
-  }
 
   return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-br from-background to-muted/50 p-4">
@@ -149,21 +141,11 @@ export default function QuizPage() {
               <div className="flex justify-between items-center mb-4">
                 <h3 className="text-xl font-semibold">
                   {selectedGame === "texas_holdem" && "Texas Hold'em Quiz"}
-                  {selectedGame === "omaha" && "Omaha Quiz (Coming Soon)"}
-                  {selectedGame === "pineapple" && "Pineapple Quiz (Coming Soon)"}
+                  {selectedGame === "omaha" && "Omaha Quiz"}
+                  {selectedGame === "pineapple" && "Pineapple Quiz"}
                 </h3>
                 <Button variant="link" onClick={() => setSelectedGame(null)}>Change Game</Button>
               </div>
-
-              {(selectedGame === "omaha" || selectedGame === "pineapple") && (
-                 <Alert className="mb-6">
-                  <Terminal className="h-4 w-4" />
-                  <AlertTitle>Coming Soon!</AlertTitle>
-                  <AlertDescription>
-                    Quizzes for Omaha and Pineapple are under development. Please select Texas Hold'em to proceed for now.
-                  </AlertDescription>
-                </Alert>
-              )}
 
               <form onSubmit={(e) => { e.preventDefault(); handleSubmitQuiz(); }}>
                 <div className="space-y-6">
@@ -174,7 +156,6 @@ export default function QuizPage() {
                         onValueChange={(value) => handleAnswerChange(q.id, value)}
                         value={answers[q.id]}
                         className="mt-2 space-y-1"
-                        disabled={selectedGame === "omaha" || selectedGame === "pineapple"}
                       >
                         {q.options.map((opt) => (
                           <div key={opt} className="flex items-center space-x-2">
@@ -197,25 +178,14 @@ export default function QuizPage() {
                 <Button 
                     type="submit" 
                     className="w-full mt-8 text-lg py-3"
-                    disabled={
-                        selectedGame === "omaha" || 
-                        selectedGame === "pineapple" ||
-                        (selectedGame === "texas_holdem" && Object.keys(answers).length !== quizQuestions.texas_holdem.length)
-                    }
+                    disabled={Object.keys(answers).length !== quizQuestions[selectedGame].length}
                 >
-                 {getButtonText()}
+                  Submit Answers
                 </Button>
               </form>
             </div>
           )}
         </CardContent>
-         {selectedGame && (selectedGame === "omaha" || selectedGame === "pineapple") && (
-             <CardFooter>
-                <p className="text-sm text-muted-foreground text-center w-full">
-                    Currently, only the Texas Hold'em quiz is active. Please select it to sign up.
-                </p>
-             </CardFooter>
-         )}
       </Card>
     </div>
   );

@@ -129,6 +129,10 @@ export default function MapPage() {
   // Function to create a custom marker icon with avatar and pin
   const createCustomMarkerIcon = async (avatarUrl: string, userId: string) => {
     try {
+      if (!avatarUrl || typeof avatarUrl !== 'string') {
+        throw new Error(`Invalid avatar URL for user ${userId}: ${avatarUrl}`);
+      }
+
       // Create a canvas to draw the custom marker
       const canvas = document.createElement("canvas");
       const size = 64; // Size of the marker
@@ -136,16 +140,29 @@ export default function MapPage() {
       canvas.height = size + 16; // Extra height for the pin
       const ctx = canvas.getContext("2d");
 
-      if (!ctx) return;
+      if (!ctx) {
+        throw new Error("Failed to get canvas 2D context");
+      }
 
-      // Draw the circular avatar
+      // Load the avatar image
+      let imgSrc = avatarUrl;
       const img = new Image();
       img.crossOrigin = "Anonymous";
-      await new Promise((resolve, reject) => {
+
+      // Attempt to load the image, with a fallback if it fails
+      const loadImage = new Promise((resolve, reject) => {
         img.onload = resolve;
-        img.onerror = reject;
-        img.src = avatarUrl;
+        img.onerror = () => {
+          console.warn(`Failed to load avatar for user ${userId}: ${avatarUrl}. Using fallback.`);
+          // Fallback to a default placeholder image
+          img.src = `https://placehold.co/40x40.png?text=U`;
+          img.onload = resolve;
+          img.onerror = () => reject(new Error(`Failed to load fallback avatar for user ${userId}`));
+        };
+        img.src = imgSrc;
       });
+
+      await loadImage;
 
       // Create a circular clip path for the avatar
       ctx.save();
@@ -180,6 +197,8 @@ export default function MapPage() {
       setMarkerIcons(prev => ({ ...prev, [userId]: dataUrl }));
     } catch (error) {
       console.error(`Error creating custom marker for user ${userId}:`, error);
+      // Use a fallback icon if creation fails
+      setMarkerIcons(prev => ({ ...prev, [userId]: "https://placehold.co/40x40.png?text=U" }));
     }
   };
 

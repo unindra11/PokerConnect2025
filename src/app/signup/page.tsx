@@ -37,6 +37,20 @@ export default function SignupPage() {
   const [selectedState, setSelectedState] = useState<string>("");
   const [selectedCity, setSelectedCity] = useState<string>("");
   const [selectedLocationCoords, setSelectedLocationCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [emailError, setEmailError] = useState<string>("");
+
+  // Check if the user has passed the quiz
+  useEffect(() => {
+    const quizPassed = localStorage.getItem("quizPassed");
+    if (quizPassed !== "true") {
+      toast({
+        title: "Quiz Required",
+        description: "You must complete and pass the quiz before signing up.",
+        variant: "destructive",
+      });
+      router.push("/quiz");
+    }
+  }, [router, toast]);
 
   // Derived states and cities based on selections
   const states = selectedCountry
@@ -53,6 +67,25 @@ export default function SignupPage() {
       ).map((city) => city.name).sort((a, b) => a.localeCompare(b))
     : [];
 
+  // Email validation regex
+  const validateEmail = (email: string): boolean => {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return emailRegex.test(email);
+  };
+
+  // Handle email input change with validation
+  const handleEmailChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newEmail = e.target.value;
+    setEmail(newEmail);
+    if (!newEmail) {
+      setEmailError("Email is required.");
+    } else if (!validateEmail(newEmail)) {
+      setEmailError("Please enter a valid email address (e.g., you@example.com).");
+    } else {
+      setEmailError("");
+    }
+  };
+
   useEffect(() => {
     const firestoreInstance = getFirestore(app, "poker");
     console.log("SignupPage: Firestore object on mount:", firestoreInstance);
@@ -62,7 +95,7 @@ export default function SignupPage() {
     if (!navigator.geolocation) {
       toast({
         title: "Geolocation Not Supported",
-        description: "Your browser does not support geolocation.",
+        description: "Your browser does not support geolocation. Please use a different browser or device.",
         variant: "destructive",
       });
       return;
@@ -87,11 +120,11 @@ export default function SignupPage() {
         console.error("Error getting geolocation:", error);
         let description = "Could not retrieve your location.";
         if (error.code === error.PERMISSION_DENIED) {
-          description = "Permission denied. Please enable location services for this site.";
+          description = "Permission denied. Please enable location services for this site to proceed.";
         } else if (error.code === error.POSITION_UNAVAILABLE) {
-          description = "Location information is unavailable.";
+          description = "Location information is unavailable. Please try again or use a different device.";
         } else if (error.code === error.TIMEOUT) {
-          description = "The request to get user location timed out.";
+          description = "The request to get user location timed out. Please try again.";
         }
         toast({
           title: "Geolocation Error",
@@ -108,6 +141,13 @@ export default function SignupPage() {
     setIsLoading(true);
     console.log("SignupPage: Attempting Firebase Auth signup for email:", email);
 
+    // Client-side email validation
+    if (!email || !validateEmail(email)) {
+      toast({ title: "Signup Error", description: "Please enter a valid email address.", variant: "destructive" });
+      setIsLoading(false);
+      return;
+    }
+
     if (password !== confirmPassword) {
       toast({ title: "Signup Error", description: "Passwords do not match.", variant: "destructive" });
       setIsLoading(false);
@@ -122,6 +162,17 @@ export default function SignupPage() {
 
     if (!selectedCountry || !selectedState || !selectedCity) {
       toast({ title: "Signup Error", description: "Please select your country, state, and city.", variant: "destructive" });
+      setIsLoading(false);
+      return;
+    }
+
+    // Check if coordinates are provided
+    if (!selectedLocationCoords) {
+      toast({
+        title: "Signup Error",
+        description: "Location coordinates are required. Please click 'Get My Coordinates' and allow location access.",
+        variant: "destructive",
+      });
       setIsLoading(false);
       return;
     }
@@ -169,35 +220,30 @@ export default function SignupPage() {
       };
       localStorage.setItem("loggedInUser", JSON.stringify(loggedInUserDetailsForStorage));
 
-      if (selectedLocationCoords) {
-        const initials = fullName.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase() || username.substring(0,1).toUpperCase() || 'P';
-        const mapUser: MockUserPin = {
-          id: user.uid,
-          username: username,
-          name: fullName,
-          avatar: `https://placehold.co/40x40.png?text=${initials}&c=${Math.random().toString(36).substring(7)}`,
-          position: selectedLocationCoords,
-          bio: userProfile.bio,
-          coverImage: userProfile.coverImage,
-        };
+      const initials = fullName.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase() || username.substring(0,1).toUpperCase() || 'P';
+      const mapUser: MockUserPin = {
+        id: user.uid,
+        username: username,
+        name: fullName,
+        avatar: `https://placehold.co/40x40.png?text=${initials}&c=${Math.random().toString(36).substring(7)}`,
+        position: selectedLocationCoords,
+        bio: userProfile.bio,
+        coverImage: userProfile.coverImage,
+      };
 
-        const existingMapUsersString = localStorage.getItem("pokerConnectMapUsers");
-        let mapUsers: MockUserPin[] = [];
-        if (existingMapUsersString) {
-          try { mapUsers = JSON.parse(existingMapUsersString); if (!Array.isArray(mapUsers)) mapUsers = []; }
-          catch (parseError) { console.error("SignupPage: Error parsing pokerConnectMapUsers from localStorage:", parseError); mapUsers = []; }
-        }
-        mapUsers = mapUsers.filter(u => u.id !== mapUser.id);
-        mapUsers.push(mapUser);
-        localStorage.setItem("pokerConnectMapUsers", JSON.stringify(mapUsers));
-        console.log("SignupPage: Added/Updated user in pokerConnectMapUsers localStorage:", mapUser);
-      } else {
-        toast({
-          title: "Location Notice",
-          description: "Location coordinates not available for map. User profile saved without precise map location.",
-          variant: "default",
-        });
+      const existingMapUsersString = localStorage.getItem("pokerConnectMapUsers");
+      let mapUsers: MockUserPin[] = [];
+      if (existingMapUsersString) {
+        try { mapUsers = JSON.parse(existingMapUsersString); if (!Array.isArray(mapUsers)) mapUsers = []; }
+        catch (parseError) { console.error("SignupPage: Error parsing pokerConnectMapUsers from localStorage:", parseError); mapUsers = []; }
       }
+      mapUsers = mapUsers.filter(u => u.id !== mapUser.id);
+      mapUsers.push(mapUser);
+      localStorage.setItem("pokerConnectMapUsers", JSON.stringify(mapUsers));
+      console.log("SignupPage: Added/Updated user in pokerConnectMapUsers localStorage:", mapUser);
+
+      // Clear quizPassed flag after successful signup
+      localStorage.removeItem("quizPassed");
 
       toast({ title: "Signup Successful!", description: `Welcome, ${fullName}! Please log in.`, });
       router.push("/login");
@@ -214,7 +260,7 @@ export default function SignupPage() {
             errorMessage = "Password is too weak. Please choose a stronger password (min. 6 characters).";
             break;
           case "auth/invalid-email":
-            errorMessage = "The email address is not valid.";
+            errorMessage = "The email address is not valid. Please check and try again.";
             break;
           default:
             if (error.message && (error.message.includes("firestore") || error.message.includes("Firestore") || error.message.includes("RPC") || (typeof error.code === 'string' && error.code.startsWith("permission-denied")) || error.code === 'unavailable' || error.code === 'unimplemented' || error.code === 'internal')) {
@@ -260,11 +306,14 @@ export default function SignupPage() {
                 id="email"
                 type="email"
                 placeholder="you@example.com"
-                className="mt-1"
+                className={`mt-1 ${emailError ? "border-destructive" : ""}`}
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                onChange={handleEmailChange}
                 required
               />
+              {emailError && (
+                <p className="text-destructive text-xs mt-1">{emailError}</p>
+              )}
             </div>
             <div>
               <Label htmlFor="username">Username</Label>
@@ -361,29 +410,35 @@ export default function SignupPage() {
                   </SelectContent>
                 </Select>
               </div>
-              <Button
-                type="button"
-                variant="outline"
-                className="w-full"
-                onClick={handleGetDeviceLocation}
-                disabled={isFetchingLocation}
-              >
-                {isFetchingLocation ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <MapPin className="mr-2 h-4 w-4" />
-                )}
-                {isFetchingLocation ? "Fetching Coordinates..." : "Get My Coordinates"}
-              </Button>
-              {selectedLocationCoords && (
-                <p className="text-xs text-muted-foreground">
-                  Coordinates: Lat: {selectedLocationCoords.lat.toFixed(4)}, Lng: {selectedLocationCoords.lng.toFixed(4)}
+              <div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full"
+                  onClick={handleGetDeviceLocation}
+                  disabled={isFetchingLocation}
+                >
+                  {isFetchingLocation ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <MapPin className="mr-2 h-4 w-4" />
+                  )}
+                  {isFetchingLocation ? "Fetching Coordinates..." : "Get My Coordinates"}
+                </Button>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {selectedLocationCoords
+                    ? `Coordinates: Lat: ${selectedLocationCoords.lat.toFixed(4)}, Lng: ${selectedLocationCoords.lng.toFixed(4)}`
+                    : "Location coordinates are required for signup."}
                 </p>
-              )}
+              </div>
             </div>
           </CardContent>
           <CardFooter className="flex flex-col gap-4">
-            <Button type="submit" className="w-full text-lg py-3" disabled={isLoading || isFetchingLocation}>
+            <Button
+              type="submit"
+              className="w-full text-lg py-3"
+              disabled={isLoading || isFetchingLocation || !!emailError || !selectedLocationCoords}
+            >
               {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <UserPlus className="mr-2 h-5 w-5" />}
               {isLoading ? "Signing Up..." : "Sign Up"}
             </Button>

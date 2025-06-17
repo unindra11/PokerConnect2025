@@ -99,7 +99,7 @@ export default function LoginPage() {
             <Button type="submit" className="w-full">Login</Button>
             <p className="text-sm text-muted-foreground">
               Don’t have an account?{" "}
-              <Link href="/signup" className="text-blue-500 hover:underline">
+              <Link href="/quiz" className="text-blue-500 hover:underline">
                 Sign up
               </Link>
             </p>
