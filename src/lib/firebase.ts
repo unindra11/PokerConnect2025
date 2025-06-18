@@ -50,9 +50,6 @@ const initializeFirebase = () => {
     firestore = getFirestore(app, "poker");
     storage = getStorage(app);
 
-    console.log("Firebase.ts: Storage instance initialized from app:", app.name);
-  }
-  return { app, auth, firestore, storage };
-};
+console.log("Firebase.ts: Storage instance initialized from app:", app.name);
 
-export default initializeFirebase;
+export { app, auth, firestore, storage };
