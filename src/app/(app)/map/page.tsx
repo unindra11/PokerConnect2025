@@ -1,368 +1,254 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
-import { GoogleMap, useJsApiLoader, Marker, InfoWindow } from "@react-google-maps/api";
-import Link from "next/link";
-import { Inter } from '@next/font/google';
+import { useState, useEffect } from "react";
+import { Inter } from "next/font/google";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Loader2 } from "lucide-react";
-import { getFirestore, collection, getDocs, query, where } from "firebase/firestore";
-import { app, auth } from "@/lib/firebase";
-import type { User as FirebaseUser } from "firebase/auth";
+import { getFirestore, collection, getDocs, query } from "firebase/firestore";
+import { app } from "@/lib/firebase";
+import Link from "next/link";
+console.log("Link component imported:", Link); // Debug log
 
-// Configure Inter font
+// Install these dependencies: npm install chart.js react-chartjs-2
+import { Bubble } from "react-chartjs-2";
+import {
+  Chart as ChartJS,
+  LinearScale,
+  PointElement,
+  Tooltip,
+  Legend,
+} from "chart.js";
+
+// Register Chart.js components
+ChartJS.register(LinearScale, PointElement, Tooltip, Legend);
+
 const inter = Inter({
-  subsets: ['latin'],
-  variable: '--font-inter',
+  subsets: ["latin"],
+  variable: "--font-inter",
 });
 
-const containerStyle = {
-  width: "100%",
-  height: "600px",
-};
-
-// Centered on Chandigarh (near clerk123 and roma123)
-const initialCenter = {
-  lat: 30.73,
-  lng: 76.779,
-};
-
-// Custom map style for a professional look
-const mapStyles = [
-  {
-    featureType: "all",
-    elementType: "geometry",
-    stylers: [{ color: "#e8ecef" }],
-  },
-  {
-    featureType: "all",
-    elementType: "labels.text.fill",
-    stylers: [{ color: "#5c6b73" }],
-  },
-  {
-    featureType: "all",
-    elementType: "labels.text.stroke",
-    stylers: [{ color: "#ffffff" }],
-  },
-  {
-    featureType: "all",
-    elementType: "labels.icon",
-    stylers: [{ visibility: "off" }],
-  },
-  {
-    featureType: "administrative",
-    elementType: "geometry.stroke",
-    stylers: [{ color: "#d1d5d8" }],
-  },
-  {
-    featureType: "landscape",
-    elementType: "geometry",
-    stylers: [{ color: "#f5f7fa" }],
-  },
-  {
-    featureType: "poi",
-    elementType: "geometry",
-    stylers: [{ color: "#e8ecef" }],
-  },
-  {
-    featureType: "road",
-    elementType: "geometry",
-    stylers: [{ color: "#ffffff" }],
-  },
-  {
-    featureType: "road.arterial",
-    elementType: "geometry",
-    stylers: [{ color: "#e4e8eb" }],
-  },
-  {
-    featureType: "road.highway",
-    elementType: "geometry",
-    stylers: [{ color: "#d1d5d8" }],
-  },
-  {
-    featureType: "transit",
-    elementType: "geometry",
-    stylers: [{ color: "#e8ecef" }],
-  },
-  {
-    featureType: "water",
-    elementType: "geometry",
-    stylers: [{ color: "#c9d7e0" }],
-  },
-];
-
-export interface MockUserPin {
-  id: string; // UID
+interface User {
+  id: string;
   username: string;
-  name: string; // fullName
   avatar: string;
-  position: { lat: number; lng: number };
-  aiHint?: string;
-  coverImage?: string;
-  bio?: string;
+  location: {
+    country: string;
+    state: string;
+    city: string;
+  };
 }
 
-const googleMapsApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
-const libraries: ("places")[] = ['places'];
+interface BubbleData {
+  label: string;
+  value: number;
+  color?: string;
+}
 
 export default function MapPage() {
-  const [selectedUser, setSelectedUser] = useState<MockUserPin | null>(null);
-  const [mapMarkersData, setMapMarkersData] = useState<MockUserPin[]>([]);
-  const [isLoadingUsers, setIsLoadingUsers] = useState(true);
-  const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
-  const [markerIcons, setMarkerIcons] = useState<{ [key: string]: string }>({});
-
-  useEffect(() => {
-    const unsubscribe = auth.onAuthStateChanged(user => {
-      setCurrentUser(user);
-    });
-    return () => unsubscribe();
-  }, []);
-
-  const { isLoaded, loadError } = useJsApiLoader({
-    id: 'google-map-script',
-    googleMapsApiKey: googleMapsApiKey || "",
-    libraries,
-  });
-
-  // Function to create a custom marker icon with avatar and pin
-  const createCustomMarkerIcon = async (avatarUrl: string, userId: string) => {
-    try {
-      if (!avatarUrl || typeof avatarUrl !== 'string') {
-        throw new Error(`Invalid avatar URL for user ${userId}: ${avatarUrl}`);
-      }
-
-      // Create a canvas to draw the custom marker
-      const canvas = document.createElement("canvas");
-      const size = 64; // Size of the marker
-      canvas.width = size;
-      canvas.height = size + 16; // Extra height for the pin
-      const ctx = canvas.getContext("2d");
-
-      if (!ctx) {
-        throw new Error("Failed to get canvas 2D context");
-      }
-
-      // Load the avatar image
-      let imgSrc = avatarUrl;
-      const img = new Image();
-      img.crossOrigin = "Anonymous";
-
-      // Attempt to load the image, with a fallback if it fails
-      const loadImage = new Promise((resolve, reject) => {
-        img.onload = resolve;
-        img.onerror = () => {
-          console.warn(`Failed to load avatar for user ${userId}: ${avatarUrl}. Using fallback.`);
-          // Fallback to a default placeholder image
-          img.src = `https://placehold.co/40x40.png?text=U`;
-          img.onload = resolve;
-          img.onerror = () => reject(new Error(`Failed to load fallback avatar for user ${userId}`));
-        };
-        img.src = imgSrc;
-      });
-
-      await loadImage;
-
-      // Create a circular clip path for the avatar
-      ctx.save();
-      ctx.beginPath();
-      ctx.arc(size / 2, size / 2, size / 2 - 2, 0, Math.PI * 2);
-      ctx.closePath();
-      ctx.clip();
-
-      // Draw the avatar image inside the circle
-      ctx.drawImage(img, 0, 0, size, size);
-      ctx.restore();
-
-      // Draw a white border around the avatar
-      ctx.strokeStyle = "#ffffff";
-      ctx.lineWidth = 4;
-      ctx.beginPath();
-      ctx.arc(size / 2, size / 2, size / 2 - 2, 0, Math.PI * 2);
-      ctx.closePath();
-      ctx.stroke();
-
-      // Draw a small pin (triangle) below the avatar
-      ctx.fillStyle = "#ff0000"; // Red pin
-      ctx.beginPath();
-      ctx.moveTo(size / 2, size); // Bottom center of avatar
-      ctx.lineTo(size / 2 - 8, size + 16); // Left bottom of triangle
-      ctx.lineTo(size / 2 + 8, size + 16); // Right bottom of triangle
-      ctx.closePath();
-      ctx.fill();
-
-      // Convert canvas to data URL and store it
-      const dataUrl = canvas.toDataURL("image/png");
-      setMarkerIcons(prev => ({ ...prev, [userId]: dataUrl }));
-    } catch (error) {
-      console.error(`Error creating custom marker for user ${userId}:`, error);
-      // Use a fallback icon if creation fails
-      setMarkerIcons(prev => ({ ...prev, [userId]: "https://placehold.co/40x40.png?text=U" }));
-    }
-  };
+  const [users, setUsers] = useState<User[]>([]);
+  const [selectedCountry, setSelectedCountry] = useState<string | null>(null);
+  const [selectedState, setSelectedState] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     const fetchUsersFromFirestore = async () => {
-      if (!currentUser) {
-        setIsLoadingUsers(false);
-        setMapMarkersData([]);
-        return;
-      }
-      setIsLoadingUsers(true);
+      setIsLoading(true);
       try {
         const db = getFirestore(app, "poker");
         const usersCollectionRef = collection(db, "users");
         const q = query(usersCollectionRef);
         const querySnapshot = await getDocs(q);
-        
-        const usersForMap: MockUserPin[] = [];
+
+        const userData: User[] = [];
         querySnapshot.forEach((docSnap) => {
-          const userData = docSnap.data();
-          const userId = docSnap.id;
-          
-          if (userData.locationCoords && typeof userData.locationCoords.lat === 'number' && typeof userData.locationCoords.lng === 'number') {
-            const userPin: MockUserPin = {
+          const userDataDoc = docSnap.data();
+          if (
+            userDataDoc.location &&
+            userDataDoc.location.country &&
+            userDataDoc.location.state &&
+            userDataDoc.location.city
+          ) {
+            userData.push({
               id: docSnap.id,
-              username: userData.username || "unknown_user",
-              name: userData.fullName || userData.username || "Unknown User",
-              avatar: userData.avatar || `https://placehold.co/40x40.png?text=${(userData.fullName || userData.username || "U").substring(0,1).toUpperCase()}`,
-              position: {
-                lat: userData.locationCoords.lat,
-                lng: userData.locationCoords.lng,
+              username: userDataDoc.username || "unknown_user",
+              avatar: userDataDoc.avatar || `https://placehold.co/40x40.png?text=${(userDataDoc.username || "U").charAt(0).toUpperCase()}`,
+              location: {
+                country: userDataDoc.location.country,
+                state: userDataDoc.location.state,
+                city: userDataDoc.location.city,
               },
-              bio: userData.bio,
-              coverImage: userData.coverImage,
-              aiHint: "map user profile",
-            };
-            usersForMap.push(userPin);
-            // Create custom marker icon for this user
-            createCustomMarkerIcon(userPin.avatar, userPin.id);
+            });
           }
         });
-        setMapMarkersData(usersForMap);
+        setUsers(userData);
       } catch (error) {
         console.error("Error fetching users from Firestore:", error);
-        setMapMarkersData([]);
       } finally {
-        setIsLoadingUsers(false);
+        setIsLoading(false);
       }
     };
 
-    if (isLoaded && !loadError && googleMapsApiKey && currentUser !== undefined) {
-        fetchUsersFromFirestore();
-    } else if (!googleMapsApiKey || loadError) {
-        setIsLoadingUsers(false);
+    fetchUsersFromFirestore();
+  }, []);
+
+  // Aggregate user counts by country
+  const countryData = users.reduce((acc: { [key: string]: number }, user) => {
+    acc[user.location.country] = (acc[user.location.country] || 0) + 1;
+    return acc;
+  }, {});
+
+  const bubbleData = {
+    datasets: [
+      {
+        label: "Countries",
+        data: Object.entries(countryData).map(([label, value]) => ({
+          x: Math.random() * 100, // Random x for visualization
+          y: Math.random() * 100, // Random y for visualization
+          r: value * 5, // Radius scaled by user count
+        })),
+        backgroundColor: Object.keys(countryData).map(() => getRandomColor()),
+        borderColor: "rgba(255, 255, 255, 0.8)",
+        borderWidth: 1,
+      },
+    ],
+  };
+
+  // Filter users by selected country and state
+  const stateUsers = selectedCountry
+    ? users.filter((user) => user.location.country === selectedCountry)
+    : [];
+  const stateCounts = stateUsers.reduce((acc: { [key: string]: number }, user) => {
+    acc[user.location.state] = (acc[user.location.state] || 0) + 1;
+    return acc;
+  }, {});
+
+  const cityUsers = selectedState
+    ? stateUsers.filter((user) => user.location.state === selectedState)
+    : [];
+
+  function getRandomColor() {
+    const letters = "0123456789ABCDEF";
+    let color = "#";
+    for (let i = 0; i < 6; i++) {
+      color += letters[Math.floor(Math.random() * 16)];
     }
-  }, [isLoaded, loadError, googleMapsApiKey, currentUser]);
-
-  if (!googleMapsApiKey) {
-    return (
-      <div className={`${inter.className} container mx-auto`}>
-        <h1 className="text-3xl font-bold mb-6">Player Map</h1>
-        <Card className="shadow-lg rounded-xl">
-          <CardHeader>
-            <CardTitle>Google Maps API Key Missing</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-destructive">
-              The Google Maps API key is not configured. Please set the{" "}
-              <code>NEXT_PUBLIC_GOOGLE_MAPS_API_KEY</code> environment variable.
-            </p>
-          </CardContent>
-        </Card>
-      </div>
-    );
+    return color;
   }
 
-  if (loadError) {
-    return (
-      <div className={`${inter.className} container mx-auto`}>
-        <h1 className="text-3xl font-bold mb-6">Player Map</h1>
-        <Card className="shadow-lg rounded-xl">
-          <CardHeader>
-            <CardTitle>Error Loading Map</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-destructive">
-              Could not load the Google Maps script. Please check your API key.
-            </p>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
+  const options = {
+    onClick: (event: any, elements: any[]) => {
+      if (elements.length > 0) {
+        const index = elements[0].index;
+        const country = Object.keys(countryData)[index];
+        setSelectedCountry(country);
+      }
+    },
+    scales: {
+      x: {
+        display: false,
+      },
+      y: {
+        display: false,
+      },
+    },
+    plugins: {
+      legend: {
+        display: false,
+      },
+      tooltip: {
+        callbacks: {
+          label: (tooltipItem: any) => {
+            const country = Object.keys(countryData)[tooltipItem.dataIndex];
+            return `${country}: ${countryData[country]} user${countryData[country] !== 1 ? "s" : ""}`;
+          },
+        },
+      },
+    },
+  };
 
   return (
-    <div className={`${inter.className} container mx-auto`}>
-      <h1 className="text-3xl font-bold mb-6">Player Map</h1>
+    <div className={`${inter.className} container mx-auto p-4`}>
+      <h1 className="text-3xl font-bold mb-6">Player Distribution</h1>
       <Card className="shadow-lg rounded-xl overflow-hidden">
         <CardHeader>
-          <CardTitle>Interactive Player Map</CardTitle>
+          <CardTitle>Interactive Player Distribution</CardTitle>
         </CardHeader>
         <CardContent>
-          {!isLoaded || isLoadingUsers ? (
-            <div className="flex items-center justify-center h-[600px]">
-              <Loader2 className="h-16 w-16 animate-spin text-primary" />
-              <p className="ml-4 text-lg">
-                {!isLoaded ? "Loading Map Script..." : "Loading Player Locations..."}
-              </p>
+          {isLoading ? (
+            <div className="flex items-center justify-center h-64">
+              <span className="text-lg">Loading user data...</span>
             </div>
           ) : (
-            <GoogleMap
-              mapContainerStyle={containerStyle}
-              center={initialCenter}
-              zoom={14}
-              options={{
-                zoomControl: true,
-                mapId: "POKER_CONNECT_MAP_ID",
-                styles: mapStyles, // Apply custom map styles
-              }}
-            >
-              {mapMarkersData.map((user) => (
-                <Marker
-                  key={user.id}
-                  position={user.position}
-                  icon={{
-                    url: markerIcons[user.id] || user.avatar,
-                    scaledSize: new window.google.maps.Size(64, 80), // Size including the pin
-                    anchor: new window.google.maps.Point(32, 80), // Anchor at the bottom center (tip of the pin)
-                  }}
-                  onClick={() => setSelectedUser(user)}
-                />
-              ))}
-
-              {selectedUser && (
-                <InfoWindow
-                  position={selectedUser.position}
-                  onCloseClick={() => setSelectedUser(null)}
-                >
-                  <div className="p-3 flex items-center space-x-4 bg-white rounded-lg shadow-md max-w-xs">
-                    <Avatar className="h-12 w-12">
-                      <AvatarImage src={selectedUser.avatar} alt={selectedUser.name} />
-                      <AvatarFallback>{selectedUser.name.substring(0,1).toUpperCase()}</AvatarFallback>
-                    </Avatar>
-                    <div className="flex-1">
-                      <p className="font-semibold text-lg text-gray-800">{selectedUser.name}</p>
-                      <p className="text-sm text-gray-500">{selectedUser.bio || "No bio available"}</p>
-                      <Link
-                        href={`/profile/${selectedUser.username}`}
-                        className="text-sm text-primary font-medium hover:underline hover:text-primary-dark transition-colors"
-                      >
-                        View Profile
-                      </Link>
-                    </div>
-                  </div>
-                </InfoWindow>
+            <>
+              {!selectedCountry && users.length > 0 && (
+                <div className="relative w-full h-96">
+                  <Bubble data={bubbleData} options={options} />
+                </div>
               )}
-            </GoogleMap>
-          )}
-          {!isLoadingUsers && (
-            <p className="text-sm text-muted-foreground mt-4">
-              {mapMarkersData.length > 0
-                ? `Showing ${mapMarkersData.length} user(s)`
-                : "No users with location data found"}
-            </p>
+              {selectedCountry && !selectedState && (
+                <div className="mt-4">
+                  <button
+                    onClick={() => setSelectedCountry(null)}
+                    className="mb-2 text-blue-600 hover:underline"
+                  >
+                    Back to Countries
+                  </button>
+                  <h2 className="text-xl font-semibold mb-2">{selectedCountry} States</h2>
+                  <ul className="space-y-2 max-h-60 overflow-y-auto">
+                    {Object.entries(stateCounts).map(([state, count]) => (
+                      <li
+                        key={state}
+                        onClick={() => setSelectedState(state)}
+                        className="cursor-pointer text-blue-600 hover:underline"
+                      >
+                        {state} ({count} user{count !== 1 ? "s" : ""})
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {selectedState && (
+                <div className="mt-4">
+                  <button
+                    onClick={() => setSelectedState(null)}
+                    className="mb-2 text-blue-600 hover:underline"
+                  >
+                    Back to {selectedCountry} States
+                  </button>
+                  <h2 className="text-xl font-semibold mb-2">{selectedState} Cities</h2>
+                  <ul className="space-y-2 max-h-60 overflow-y-auto">
+                    {Object.entries(
+                      cityUsers.reduce((acc: { [key: string]: User[] }, user) => {
+                        (acc[user.location.city] = acc[user.location.city] || []).push(user);
+                        return acc;
+                      }, {})
+                    ).map(([city, usersInCity]) => (
+                      <li key={city} className="mb-2">
+                        <h3 className="font-medium">{city} ({usersInCity.length} user{usersInCity.length !== 1 ? "s" : ""})</h3>
+                        <ul className="ml-4 space-y-1">
+                          {usersInCity.map((user) => (
+                            <li key={user.id} className="flex items-center space-x-2">
+                              <Link href={`/profile/${user.username}`}>
+                                <img
+                                  src={user.avatar}
+                                  alt={user.username}
+                                  className="w-8 h-8 rounded-full hover:opacity-80 transition-opacity"
+                                  onError={(e) => {
+                                    (e.target as HTMLImageElement).src = `https://placehold.co/40x40.png?text=${user.username.charAt(0).toUpperCase()}`;
+                                  }}
+                                />
+                              </Link>
+                              <Link href={`/profile/${user.username}`} className="hover:underline">
+                                {user.username}
+                              </Link>
+                            </li>
+                          ))}
+                        </ul>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </>
           )}
         </CardContent>
       </Card>
