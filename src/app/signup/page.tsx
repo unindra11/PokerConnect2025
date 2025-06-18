@@ -7,10 +7,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import Link from "next/link";
-import { UserPlus, Loader2, MapPin } from "lucide-react";
+import { UserPlus, Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/hooks/use-toast";
-import type { MockUserPin } from "@/app/(app)/map/page";
 import { app, auth, firestore as db } from "@/lib/firebase";
 import { createUserWithEmailAndPassword, type UserCredential } from "firebase/auth";
 import { getFirestore, doc, setDoc, serverTimestamp } from "firebase/firestore";
@@ -26,7 +25,6 @@ export default function SignupPage() {
   const router = useRouter();
   const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
-  const [isFetchingLocation, setIsFetchingLocation] = useState(false);
 
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
@@ -36,7 +34,6 @@ export default function SignupPage() {
   const [selectedCountry, setSelectedCountry] = useState<string>("");
   const [selectedState, setSelectedState] = useState<string>("");
   const [selectedCity, setSelectedCity] = useState<string>("");
-  const [selectedLocationCoords, setSelectedLocationCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [emailError, setEmailError] = useState<string>("");
 
   // Check if the user has passed the quiz
@@ -91,51 +88,6 @@ export default function SignupPage() {
     console.log("SignupPage: Firestore object on mount:", firestoreInstance);
   }, []);
 
-  const handleGetDeviceLocation = () => {
-    if (!navigator.geolocation) {
-      toast({
-        title: "Geolocation Not Supported",
-        description: "Your browser does not support geolocation. Please use a different browser or device.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    setIsFetchingLocation(true);
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const coords = {
-          lat: position.coords.latitude,
-          lng: position.coords.longitude,
-        };
-        setSelectedLocationCoords(coords);
-        toast({
-          title: "Location Retrieved",
-          description: "Your current coordinates have been set.",
-        });
-        setIsFetchingLocation(false);
-        console.log("SignupPage: Fetched device location:", coords);
-      },
-      (error) => {
-        console.error("Error getting geolocation:", error);
-        let description = "Could not retrieve your location.";
-        if (error.code === error.PERMISSION_DENIED) {
-          description = "Permission denied. Please enable location services for this site to proceed.";
-        } else if (error.code === error.POSITION_UNAVAILABLE) {
-          description = "Location information is unavailable. Please try again or use a different device.";
-        } else if (error.code === error.TIMEOUT) {
-          description = "The request to get user location timed out. Please try again.";
-        }
-        toast({
-          title: "Geolocation Error",
-          description,
-          variant: "destructive",
-        });
-        setIsFetchingLocation(false);
-      }
-    );
-  };
-
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setIsLoading(true);
@@ -166,17 +118,6 @@ export default function SignupPage() {
       return;
     }
 
-    // Check if coordinates are provided
-    if (!selectedLocationCoords) {
-      toast({
-        title: "Signup Error",
-        description: "Location coordinates are required. Please click 'Get My Coordinates' and allow location access.",
-        variant: "destructive",
-      });
-      setIsLoading(false);
-      return;
-    }
-
     try {
       const userCredential: UserCredential = await createUserWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
@@ -188,7 +129,6 @@ export default function SignupPage() {
         email: user.email,
         username: username,
         location: { country: selectedCountry, state: selectedState, city: selectedCity },
-        locationCoords: selectedLocationCoords,
         bio: "",
         avatar: "",
         coverImage: "",
@@ -216,23 +156,21 @@ export default function SignupPage() {
         avatar: userProfile.avatar,
         coverImage: userProfile.coverImage,
         location: userProfile.location,
-        locationCoords: userProfile.locationCoords,
       };
       localStorage.setItem("loggedInUser", JSON.stringify(loggedInUserDetailsForStorage));
 
       const initials = fullName.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase() || username.substring(0,1).toUpperCase() || 'P';
-      const mapUser: MockUserPin = {
+      const mapUser = {
         id: user.uid,
         username: username,
         name: fullName,
         avatar: `https://placehold.co/40x40.png?text=${initials}&c=${Math.random().toString(36).substring(7)}`,
-        position: selectedLocationCoords,
         bio: userProfile.bio,
         coverImage: userProfile.coverImage,
       };
 
       const existingMapUsersString = localStorage.getItem("pokerConnectMapUsers");
-      let mapUsers: MockUserPin[] = [];
+      let mapUsers: any[] = [];
       if (existingMapUsersString) {
         try { mapUsers = JSON.parse(existingMapUsersString); if (!Array.isArray(mapUsers)) mapUsers = []; }
         catch (parseError) { console.error("SignupPage: Error parsing pokerConnectMapUsers from localStorage:", parseError); mapUsers = []; }
@@ -410,34 +348,13 @@ export default function SignupPage() {
                   </SelectContent>
                 </Select>
               </div>
-              <div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="w-full"
-                  onClick={handleGetDeviceLocation}
-                  disabled={isFetchingLocation}
-                >
-                  {isFetchingLocation ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  ) : (
-                    <MapPin className="mr-2 h-4 w-4" />
-                  )}
-                  {isFetchingLocation ? "Fetching Coordinates..." : "Get My Coordinates"}
-                </Button>
-                <p className="text-xs text-muted-foreground mt-1">
-                  {selectedLocationCoords
-                    ? `Coordinates: Lat: ${selectedLocationCoords.lat.toFixed(4)}, Lng: ${selectedLocationCoords.lng.toFixed(4)}`
-                    : "Location coordinates are required for signup."}
-                </p>
-              </div>
             </div>
           </CardContent>
           <CardFooter className="flex flex-col gap-4">
             <Button
               type="submit"
               className="w-full text-lg py-3"
-              disabled={isLoading || isFetchingLocation || !!emailError || !selectedLocationCoords}
+              disabled={isLoading || !!emailError}
             >
               {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <UserPlus className="mr-2 h-5 w-5" />}
               {isLoading ? "Signing Up..." : "Sign Up"}
